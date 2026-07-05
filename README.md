@@ -9,7 +9,9 @@
 [简体中文](README_CN.md) | English
 
 ![Node.js](https://img.shields.io/badge/Node.js-20+-339933)
-![macOS](https://img.shields.io/badge/macOS-14%2B-blue)
+![Linux](https://img.shields.io/badge/Linux-supported-blue)
+![macOS](https://img.shields.io/badge/macOS-supported-blue)
+![Windows](https://img.shields.io/badge/Windows-supported-blue)
 ![Memory](https://img.shields.io/badge/free%20memory-3GB%2B-orange)
 ![Optional Packages](https://img.shields.io/badge/optional%20packages-supported-purple)
 
@@ -29,11 +31,11 @@ The project no longer serves its own browser WebUI. Normal operation is controll
 
 | Module | Description |
 | :--- | :--- |
-| iMessage console | Receive trusted commands such as `/状态`, `/维护`, `/开启QQ`, `/关闭QQ`, `/节点检查`, `/切换节点`, and `/远程执行`. |
-| iMessage private replies | Generate replies through Codex CLI, keep independent rolling context, recover the polling cursor after database permission failures, and support one-message model overrides. |
+| iMessage console | macOS-only. Receive trusted commands such as `/状态`, `/维护`, `/开启QQ`, `/关闭QQ`, `/节点检查`, `/切换节点`, and `/远程执行`. |
+| iMessage private replies | macOS-only. Generate replies through Codex CLI, keep independent rolling context, recover the polling cursor after database permission failures, and support one-message model overrides. |
 | QQ/OneBot channel | Receive QQ group and private messages, ignore untranscribed voice messages, inspect explicitly mentioned images, expand recent context when needed, and keep lightweight member personas. |
-| Remote execution | Start a full Codex CLI local task channel from iMessage. |
-| Proxy and system control | Control Shadowrocket node status/check/switching, keep-awake, display sleep, and built-in-display backlight helper scripts. |
+| Remote execution | Start a full Codex CLI local task channel. The iMessage entry point is macOS-only; the backend and QQ bridge can run on Linux and Windows. |
+| Proxy and system control | macOS-specific helper scripts for Shadowrocket, keep-awake, display sleep, and built-in-display backlight control. |
 | Optional packages | Load `qq-enhancer` and `unified-memory` when present; fall back cleanly when absent. |
 
 ## Project Structure
@@ -42,12 +44,12 @@ The project no longer serves its own browser WebUI. Normal operation is controll
 codexremotecontact/
   src/server.js                         # Hub main process
   modules/
-    imessage/                           # iMessage notes
+    imessage/                           # iMessage notes (macOS-only)
     qq-llbot/                           # QQ/LLBot notes
-    shadowrocket/                       # Shadowrocket scripts
-    system-control/                     # Keep-awake and backlight scripts
-    mac-client/                         # macOS WebKit client source
-    macos-launcher/                     # Launcher source
+    shadowrocket/                       # Shadowrocket scripts (macOS-only)
+    system-control/                     # Keep-awake and backlight scripts (macOS-only)
+    mac-client/                         # macOS WebKit client source (optional)
+    macos-launcher/                     # Launcher source (optional, macOS)
   config/
     settings.example.json               # Example settings
     local.codexremotecontact.chat-hub.plist.example
@@ -60,21 +62,29 @@ codexremotecontact/
 
 | Requirement | Notes |
 | :--- | :--- |
-| macOS 14 Sonoma or later | Tested on macOS 15.7. macOS 14 is expected to work. |
+| Linux, macOS, or Windows | Linux and Windows are supported for the QQ/OneBot + Codex backend. macOS is required only for iMessage, Shadowrocket, and macOS GUI/system-control helpers. |
 | Node.js 20+ | Used to run the hub. |
 | 3GB+ free memory | Recommended when Codex CLI, QQ bridge, and the hub run together. |
 | OpenAI Codex CLI or Codex.app bundled CLI | Used for reply generation and remote execution. |
 | NapCat, LLBot Desktop, or another OneBot-compatible bridge | Required for QQ. |
-| Messages app signed in | Required for iMessage. |
-| Shadowrocket | Required for proxy commands. |
+| Messages app signed in | macOS-only; required for iMessage. |
+| Shadowrocket | macOS-only; required for Shadowrocket proxy commands. |
 
 Install the basic dependency:
 
 ```bash
-brew install node
+# Debian / Ubuntu
+sudo apt update
+sudo apt install -y nodejs npm git curl
+
+# macOS
+brew install node git curl
+
+# Windows PowerShell
+winget install OpenJS.NodeJS Git.Git
 ```
 
-Optional dependencies:
+Optional macOS dependencies:
 
 ```bash
 brew install brightness
@@ -175,9 +185,9 @@ Deployment-specific assistant style can live in an external profile file:
 export CODEX_REMOTE_CONTACT_ASSISTANT_PROFILE_PATH="/absolute/path/to/assistant-profile.md"
 ```
 
-### 3. Grant macOS Permissions
+### 3. Optional macOS Permissions
 
-Grant permissions to the process that actually runs the hub. For Terminal deployment this is usually `Terminal`, `iTerm`, or `node`; for app deployment it is the compiled client or launcher.
+Skip this section on Linux and Windows. On macOS, grant permissions to the process that actually runs the hub. For Terminal deployment this is usually `Terminal`, `iTerm`, or `node`; for app deployment it is the compiled client or launcher.
 
 | Permission | Required For |
 | :--- | :--- |
@@ -186,9 +196,9 @@ Grant permissions to the process that actually runs the hub. For Terminal deploy
 | Accessibility | GUI operations in remote execution mode. |
 | Screen Recording | Screenshots or screen inspection in remote execution mode. |
 
-### 4. Prepare iMessage
+### 4. Optional iMessage Setup
 
-Sign in to Messages on the Mac and make sure `replyHandle` can send iMessages to the configured `trustedHandles`.
+iMessage is macOS-only. Skip this section on Linux and Windows. On macOS, sign in to Messages and make sure `replyHandle` can send iMessages to the configured `trustedHandles`.
 
 For a one-message model or reasoning override, add a directive line before or after the message body:
 
@@ -385,14 +395,14 @@ CODEX_REMOTE_CONTACT_UNIFIED_MEMORY_MODULE=/absolute/path/to/unified-memory/src/
 | Problem | Check |
 | :--- | :--- |
 | Port already in use | `lsof -nP -iTCP:3789 -sTCP:LISTEN` |
-| iMessage cannot be read | Grant Full Disk Access and restart the hub. |
-| Messages cannot send replies | Grant Automation permission for Messages. |
+| iMessage cannot be read | macOS-only. Grant Full Disk Access and restart the hub. |
+| Messages cannot send replies | macOS-only. Grant Automation permission for Messages. |
 | QQ does not respond | Check NapCat/LLBot, `ONEBOT_API_BASE`, allowed groups, QQ switch, and ban list. |
-| Remote execution GUI operations fail | Grant Accessibility and Screen Recording to the running process and Codex. |
-| Shadowrocket commands fail | Verify Shadowrocket is installed and grant Full Disk Access to the hub. |
+| Remote execution GUI operations fail | macOS GUI automation only. Grant Accessibility and Screen Recording to the running process and Codex. |
+| Shadowrocket commands fail | macOS-only. Verify Shadowrocket is installed and grant Full Disk Access to the hub. |
 
 ## Notice
 
 Add your own configuration through `data/settings.json`, environment variables, and external profile files.
 
-This is a local automation tool. Before enabling iMessage, QQ, remote execution, proxy control, or GUI control, make sure you understand the related permissions and local security impact.
+This is a local automation tool. Before enabling QQ, iMessage, remote execution, proxy control, or GUI control, make sure you understand the related permissions and local security impact. Linux and Windows deployments can use the QQ/OneBot + Codex backend without macOS-only iMessage or Shadowrocket features.
