@@ -75,10 +75,10 @@ codexremotecontact/
 ```bash
 # Debian / Ubuntu
 sudo apt update
-sudo apt install -y nodejs npm git curl
+sudo apt install -y nodejs npm git curl zsh
 
 # macOS
-brew install node git curl
+brew install node git curl zsh
 
 # Windows PowerShell
 winget install OpenJS.NodeJS Git.Git
