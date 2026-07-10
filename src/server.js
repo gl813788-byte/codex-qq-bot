@@ -49,7 +49,7 @@ const logger = createLogger({
   filePath: logFilePath,
   maxBytes: Number(process.env.CODEX_REMOTE_CONTACT_LOG_MAX_BYTES || 5 * 1024 * 1024),
   maxFiles: Number(process.env.CODEX_REMOTE_CONTACT_LOG_MAX_FILES || 5),
-  minLevel: process.env.CODEX_REMOTE_CONTACT_LOG_LEVEL || "info",
+  minLevel: process.env.CODEX_REMOTE_CONTACT_LOG_LEVEL || "debug",
   consoleOutput: process.env.CODEX_REMOTE_CONTACT_LOG_CONSOLE !== "0",
   consoleLevels: process.env.CODEX_REMOTE_CONTACT_LOG_CONSOLE_LEVELS || "success,warn,error"
 });
@@ -2205,6 +2205,9 @@ function logQqProactiveInterestDecision(event, decision = {}) {
     modelReplyStyle: judge.replyStyle,
     modelDurationMs: judge.durationMs,
     modelStatus: judge.status,
+    modelFinishReason: judge.finishReason,
+    modelStreamedTokenChunks: judge.streamedTokenChunks,
+    modelReasoningLength: judge.reasoningLength,
     modelError: judge.ok === false ? (judge.reason || judge.error) : undefined
   };
   const level = decision.ok ? "info" : (judge.ok === false ? "warn" : "debug");
@@ -2543,7 +2546,7 @@ function buildQqInterestConfigAction(normalized, event) {
     const timeoutMs = Math.max(1500, Math.min(20000, Number(timeoutMatch[1])));
     state.qq.proactive.judge.timeoutMs = timeoutMs;
     return {
-      reply: `主动兴趣判定超时已改为：${timeoutMs}ms。`,
+      reply: `主动兴趣判定 Token 静默超时已改为：${timeoutMs}ms。`,
       afterSend: saveSettings
     };
   }
@@ -2694,6 +2697,15 @@ function formatQqCommandPermissions() {
 }
 
 function getQqCommandMenuLines(command) {
+  if (command?.key === "interest") {
+    return [
+      "/兴趣配置",
+      `/兴趣间隔 ${state.qq.proactive.judgeEveryMessages}`,
+      `/兴趣模型 ${state.qq.proactive.judge.model}`,
+      `/兴趣超时 ${state.qq.proactive.judge.timeoutMs}`,
+      `/兴趣最近 ${state.qq.proactive.judge.maxRecentMessages}`
+    ];
+  }
   const lines = Array.isArray(command.menuLines) ? command.menuLines : [command.menuLine];
   return lines.map((line) => String(line || "").trim()).filter(Boolean);
 }
@@ -2730,7 +2742,7 @@ function buildQqOwnerConfigDetail() {
     `ban 用户：${state.qq.bannedUserIds.length ? state.qq.bannedUserIds.map((id) => formatQqBanListEntry(id)).join(", ") : "无"}`,
     `QQ enhancer：${state.qq.enhancer.enabled ? "开启" : "关闭"}`,
     `主动响应：${state.qq.proactive.enabled ? "开启" : "关闭"}，每 ${state.qq.proactive.judgeEveryMessages} 条普通群消息交给模型判断，最终阈值 ${state.qq.proactive.judge.minInterest}`,
-    `主动判定模型：${state.qq.proactive.judge.model}，Key：${state.qq.proactive.judge.apiKeyConfigured ? "已配置" : "未配置"}，超时 ${state.qq.proactive.judge.timeoutMs}ms`,
+    `主动判定模型：${state.qq.proactive.judge.model}，Key：${state.qq.proactive.judge.apiKeyConfigured ? "已配置" : "未配置"}，Token 静默超时 ${state.qq.proactive.judge.timeoutMs}ms`,
     `联网查询：${state.qq.webLookup.enabled ? "开启" : "关闭"}`,
     `主人文件/图片任务：${qqOwnerFileImageTasksEnabled ? "开启" : "关闭"}`,
     `公共长期记忆：${state.qq.publicMemory.entries.length} / ${state.qq.publicMemory.maxEntries}`,
@@ -2751,7 +2763,7 @@ function buildQqInterestConfigDetail() {
     `判断间隔：每 ${state.qq.proactive.judgeEveryMessages} 条普通群消息`,
     `判定模型：${state.qq.proactive.judge.model}`,
     `OpenRouter Key：${state.qq.proactive.judge.apiKeyConfigured ? "已配置" : "未配置"}`,
-    `超时：${state.qq.proactive.judge.timeoutMs}ms`,
+    `Token 静默超时：${state.qq.proactive.judge.timeoutMs}ms`,
     `上下文：最近 ${state.qq.proactive.judge.maxRecentMessages} 条`,
     `最终阈值：${state.qq.proactive.judge.minInterest}`,
     `当前计数：${counts || "无"}`,
@@ -2765,10 +2777,10 @@ function buildQqInterestConfigHelp() {
     "可用命令：",
     "/兴趣配置",
     "/兴趣 开启 或 /兴趣 关闭",
-    "/兴趣间隔 20",
-    "/兴趣模型 nousresearch/hermes-3-llama-3.1-405b:free",
-    "/兴趣超时 6500",
-    "/兴趣最近 8",
+    `/兴趣间隔 ${state.qq.proactive.judgeEveryMessages}`,
+    `/兴趣模型 ${state.qq.proactive.judge.model}`,
+    `/兴趣超时 ${state.qq.proactive.judge.timeoutMs}`,
+    `/兴趣最近 ${state.qq.proactive.judge.maxRecentMessages}`,
     "/兴趣重置"
   ].join("\n");
 }

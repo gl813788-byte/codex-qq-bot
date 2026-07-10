@@ -48,7 +48,7 @@ function parseArgs(args) {
     category: "",
     plain: !process.stdout.isTTY,
     all: false,
-    verbose: false
+    verbose: true
   };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -68,6 +68,8 @@ function parseArgs(args) {
       output.all = true;
     } else if (arg === "--verbose" || arg === "--detail" || arg === "--details") {
       output.verbose = true;
+    } else if (arg === "--compact" || arg === "--no-verbose") {
+      output.verbose = false;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -282,6 +284,9 @@ function formatInterestDetails(details, options) {
     pushPart(parts, "模型理由", details.modelReason);
     pushPart(parts, "回复风格", details.modelReplyStyle);
     pushPart(parts, "模型用时", formatMs(details.modelDurationMs));
+    pushPart(parts, "结束原因", details.modelFinishReason);
+    pushPart(parts, "流式片段", details.modelStreamedTokenChunks);
+    pushPart(parts, "推理字符", details.modelReasoningLength);
     pushPart(parts, "模型错误", humanError(details.modelError));
   }
   return parts.join(" · ");
@@ -332,6 +337,9 @@ function detailLabel(key) {
     modelReplyStyle: "回复风格",
     modelDurationMs: "模型用时",
     modelStatus: "模型状态",
+    modelFinishReason: "模型结束原因",
+    modelStreamedTokenChunks: "模型流式片段",
+    modelReasoningLength: "模型推理字符",
     modelError: "模型错误",
     results: "结果详情",
     title: "标题",
@@ -460,5 +468,5 @@ function color(text, colorName, options) {
 }
 
 function usage() {
-  process.stderr.write("用法: ncc-log-viewer.mjs LOG_FILE [--tail N] [-f] [--level LEVEL] [--category CATEGORY] [--all] [--plain] [--verbose]\n");
+  process.stderr.write("用法: ncc-log-viewer.mjs LOG_FILE [--tail N] [-f] [--level LEVEL] [--category CATEGORY] [--all] [--plain] [--verbose|--compact]\n");
 }

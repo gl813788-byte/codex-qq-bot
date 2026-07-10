@@ -6,7 +6,7 @@ import test from "node:test";
 import { buildLogsResponse } from "../src/log-api.js";
 import { createLogger } from "../src/logger.js";
 
-test("log API defaults to compact high-signal entries and exposes full diagnostics explicitly", async (t) => {
+test("log API exposes full diagnostics by default and supports compact mode explicitly", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "codex-qq-log-api-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const filePath = join(directory, "hub.jsonl");
@@ -17,11 +17,11 @@ test("log API defaults to compact high-signal entries and exposes full diagnosti
   logger.warn("QQ web lookup failed", { error: "timeout", query: "private query" }, "search");
   await logger.flush();
 
-  const compact = await buildLogsResponse(filePath, new URLSearchParams());
+  const compact = await buildLogsResponse(filePath, new URLSearchParams("verbose=0"));
   assert.deepEqual(compact.entries.map((entry) => entry.message), ["Codex CLI finished", "QQ web lookup failed"]);
   assert.deepEqual(compact.entries[0].details, { durationMs: 42 });
 
-  const verbose = await buildLogsResponse(filePath, new URLSearchParams("verbose=1"));
+  const verbose = await buildLogsResponse(filePath, new URLSearchParams());
   assert.equal(verbose.entries.length, 4);
   assert.equal(verbose.entries[0].details.text, "private message");
 

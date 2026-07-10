@@ -83,6 +83,7 @@ export async function shouldProactivelyReplyToQq(event = {}, state = {}, helpers
   const judge = await judgeProactiveInterestWithOpenRouter(event, assessment, {
     ...judgeConfig,
     apiKey: helpers.openRouterApiKey || "",
+    fetch: helpers.fetch,
     recentMessages: helpers.recentMessages || [],
     assistantName: helpers.assistantName || "assistant",
     ownerLabel: helpers.ownerLabel || "主人"
@@ -230,10 +231,20 @@ async function judgeProactiveInterestWithOpenRouter(event, assessment, config) {
   }
   const timeoutMs = Math.max(1500, Math.min(20000, Number(config.timeoutMs || 6500)));
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const fetchImpl = typeof config.fetch === "function" ? config.fetch : globalThis.fetch;
+  let idleTimeout = null;
+  let idleTimedOut = false;
+  const resetIdleTimeout = () => {
+    clearTimeout(idleTimeout);
+    idleTimeout = setTimeout(() => {
+      idleTimedOut = true;
+      controller.abort();
+    }, timeoutMs);
+  };
+  resetIdleTimeout();
   const startedAt = Date.now();
   try {
-    const response = await fetch(`${String(config.baseUrl || defaultOpenRouterBaseUrl).replace(/\/+$/, "")}/chat/completions`, {
+    const response = await fetchImpl(`${String(config.baseUrl || defaultOpenRouterBaseUrl).replace(/\/+$/, "")}/chat/completions`, {
       method: "POST",
       headers: {
         "authorization": `Bearer ${config.apiKey}`,
@@ -244,29 +255,48 @@ async function judgeProactiveInterestWithOpenRouter(event, assessment, config) {
       body: JSON.stringify({
         model: config.model,
         temperature: 0.2,
-        max_tokens: 420,
+        max_tokens: 2048,
+        stream: true,
         messages: buildJudgeMessages(event, assessment, config)
       }),
       signal: controller.signal
     });
-    const bodyText = await response.text();
     if (!response.ok) {
+      const bodyText = await response.text();
+      const errorBody = parseJsonObject(bodyText);
       return {
         ok: false,
         fallback: true,
         status: response.status,
-        reason: `OpenRouter returned HTTP ${response.status}`,
+        reason: String(errorBody?.error?.message || `OpenRouter returned HTTP ${response.status}`).slice(0, 500),
         durationMs: Date.now() - startedAt
       };
     }
-    const parsed = JSON.parse(bodyText);
-    const content = String(parsed?.choices?.[0]?.message?.content || "").trim();
+    const streamed = await readOpenRouterCompletion(response, { onToken: resetIdleTimeout });
+    const content = String(streamed.content || "").trim();
     const judge = parseJudgeJson(content);
+    if (typeof judge.shouldReply !== "boolean" || !Number.isFinite(Number(judge.interest))) {
+      return {
+        ok: false,
+        fallback: true,
+        provider: "openrouter",
+        model: config.model,
+        durationMs: Date.now() - startedAt,
+        finishReason: streamed.finishReason,
+        streamedTokenChunks: streamed.tokenChunks,
+        reasoningLength: streamed.reasoning.length,
+        raw: content.slice(0, 800),
+        reason: "OpenRouter judge did not return valid FINAL_JSON"
+      };
+    }
     return {
       ok: true,
       provider: "openrouter",
       model: config.model,
       durationMs: Date.now() - startedAt,
+      finishReason: streamed.finishReason,
+      streamedTokenChunks: streamed.tokenChunks,
+      reasoningLength: streamed.reasoning.length,
       raw: content.slice(0, 800),
       shouldReply: Boolean(judge.shouldReply),
       interest: clampNumber(judge.interest, 0, 100, 0),
@@ -277,11 +307,82 @@ async function judgeProactiveInterestWithOpenRouter(event, assessment, config) {
     return {
       ok: false,
       fallback: true,
-      reason: error.name === "AbortError" ? `OpenRouter judge timed out after ${timeoutMs}ms` : error.message,
+      reason: idleTimedOut || error.name === "AbortError"
+        ? `OpenRouter judge produced no new token for ${timeoutMs}ms`
+        : error.message,
       durationMs: Date.now() - startedAt
     };
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(idleTimeout);
+  }
+}
+
+async function readOpenRouterCompletion(response, { onToken } = {}) {
+  const contentType = String(response.headers?.get?.("content-type") || "").toLowerCase();
+  if (!contentType.includes("text/event-stream")) {
+    const parsed = parseJsonObject(await response.text());
+    const message = parsed?.choices?.[0]?.message || {};
+    const content = String(message.content || "");
+    const reasoning = String(message.reasoning || message.reasoning_content || "");
+    if (content || reasoning) onToken?.();
+    return {
+      content,
+      reasoning,
+      finishReason: parsed?.choices?.[0]?.finish_reason || null,
+      tokenChunks: content || reasoning ? 1 : 0
+    };
+  }
+
+  if (!response.body?.getReader) throw new Error("OpenRouter returned an unreadable event stream");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let reasoning = "";
+  let finishReason = null;
+  let tokenChunks = 0;
+
+  const consumeEvent = (eventText) => {
+    const data = eventText
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n")
+      .trim();
+    if (!data || data === "[DONE]") return;
+    const parsed = parseJsonObject(data);
+    if (parsed?.error) throw new Error(String(parsed.error.message || parsed.error));
+    const choice = parsed?.choices?.[0] || {};
+    const delta = choice.delta || {};
+    const contentDelta = String(delta.content || "");
+    const reasoningDelta = String(delta.reasoning || delta.reasoning_content || "");
+    if (contentDelta || reasoningDelta) {
+      content += contentDelta;
+      reasoning += reasoningDelta;
+      tokenChunks += 1;
+      onToken?.();
+    }
+    if (choice.finish_reason) finishReason = choice.finish_reason;
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split(/\r?\n\r?\n/);
+    buffer = events.pop() || "";
+    for (const eventText of events) consumeEvent(eventText);
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) consumeEvent(buffer);
+  return { content, reasoning, finishReason, tokenChunks };
+}
+
+function parseJsonObject(value) {
+  try {
+    return JSON.parse(String(value || ""));
+  } catch {
+    return {};
   }
 }
 

@@ -22,7 +22,7 @@ async function waitFor(predicate, timeoutMs = 3000) {
   throw new Error("Timed out while waiting for log viewer output");
 }
 
-test("ncc log viewer is compact by default and expands only when requested", async (t) => {
+test("ncc log viewer is detailed by default and compacts only when requested", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "codex-qq-log-viewer-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const filePath = join(directory, "hub.jsonl");
@@ -36,18 +36,18 @@ test("ncc log viewer is compact by default and expands only when requested", asy
   ];
   await writeFile(filePath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
 
-  const defaults = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--plain", "--tail", "20"]);
-  assert.match(defaults.stdout, /Codex CLI finished/);
-  assert.match(defaults.stdout, /QQ 联网搜索失败/);
-  assert.match(defaults.stdout, /QQ 联网搜索开始/);
-  assert.doesNotMatch(defaults.stdout, /收到 OneBot 消息|private message|result title|internal detail/);
-  assert.match(defaults.stdout, /\.\.\./);
+  const compact = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--plain", "--compact", "--tail", "20"]);
+  assert.match(compact.stdout, /Codex CLI finished/);
+  assert.match(compact.stdout, /QQ 联网搜索失败/);
+  assert.match(compact.stdout, /QQ 联网搜索开始/);
+  assert.doesNotMatch(compact.stdout, /收到 OneBot 消息|private message|result title|internal detail/);
+  assert.match(compact.stdout, /\.\.\./);
 
   const all = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--plain", "--all"]);
   assert.match(all.stdout, /收到 OneBot 消息/);
-  assert.doesNotMatch(all.stdout, /private message/);
+  assert.match(all.stdout, /private message/);
 
-  const verbose = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--plain", "--verbose"]);
+  const verbose = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--plain"]);
   assert.match(verbose.stdout, /private message|result title|internal detail/);
 });
 

@@ -269,7 +269,7 @@ ncc logs -f
 curl 'http://localhost:3789/api/logs?limit=50&category=qq'
 ```
 
-默认日志会隐藏调试级细节，只显示翻译后的人类可读摘要。需要排查 QQ 消息内容、搜索触发原因、每个搜索厂商的 query 变体、命中标题/链接/摘要时，使用 `--verbose`。
+默认日志会保存并显示调试级详细信息，包括 QQ 消息处理、搜索触发原因、厂商 query 变体以及命中结果。需要临时折叠为高信号摘要时，使用 `--compact`；也可以通过 `CODEX_REMOTE_CONTACT_LOG_LEVEL=info` 降低写入详细度。
 
 `ncc` 仍会在名为 `codex-contact` 的 `screen` 会话里启动后端；只有排查进程启动输出时才需要 `screen -r codex-contact`。
 
@@ -337,6 +337,8 @@ export OPENROUTER_API_KEY="sk-or-..."
 ```bash
 ncc logs --verbose --category interest
 ```
+
+兴趣模型使用流式输出；`/兴趣超时` 表示等待首个 token 或相邻 token 的最大静默时间，只要模型持续输出就会继续等待到生成结束。模型输出仍受 token 上限保护，避免无限生成。
 
 主人可以在 QQ 里直接调整主动兴趣配置：
 
