@@ -177,7 +177,7 @@ function renderLine(line, options) {
     color((levelNames[level] || level).padEnd(2, " "), colorName, options),
     color((categoryNames[category] || category).padEnd(7, " "), colorName, options)
   ].join(" ");
-  const message = humanMessage(entry.message || "");
+  const message = color(humanMessage(entry.message || ""), colorName, options);
   const details = formatDetails(entry, options);
   return `${header} ${message}${details ? ` ${color(details, "gray", options)}` : ""}`;
 }
@@ -191,7 +191,6 @@ function colorFor(level, category) {
   if (level === "error") return "red";
   if (level === "warn") return "yellow";
   if (level === "success") return "green";
-  if (level === "debug") return "gray";
   if (category === "search") return "brightCyan";
   if (category === "interest") return "yellow";
   if (category === "qq") return "brightBlue";
@@ -201,6 +200,7 @@ function colorFor(level, category) {
   if (category === "web") return "blue";
   if (category === "memory") return "green";
   if (category === "command") return "yellow";
+  if (level === "debug") return "gray";
   return "gray";
 }
 

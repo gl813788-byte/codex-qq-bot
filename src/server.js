@@ -11,6 +11,8 @@ import { buildLogsResponse } from "./log-api.js";
 import { importOptionalModule } from "./optional-modules.js";
 import { defaultQqPublicCommands, qqCommandCatalog } from "./qq-command-catalog.js";
 import { createConcurrencyLimiter } from "./concurrency-limiter.js";
+import { createCodexModelCatalog, findCodexModel } from "./codex-model-catalog.js";
+import { buildCodexChildEnv } from "./codex-child-env.js";
 import { resolveAllowedQqMarkerPath, resolveQqMarkerPath } from "./qq-output-policy.js";
 import { createRuntimePaths } from "./runtime-paths.js";
 import { createScopedReplyScheduler } from "./scoped-reply-scheduler.js";
@@ -175,6 +177,10 @@ if (qqEnhancerModule) {
 const oneBotApiBase = process.env.ONEBOT_API_BASE || "http://127.0.0.1:3000";
 const oneBotRequestTimeoutMs = Math.max(1000, Math.min(30000, Number(process.env.CODEX_REMOTE_CONTACT_ONEBOT_TIMEOUT_MS || 10000) || 10000));
 const codexCliPath = process.env.CODEX_CLI_PATH || "/Applications/Codex.app/Contents/Resources/codex";
+const codexModelCatalog = createCodexModelCatalog({
+  codexPath: codexCliPath,
+  envProvider: () => buildCodexChildEnv()
+});
 const codexModel = process.env.CODEX_REMOTE_CONTACT_CODEX_MODEL || "gpt-5.4-mini";
 const codexReasoningEffort = process.env.CODEX_REMOTE_CONTACT_REASONING_EFFORT || "low";
 const codexMaxConcurrencyRaw = Number(process.env.CODEX_REMOTE_CONTACT_CODEX_MAX_CONCURRENCY || 2);
@@ -723,7 +729,7 @@ async function saveSettings() {
 }
 
 function isValidReasoningEffort(value) {
-  return ["low", "medium", "high", "xhigh"].includes(String(value || ""));
+  return ["low", "medium", "high", "xhigh", "max", "ultra"].includes(String(value || ""));
 }
 
 function getRemoteExecutionSkillRegistry() {
@@ -2177,6 +2183,7 @@ async function shouldRespondToQq(event) {
 
 function logQqProactiveInterestDecision(event, decision = {}) {
   if (!event.groupId) return;
+  if (decision.reason === "waiting for proactive judge message interval") return;
   const interest = decision.interest || {};
   const judge = decision.modelJudge || {};
   const details = {
@@ -2380,12 +2387,7 @@ async function buildQqCommandAction(event) {
   }
 
   if (isQqCommandAllowedForEvent("model", event) && /^(5|5\.5|5\.4|5\.4mini|5\.4-mini|mini|5\.3|5\.3codex|5\.3-codex|codex)$/i.test(compact)) {
-    const model = resolveQqModelAlias(compact);
-    state.ai.model = model;
-    return {
-      reply: `QQ 通道模型已切换：${model}`,
-      afterSend: saveSettings
-    };
+    return selectQqModel(compact, event);
   }
 
   const addGroupMatch = isQqCommandAllowedForEvent("allowlist", event) ? normalized.match(/^(?:加群|添加群|加入群|群添加|群加入|白名单添加|添加白名单群|加入白名单群)\s*([0-9]+)$/) : null;
@@ -2406,22 +2408,25 @@ async function buildQqCommandAction(event) {
     };
   }
 
+  const modelListMatch = isQqCommandAllowedForEvent("model", event) && /^(?:模型|qq模型|切模型|切换模型)$/i.test(normalized);
+  if (modelListMatch) return buildQqModelPicker();
+
   const modelMatch = isQqCommandAllowedForEvent("model", event) ? normalized.match(/^(?:模型|qq模型|切模型|切换模型)\s+(.+)$/i) : null;
   if (modelMatch) {
-    const model = resolveQqModelAlias(modelMatch[1].trim());
-    if (!/^[A-Za-z0-9._:-]+$/.test(model)) {
-      return { reply: `${pickActionBeat(event)}这个模型名看起来不太对，我这边只接受字母、数字、点、横线、下划线和冒号。` };
-    }
-    state.ai.model = model;
-    return {
-      reply: `${pickActionBeat(event)}QQ 通道模型已切换：${model}`,
-      afterSend: saveSettings
-    };
+    return selectQqModel(modelMatch[1].trim(), event);
   }
 
-  const effortMatch = isQqCommandAllowedForEvent("reasoning", event) ? normalized.match(/^(?:智能等级|智能|思考强度|qq智能等级|qq智能|qq思考强度)\s+(low|medium|high|xhigh|低|中|高|最高)$/i) : null;
+  const effortListMatch = isQqCommandAllowedForEvent("reasoning", event) && /^(?:智能等级|智能|思考强度|qq智能等级|qq智能|qq思考强度)$/i.test(normalized);
+  if (effortListMatch) return buildQqReasoningPicker();
+
+  const effortMatch = isQqCommandAllowedForEvent("reasoning", event) ? normalized.match(/^(?:智能等级|智能|思考强度|qq智能等级|qq智能|qq思考强度)\s+(low|medium|high|xhigh|max|ultra|低|中|高|最高|极高|极致)$/i) : null;
   if (effortMatch) {
     const effort = normalizeReasoningEffort(effortMatch[1]);
+    const models = await codexModelCatalog.list().catch(() => []);
+    const selected = findCodexModel(models, state.ai.model);
+    if (selected && !selected.supportedReasoningEfforts.includes(effort)) {
+      return { reply: `${pickActionBeat(event)}当前模型 ${selected.displayName} 不支持 ${effort}。可用：${selected.supportedReasoningEfforts.join("、")}` };
+    }
     state.ai.reasoningEffort = effort;
     return {
       reply: `${pickActionBeat(event)}QQ 通道智能等级已切换：${effort}`,
@@ -2430,6 +2435,51 @@ async function buildQqCommandAction(event) {
   }
 
   return null;
+}
+
+async function buildQqModelPicker() {
+  try {
+    const models = await codexModelCatalog.list({ refresh: true });
+    if (models.length === 0) return { reply: "Codex 当前没有返回可选模型。" };
+    const lines = models.map((item, index) => `${index + 1}. ${item.displayName}（${item.model}）${item.model === state.ai.model ? " ← 当前" : ""}`);
+    return { reply: `当前可用模型：\n${lines.join("\n")}\n发送 /模型 序号 进行切换。` };
+  } catch (error) {
+    logger.warn("Unable to load Codex model catalog", { error: error.message }, "codex");
+    return { reply: `读取 Codex 可用模型失败：${error.message}` };
+  }
+}
+
+async function selectQqModel(selector, event) {
+  try {
+    const models = await codexModelCatalog.list();
+    const requested = resolveQqModelAlias(selector);
+    const selected = findCodexModel(models, selector) || findCodexModel(models, requested);
+    if (!selected) return { reply: `${pickActionBeat(event)}这个模型不在当前账号的可用列表里，请先发送 /模型 查看。` };
+    state.ai.model = selected.model;
+    if (!selected.supportedReasoningEfforts.includes(state.ai.reasoningEffort)) {
+      state.ai.reasoningEffort = selected.defaultReasoningEffort;
+    }
+    return {
+      reply: `${pickActionBeat(event)}QQ 通道模型已切换：${selected.displayName}（${selected.model}）\n思考强度：${state.ai.reasoningEffort}`,
+      afterSend: saveSettings
+    };
+  } catch (error) {
+    logger.warn("Unable to select Codex model", { error: error.message }, "codex");
+    return { reply: `读取 Codex 可用模型失败：${error.message}` };
+  }
+}
+
+async function buildQqReasoningPicker() {
+  try {
+    const models = await codexModelCatalog.list();
+    const selected = findCodexModel(models, state.ai.model);
+    const efforts = selected?.supportedReasoningEfforts || [];
+    if (efforts.length === 0) return { reply: `当前模型 ${state.ai.model} 没有返回可选思考强度。` };
+    return { reply: `当前模型：${selected.displayName}（${selected.model}）\n支持的思考强度：${efforts.join("、")}\n当前：${state.ai.reasoningEffort}\n发送 /思考强度 档位 进行切换。` };
+  } catch (error) {
+    logger.warn("Unable to load Codex reasoning efforts", { error: error.message }, "codex");
+    return { reply: `读取思考强度失败：${error.message}` };
+  }
 }
 
 function isAllowedQqCommandEvent(event) {
@@ -7015,6 +7065,8 @@ function normalizeReasoningEffort(value) {
   if (normalized === "中") return "medium";
   if (normalized === "高") return "high";
   if (normalized === "最高") return "xhigh";
+  if (normalized === "极高") return "max";
+  if (normalized === "极致") return "ultra";
   return normalized;
 }
 
@@ -8422,7 +8474,7 @@ function runCodexCliProcess(args, input, options) {
     const previousQuota = state.maintenance.codex.quota;
     const child = spawn(codexCliPath, args, {
       cwd: options.cwd,
-      env: options.env,
+      env: buildCodexChildEnv({ overrides: options.env }),
       stdio: ["pipe", "pipe", "pipe"]
     });
     const qqGenerationId = options.env?.CODEX_REMOTE_CONTACT_QQ_MODE || options.env?.CODEX_REMOTE_CONTACT_QQ_OWNER_FILE_IMAGE_MODE
@@ -9656,6 +9708,7 @@ async function handleApi(req, res) {
 }
 
 await loadSettings();
+await ensureAvailableQqModel();
 await mkdir(qqStickerDir, { recursive: true });
 await loadQqMemory();
 await loadQqPublicMemory();
@@ -9690,3 +9743,32 @@ server.listen(hubPort, hubHost, () => {
     logFile: logFilePath
   }, "system");
 });
+
+async function ensureAvailableQqModel() {
+  try {
+    const models = await codexModelCatalog.list({ refresh: true });
+    if (models.length === 0) return;
+    const selected = findCodexModel(models, state.ai.model);
+    if (selected) {
+      if (!selected.supportedReasoningEfforts.includes(state.ai.reasoningEffort)) {
+        state.ai.reasoningEffort = selected.defaultReasoningEffort;
+        await saveSettings();
+      }
+      return;
+    }
+    const fallback = models.find((item) => item.isDefault) || models[0];
+    const previousModel = state.ai.model;
+    state.ai.model = fallback.model;
+    state.ai.reasoningEffort = fallback.supportedReasoningEfforts.includes(state.ai.reasoningEffort)
+      ? state.ai.reasoningEffort
+      : fallback.defaultReasoningEffort;
+    await saveSettings();
+    logger.warn("Configured QQ model is unavailable; selected Codex default", {
+      previousModel,
+      model: fallback.model,
+      reasoningEffort: fallback.defaultReasoningEffort
+    }, "codex");
+  } catch (error) {
+    logger.warn("Unable to validate configured QQ model", { error: error.message }, "codex");
+  }
+}
