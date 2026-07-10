@@ -10,14 +10,14 @@ export function createLogger({
   filePath,
   maxBytes = 5 * 1024 * 1024,
   maxFiles = 5,
-  minLevel = "info",
+  minLevel = "debug",
   consoleOutput = true,
   consoleLevels = defaultConsoleLevels
 } = {}) {
   if (!filePath) throw new Error("Logger filePath is required");
   const normalizedMaxBytes = normalizePositiveInteger(maxBytes, 5 * 1024 * 1024);
   const normalizedMaxFiles = normalizePositiveInteger(maxFiles, 5);
-  const minimumLevel = normalizeLevel(minLevel, "info");
+  const minimumLevel = normalizeLevel(minLevel, "debug");
   const enabledConsoleLevels = normalizeLevelSet(consoleLevels, defaultConsoleLevels);
   let writeChain = Promise.resolve();
 

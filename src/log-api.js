@@ -4,7 +4,8 @@ export async function buildLogsResponse(logFilePath, searchParams) {
   const limit = Number(searchParams.get("limit") || 100);
   const level = searchParams.get("level") || "";
   const category = searchParams.get("category") || "";
-  const verbose = ["1", "true", "yes"].includes(String(searchParams.get("verbose") || "").toLowerCase());
+  const verboseValue = String(searchParams.get("verbose") ?? "1").toLowerCase();
+  const verbose = !["0", "false", "no", "off"].includes(verboseValue);
   const normalizedLimit = Math.max(1, Math.min(1000, Number(limit) || 100));
   const entries = await readLogEntries(logFilePath, {
     limit: verbose ? normalizedLimit : 1000,

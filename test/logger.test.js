@@ -5,25 +5,26 @@ import { join } from "node:path";
 import test from "node:test";
 import { createLogger, normalizeEntry, readLogEntries } from "../src/logger.js";
 
-test("logger stores info and above by default, with debug available on demand", async (t) => {
+test("logger stores detailed debug entries by default and still supports an explicit higher threshold", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "codex-qq-logger-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const filePath = join(directory, "hub.jsonl");
   const logger = createLogger({ filePath, consoleOutput: false });
 
-  logger.debug("debug detail", { text: "hidden by default" });
+  logger.debug("debug detail", { text: "visible by default" });
   logger.info("useful lifecycle event");
   logger.success("completed", { durationMs: 12 });
   await logger.flush();
 
   const entries = await readLogEntries(filePath, { limit: 10 });
-  assert.deepEqual(entries.map((entry) => entry.message), ["useful lifecycle event", "completed"]);
+  assert.deepEqual(entries.map((entry) => entry.message), ["debug detail", "useful lifecycle event", "completed"]);
 
-  const debugFile = join(directory, "debug.jsonl");
-  const debugLogger = createLogger({ filePath: debugFile, minLevel: "debug", consoleOutput: false });
-  debugLogger.debug("debug detail");
-  await debugLogger.flush();
-  assert.equal((await readLogEntries(debugFile, { limit: 10 }))[0].message, "debug detail");
+  const infoFile = join(directory, "info.jsonl");
+  const infoLogger = createLogger({ filePath: infoFile, minLevel: "info", consoleOutput: false });
+  infoLogger.debug("filtered debug detail");
+  infoLogger.info("info detail");
+  await infoLogger.flush();
+  assert.deepEqual((await readLogEntries(infoFile, { limit: 10 })).map((entry) => entry.message), ["info detail"]);
 });
 
 test("logger serializes concurrent writes and preserves status booleans while redacting secrets", async (t) => {

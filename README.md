@@ -269,7 +269,7 @@ ncc logs -f
 curl 'http://localhost:3789/api/logs?limit=50&category=qq'
 ```
 
-Default logs hide debug-level details and show translated, human-readable summaries. Use `--verbose` when diagnosing QQ message text, web lookup trigger reasons, provider query variants, result titles, URLs, and snippets.
+Logs save and display debug-level diagnostics by default, including QQ message handling, lookup triggers, provider query variants, and matched results. Use `--compact` for a temporary high-signal summary, or set `CODEX_REMOTE_CONTACT_LOG_LEVEL=info` to reduce persisted detail.
 
 `ncc` also starts the hub in a `screen` session named `codex-contact`; use `screen -r codex-contact` only when diagnosing process-level startup output.
 
@@ -337,6 +337,8 @@ Proactive interest decisions are logged under the `interest` category. To inspec
 ```bash
 ncc logs --verbose --category interest
 ```
+
+The proactive-interest judge uses streaming output. `/兴趣超时` controls the maximum idle time before the first token or between tokens; generation may continue past that duration while tokens keep arriving. A token limit remains as a final guard against unbounded generation.
 
 Owners can adjust proactive interest settings from QQ:
 
