@@ -14,6 +14,7 @@ import { createConcurrencyLimiter } from "./concurrency-limiter.js";
 import { createCodexModelCatalog, findCodexModel } from "./codex-model-catalog.js";
 import { buildCodexChildEnv } from "./codex-child-env.js";
 import { resolveAllowedQqMarkerPath, resolveQqMarkerPath } from "./qq-output-policy.js";
+import { createQqStickerLabelStore, normalizeQqStickerTags } from "./qq-sticker-label-store.js";
 import { createRuntimePaths } from "./runtime-paths.js";
 import { createScopedReplyScheduler } from "./scoped-reply-scheduler.js";
 import { serializeFileOperation, writeJsonAtomically } from "./file-store.js";
@@ -39,6 +40,7 @@ const {
   qqMemoryPath,
   qqPublicMemoryPath,
   qqPersonasPath,
+  qqStickerLabelsPath,
   imessageMemoryPath,
   remoteExecutionMemoryPath,
   unifiedMemoryPath,
@@ -233,7 +235,6 @@ const proxyConfirmTtlMs = Number(process.env.CODEX_REMOTE_CONTACT_PROXY_CONFIRM_
 const imessageAttachmentSendingEnabled = process.env.CODEX_REMOTE_CONTACT_IMESSAGE_ATTACHMENTS === "1";
 const imessageImageDelivery = process.env.CODEX_REMOTE_CONTACT_IMESSAGE_IMAGE_DELIVERY || (imessageAttachmentSendingEnabled ? "attachment" : "photos");
 const baseBuildQqStickerCatalog = buildQqStickerCatalog;
-const baseFormatQqStickerCatalog = formatQqStickerCatalog;
 const baseResolveQqReplyMedia = resolveQqReplyMedia;
 let qqAccountStickerCatalogCache = {
   expiresAt: 0,
@@ -251,15 +252,17 @@ buildQqStickerCatalog = async (stickerDir) => {
       return [];
     })
   ]);
-  return mergeQqStickerCatalogs(accountCatalog, localCatalog);
+  return qqStickerLabels.enrich(mergeQqStickerCatalogs(accountCatalog, localCatalog));
 };
 
 formatQqStickerCatalog = (catalog = []) => {
-  const formatted = String(baseFormatQqStickerCatalog(catalog) || "").trim();
-  if (formatted) return formatted.replace("本地表情包库", "可用表情包库");
   const list = Array.isArray(catalog) ? catalog : [];
   if (!list.length) return "（可用表情包库为空）";
-  return list.slice(0, 80).map((item) => `- ${item.name}`).join("\n");
+  return list.slice(0, 80).map((item) => {
+    const tags = Array.isArray(item.tags) && item.tags.length ? item.tags.join("、") : "";
+    if (!tags && !item.description) return `- ${item.name}（未查看/未标注）`;
+    return `- ${item.name}：${tags || "已查看"}${item.description ? `；${item.description}` : ""}`;
+  }).join("\n");
 };
 
 resolveQqReplyMedia = async (reply, options = {}) => {
@@ -299,6 +302,7 @@ let assistantMentionAliases = (process.env.CODEX_REMOTE_CONTACT_ASSISTANT_MENTIO
   .map((item) => item.trim())
   .filter(Boolean);
 const unifiedMemory = createUnifiedMemory({ memoryPath: unifiedMemoryPath });
+const qqStickerLabels = createQqStickerLabelStore({ filePath: qqStickerLabelsPath });
 
 function defaultQqProactiveInterestPreset() {
   return {
@@ -1993,6 +1997,9 @@ async function cleanupQqEventTaskWorkspaceByBot(event, reason = "QQ send finishe
   const workspace = event.qqTaskWorkspace;
   event.qqTaskWorkspace = null;
   event.imagePaths = [];
+  event.qqToolImagePaths = [];
+  event.qqPendingStickerLabels = [];
+  event.qqStickerViewRounds = {};
   const root = workspace?.root ? String(workspace.root) : "";
   if (!root || !isPathUnderAnyDir(root, [qqTaskWorkspacesDir])) {
     logger.warn("Refused to cleanup QQ task workspace outside the task root", { root, reason }, "qq");
@@ -2871,6 +2878,8 @@ function formatQqBotInternalToolContext(event) {
     "- [[qq_command:/统一记忆 搜索 关键词]] 搜索跨端统一记忆。",
     "- [[qq_command:/统一记忆 添加 内容]] 写入一条跨端统一记忆；只写稳定、以后会复用的事实或项目状态。",
     "- [[qq_command:/统一记忆 状态]] 查看统一记忆条数和最近状态。",
+    "- [[qq_command:/看表情 表情名]] 主动加载一个可用表情给自己查看。未标注表情第一次查看后，必须继续调用 /表情标签 完成标注。",
+    "- [[qq_command:/表情标签 表情名 | 标签1,标签2 | 画面和适用语境]] 保存或覆盖表情标签。可以重复 /看表情，再更新标签。",
     "公共长期记忆是 bot 自己用的共享背景，不显示在 /菜单 里。只有当信息稳定、以后会反复有用、不是隐私/密钥/临时闲聊时才写入；发现记忆错误或过时时，可以主动修改或删除。",
     "如果有人刷屏、持续骚扰、恶意辱骂/攻击、诱导泄露隐私或绕过权限、反复要求危险操作、滥用 bot 打断正常聊天，可以先用普通回复明确警告并说明继续会被临时 ban；如果最近聊天记录显示对方已经被警告后仍继续，或当前行为明显严重，可以主动使用 /ban QQ号 10m 到 2h。",
     "执行 ban 前后都要保持简短，只说明原因和时长；不要把内部工具标记展示给群友。不能 ban 主人、自己或正常聊天发图片的人。",
@@ -2891,8 +2900,31 @@ async function runQqBotToolLoop({ initialReply, event, memoryContext, buildReply
   const commandCounts = new Map();
   for (let round = 1; round <= qqBotToolLoopLimit; round += 1) {
     assertQqReplyScopeActive(replyScope);
+    event.qqCurrentToolRound = round;
     const resolution = await resolveQqBotCommandMarkers(reply, event, { commandCounts });
     if (resolution.results.length === 0) {
+      const pendingStickers = getPendingQqStickerLabels(event);
+      if (pendingStickers.length > 0) {
+        transcript.push({
+          round,
+          visibleText: resolution.visibleText,
+          results: [{
+            ok: false,
+            command: "/表情标签",
+            reply: `你刚查看了尚未标注的表情：${pendingStickers.map((item) => item.name).join("、")}。必须先调用 /表情标签 表情名 | 标签1,标签2 | 画面和适用语境，完成后才能给出最终回复。`
+          }]
+        });
+        const prompt = await buildReplyPrompt(
+          memoryContext,
+          1,
+          true,
+          formatQqBotToolTranscript(transcript),
+          resolution.visibleText,
+          round
+        );
+        reply = await runReplyPrompt(prompt);
+        continue;
+      }
       return stripQqBotDoneMarker(resolution.visibleText || reply);
     }
     transcript.push({
@@ -2927,7 +2959,7 @@ async function resolveQqBotCommandMarkers(reply, event, { commandCounts = new Ma
     const key = normalized.toLowerCase().replace(/\s+/g, " ").trim();
     const previousCount = commandCounts.get(key) || 0;
     commandCounts.set(key, previousCount + 1);
-    if (previousCount >= 1) {
+    if (previousCount >= 1 && !isQqBotStickerViewCommand(normalized)) {
       results.push({
         ok: false,
         command: normalized || command,
@@ -2989,6 +3021,10 @@ async function executeQqBotInternalCommand(command, event) {
     return executeQqBotPokeCommand(normalizedCommand, event);
   }
 
+  if (isQqBotStickerCommand(normalizedCommand)) {
+    return executeQqBotStickerCommand(normalizedCommand, event);
+  }
+
   if (isQqBotHistoryCommand(normalizedCommand)) {
     return {
       ok: true,
@@ -3037,6 +3073,99 @@ function isQqBotWebSearchCommand(command) {
 
 function isQqBotPokeCommand(command) {
   return /^\/?(拍一拍|拍拍|拍|戳一戳|戳|poke)(?:\s+.*)?$/i.test(command);
+}
+
+function isQqBotStickerCommand(command) {
+  return /^\/?(?:看表情|查看表情|检查表情|inspect[- ]?sticker|表情标签|更新表情标签|标注表情|tag[- ]?sticker)(?:\s+.*)?$/i.test(command);
+}
+
+function isQqBotStickerViewCommand(command) {
+  return /^\/?(?:看表情|查看表情|检查表情|inspect[- ]?sticker)\s+.+$/i.test(command);
+}
+
+async function executeQqBotStickerCommand(command, event) {
+  const normalized = String(command || "").trim().replace(/^\/+/, "");
+  const viewMatch = normalized.match(/^(?:看表情|查看表情|检查表情|inspect[- ]?sticker)\s+(.+)$/i);
+  if (viewMatch) return inspectQqStickerForModel(viewMatch[1].trim(), command, event);
+
+  const labelBody = normalized.replace(/^(?:表情标签|更新表情标签|标注表情|tag[- ]?sticker)\s*/i, "").trim();
+  const [selector = "", rawTags = "", ...descriptionParts] = labelBody.split("|").map((item) => item.trim());
+  const tags = normalizeQqStickerTags(rawTags);
+  const description = descriptionParts.join(" | ").trim();
+  if (!selector || tags.length === 0) {
+    return {
+      ok: false,
+      command,
+      reply: "格式错误。请使用 /表情标签 表情名 | 标签1,标签2 | 画面和适用语境。至少写一个标签。"
+    };
+  }
+  const catalog = await buildQqStickerCatalog(qqStickerDir);
+  const sticker = findQqStickerCatalogItem(catalog, selector);
+  if (!sticker) return { ok: false, command, reply: `找不到表情：${selector}` };
+  const viewedRound = Number(event.qqStickerViewRounds?.[sticker.identity] || 0);
+  if (viewedRound >= Number(event.qqCurrentToolRound || 0)) {
+    return { ok: false, command, reply: `表情 ${sticker.name} 的图片会在下一轮模型输入中出现；请实际看完后再调用 /表情标签。` };
+  }
+  const result = await qqStickerLabels.updateLabels(sticker, { tags, description });
+  if (!result.ok) {
+    return { ok: false, command, reply: `请先调用 /看表情 ${sticker.name}，实际查看后才能标注。` };
+  }
+  event.qqPendingStickerLabels = getPendingQqStickerLabels(event)
+    .filter((item) => item.identity !== sticker.identity);
+  return {
+    ok: true,
+    command,
+    reply: `已更新 ${sticker.name} 的标签：${result.entry.tags.join("、")}${result.entry.description ? `；${result.entry.description}` : ""}`
+  };
+}
+
+async function inspectQqStickerForModel(selector, command, event) {
+  const catalog = await buildQqStickerCatalog(qqStickerDir);
+  const sticker = findQqStickerCatalogItem(catalog, selector);
+  if (!sticker) return { ok: false, command, reply: `找不到表情：${selector}` };
+  if (!event.qqTaskWorkspace) {
+    event.qqTaskWorkspace = await createQqTaskWorkspace("qq-sticker-inspect", crypto.randomUUID());
+  }
+  const imageInputs = sticker.file ? [{ file: sticker.file }] : [{ url: sticker.url, file: `${sticker.name}.jpg` }];
+  const paths = await prepareQqModelImages(imageInputs, {
+    outputDir: event.qqTaskWorkspace.inputDir,
+    fetchOneBotImage
+  });
+  if (paths.length === 0) return { ok: false, command, reply: `表情 ${sticker.name} 加载失败。` };
+  event.qqToolImagePaths = [...new Set([...(event.qqToolImagePaths || []), ...paths])];
+  const viewed = await qqStickerLabels.markViewed(sticker);
+  event.qqStickerViewRounds = {
+    ...(event.qqStickerViewRounds || {}),
+    [sticker.identity]: Number(event.qqCurrentToolRound || 0)
+  };
+  if (viewed.tags.length === 0 && !viewed.description) {
+    const pending = getPendingQqStickerLabels(event);
+    if (!pending.some((item) => item.identity === sticker.identity)) {
+      event.qqPendingStickerLabels = [...pending, { identity: sticker.identity, name: sticker.name }];
+    }
+  }
+  return {
+    ok: true,
+    command,
+    reply: [
+      `已把 ${sticker.name} 作为本轮图片加载给你查看（第 ${viewed.viewCount} 次）。`,
+      viewed.tags.length || viewed.description
+        ? `现有标签：${viewed.tags.join("、") || "无"}${viewed.description ? `；${viewed.description}` : ""}。看完后可以用 /表情标签 覆盖更新。`
+        : `这是首次标注。看完图片后必须调用 /表情标签 ${sticker.name} | 标签1,标签2 | 画面和适用语境。`
+    ].join("\n")
+  };
+}
+
+function findQqStickerCatalogItem(catalog, selector) {
+  const normalized = normalizeSemanticText(selector);
+  const exact = (catalog || []).find((item) => normalizeSemanticText(item.name) === normalized);
+  if (exact) return exact;
+  const partial = (catalog || []).filter((item) => normalizeSemanticText(item.name).includes(normalized));
+  return partial.length === 1 ? partial[0] : null;
+}
+
+function getPendingQqStickerLabels(event) {
+  return Array.isArray(event?.qqPendingStickerLabels) ? event.qqPendingStickerLabels : [];
 }
 
 async function executeQqBotWebSearchCommand(command) {
@@ -3783,6 +3912,25 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   const botToolContext = formatQqBotInternalToolContext(event);
   const runReplyPrompt = async (prompt) => {
     assertQqReplyScopeActive(replyScope);
+    const currentImagePaths = [...new Set([...imagePaths, ...(event.qqToolImagePaths || [])])];
+    const args = [
+      "exec",
+      "--ephemeral",
+      "--skip-git-repo-check",
+      "--ignore-rules",
+      "-s",
+      "read-only",
+      "-m",
+      state.ai.model,
+      "-c",
+      `model_reasoning_effort="${state.ai.reasoningEffort}"`,
+      "-C",
+      codexWorkspaceDir,
+      "-o",
+      outputPath,
+      ...currentImagePaths.flatMap((imagePath) => ["--image", imagePath]),
+      "-"
+    ];
     await runCodexCli(args, prompt, {
       cwd: codexWorkspaceDir,
       timeout: 120000,
@@ -3826,6 +3974,9 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       expandLevel === 0 ? "" : null,
       state.qq.enhancer.enabled && event.proactiveDecision?.promptHint ? event.proactiveDecision.promptHint : null,
       state.qq.enhancer.enabled && event.proactiveDecision?.promptHint ? "" : null,
+      event.proactiveDecision?.replyContext?.length ? "主动兴趣判定所依据的群聊上下文（正式回复必须结合这些消息理解语境，不能只回复当前一句）：" : null,
+      ...(event.proactiveDecision?.replyContext || []).map((item) => `- ${item.sender}: ${item.text}${item.replyToBot ? "（回复 bot）" : ""}`),
+      event.proactiveDecision?.replyContext?.length ? "" : null,
       event.pendingImageRequestText ? `触发原因：${ownerLabel}刚刚说“${event.pendingImageRequestText}”，随后这张 QQ 图片到达。请直接看这张图并回应。` : null,
       event.pendingImageRequestText ? "" : null,
       hasAnyQqImageReference(event) && !shouldInspectImages ? "本条 QQ 消息或引用消息带了图片，但文本兴趣不足或未明确要求看图；Hub 已跳过视觉输入以节省 token。不要声称看过图片内容。" : null,
@@ -3835,7 +3986,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       hasAnyQqImageReference(event) ? "" : null,
       state.qq.enhancer.enabled ? "可用表情包库（本地 + 账号收藏）：" : null,
       state.qq.enhancer.enabled ? formatQqStickerCatalog(stickerCatalog) : null,
-      state.qq.enhancer.enabled && stickerCatalog.length ? "表情包库可用时，部署者可以在自定义 profile 或 QQ enhancer 包中说明何时使用 [[qq_sticker:表情包名]]；只能选择提示里真实存在的表情包名。账号收藏表情会以“账号表情1”这类名称列出。" : null,
+      state.qq.enhancer.enabled && stickerCatalog.length ? "你可以根据标签直接选择 [[qq_sticker:表情包名]]。遇到未查看/未标注的表情时，可以主动调用 [[qq_command:/看表情 表情名]] 查看；首次查看后必须用 /表情标签 写入标签。已标注表情也能重复查看并覆盖更新标签。只能选择提示里真实存在的表情包名。" : null,
       "",
       isQqPrivateEvent(event) ? "收到的 QQ 私聊：" : "收到的群消息：",
       event.queuedAggregate ? `下面是你上一轮生成期间继续收到的 ${event.queuedMessageCount || "多"} 条消息，Hub 已按“消息一/消息二/...”标注；请把它们当作连续上下文一起回应，不要逐条机械复读标签，除非需要澄清。` : null,
@@ -3850,25 +4001,6 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   };
 
   await ensureCodexReplyWorkspace();
-
-  const args = [
-    "exec",
-    "--ephemeral",
-    "--skip-git-repo-check",
-    "--ignore-rules",
-    "-s",
-    "read-only",
-    "-m",
-    state.ai.model,
-    "-c",
-    `model_reasoning_effort="${state.ai.reasoningEffort}"`,
-    "-C",
-    codexWorkspaceDir,
-    "-o",
-    outputPath,
-    ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
-    "-"
-  ];
 
   try {
     let prompt = await buildReplyPrompt(memoryContext, 0);
@@ -8627,6 +8759,7 @@ async function ensureCodexReplyWorkspace() {
       "如果需要通过 QQ 发普通文件，单独输出一行 [[qq_file:/absolute/path/to/file]]；需要指定发送文件名时写 [[qq_file:/absolute/path/to/file|filename.ext]]。",
       "Hub 只会发送最终回复里显式写出的 QQ 图片/文件 marker；如果某次任务给了临时工作区，待发送文件在 QQ 发送完成前不要删除，Hub 会另开清理回合让你清理。",
       state.qq.enhancer.enabled ? "如果要发表情包，优先输出 [[qq_sticker:表情包名]]；表情包名必须来自提示里的可用表情包库（本地或账号收藏）。" : null,
+      state.qq.enhancer.enabled ? "你可以主动调用 [[qq_command:/看表情 表情名]] 查看表情。未标注表情第一次查看后必须调用 /表情标签；已标注表情可以重复查看并覆盖更新标签。" : null,
       formatQqBubbleInstruction(),
       "群内 /stop 是强制停止当前回复并开启新对话，不是关闭 QQ 通道；关闭通道使用 /关闭QQ。",
       "非主人看到的 /菜单 是权限过滤后的菜单，能看到的指令就代表当前允许使用。",
@@ -9059,12 +9192,22 @@ function normalizeQqAccountStickerCatalog(data) {
     const label = extractQqStickerLabel(item) || `账号表情${catalog.length + 1}`;
     catalog.push({
       name: label,
+      id: extractQqStickerId(item) || undefined,
       url,
       source: "account",
       index: index + 1
     });
   }
   return catalog;
+}
+
+function extractQqStickerId(item) {
+  if (!item || typeof item !== "object") return "";
+  const summary = item.summary && typeof item.summary === "object" ? item.summary : {};
+  const rich = summary.richMediaSummary && typeof summary.richMediaSummary === "object" ? summary.richMediaSummary : {};
+  return [item.cid, item.id, item.faceId, item.fileId, item.md5, item.resId, rich.id, rich.resId]
+    .map((value) => String(value || "").trim())
+    .find(Boolean) || "";
 }
 
 function extractQqStickerLikeValues(value) {
