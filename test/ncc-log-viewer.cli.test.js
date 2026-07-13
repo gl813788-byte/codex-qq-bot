@@ -76,15 +76,36 @@ test("ncc log viewer highlights at-bot QQ entries separately", async (t) => {
       category: "search",
       message: "QQ web lookup trigger matched",
       details: { messageType: "group_at", query: "at bot search", isAt: true }
+    },
+    {
+      ts: "2026-01-01T00:00:03.000Z",
+      level: "success",
+      category: "lifecycle",
+      message: "QQ reply lifecycle completed",
+      traceId: "trace-colored-success",
+      details: { outcome: "sent", totalDurationMs: 2300 }
+    },
+    {
+      ts: "2026-01-01T00:00:04.000Z",
+      level: "warn",
+      category: "search",
+      message: "QQ web lookup failed",
+      details: { error: "search timeout" }
     }
   ];
   await writeFile(filePath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
 
-  const result = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--color", "--tail", "20"]);
+  const result = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--color", "--tail", "20", "--summary"]);
 
   assert.match(result.stdout, /\x1b\[94mQQ\s+\x1b\[0m \x1b\[94m收到 QQ 消息详情\x1b\[0m/);
   assert.match(result.stdout, /\x1b\[93mQQ\s+\x1b\[0m \x1b\[93m收到 QQ 消息详情\x1b\[0m/);
   assert.match(result.stdout, /\x1b\[93m搜索\s+\x1b\[0m \x1b\[93mQQ 消息触发联网搜索\x1b\[0m/);
+  assert.match(result.stdout, /\x1b\[92m成功\x1b\[0m \x1b\[97m流程\s+\x1b\[0m/);
+  assert.match(result.stdout, /\x1b\[92mQQ 回复流程完成\x1b\[0m \x1b\[2m结果:\x1b\[0m \x1b\[92m已发送\x1b\[0m/);
+  assert.match(result.stdout, /\x1b\[2m总用时:\x1b\[0m \x1b\[93m2\.30s\x1b\[0m/);
+  assert.match(result.stdout, /\x1b\[93m警告\x1b\[0m \x1b\[96m搜索\s+\x1b\[0m \x1b\[93mQQ 联网搜索失败\x1b\[0m/);
+  assert.match(result.stdout, /\x1b\[2m错误:\x1b\[0m \x1b\[91msearch timeout\x1b\[0m/);
+  assert.match(result.stdout, /\x1b\[97m日志摘要\x1b\[0m/);
 });
 
 test("ncc log follower resets its offset after rotation", async (t) => {
@@ -123,4 +144,75 @@ test("ncc log follower resets its offset after rotation", async (t) => {
 
   await waitFor(() => output.includes("after rotation"));
   assert.match(output, /after rotation/);
+});
+
+test("ncc log viewer follows a trace, finds slow operations, and prints a summary", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-qq-log-trace-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = join(directory, "hub.jsonl");
+  const entries = [
+    {
+      ts: "2026-07-13T10:00:00.000Z",
+      level: "debug",
+      category: "lifecycle",
+      message: "QQ reply lifecycle started",
+      traceId: "trace-main-abcdef",
+      details: { groupId: "123", senderId: "456", messageType: "group_at" }
+    },
+    {
+      ts: "2026-07-13T10:00:02.000Z",
+      level: "success",
+      category: "lifecycle",
+      message: "QQ reply lifecycle completed",
+      traceId: "trace-main-abcdef",
+      details: { groupId: "123", senderId: "456", outcome: "sent", totalDurationMs: 2200, generationDurationMs: 1800, bubbleCount: 2 }
+    },
+    {
+      ts: "2026-07-13T10:00:03.000Z",
+      level: "error",
+      category: "system",
+      message: "unrelated failure",
+      traceId: "trace-other",
+      details: { groupId: "999", durationMs: 9000 }
+    }
+  ];
+  await writeFile(`${filePath}.1`, `${JSON.stringify({
+    ts: "2026-07-13T09:59:59.000Z",
+    level: "info",
+    category: "search",
+    message: "QQ web lookup started",
+    traceId: "trace-main-abcdef",
+    details: { groupId: "123", senderId: "456", durationMs: 30 }
+  })}\n`, "utf8");
+  await writeFile(filePath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+
+  const trace = await execFileAsync(process.execPath, [
+    viewerPath.pathname,
+    filePath,
+    "--plain",
+    "--compact",
+    "--trace",
+    "trace-main",
+    "--summary"
+  ]);
+  assert.match(trace.stdout, /\[trace-ma\]/);
+  assert.match(trace.stdout, /QQ 回复流程开始/);
+  assert.match(trace.stdout, /QQ 回复流程完成/);
+  assert.match(trace.stdout, /QQ 联网搜索开始/);
+  assert.match(trace.stdout, /日志摘要：3 条，1 条链路/);
+  assert.doesNotMatch(trace.stdout, /unrelated failure/);
+
+  const slow = await execFileAsync(process.execPath, [
+    viewerPath.pathname,
+    filePath,
+    "--plain",
+    "--slow",
+    "2000",
+    "--group",
+    "123",
+    "--search",
+    "sent"
+  ]);
+  assert.match(slow.stdout, /QQ 回复流程完成/);
+  assert.doesNotMatch(slow.stdout, /QQ 回复流程开始|unrelated failure/);
 });
