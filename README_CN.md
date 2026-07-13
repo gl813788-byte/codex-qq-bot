@@ -371,6 +371,31 @@ export CODEX_REMOTE_CONTACT_QQ_ENHANCER_MODULE="/absolute/path/to/qq-enhancer/sr
 - `[[qq_command:/统一记忆 添加 内容]]`
 - `[[qq_command:/统一记忆 状态]]`
 
+### QQ 社交动作与群管理
+
+Bot 还内置了一组不显示在 `/菜单` 的社交工具：点赞、识别和处理好友/群申请、读取 QQ 空间动态、发表文字动态及评论动态。好友申请、入群申请和群邀请会保存到 `data/qq-requests.json`，并通知所有已配置主人。由主人 QQ 发来的申请或群邀请属于可信申请，会自动通过且照常通知；其他申请等待主人或 Bot 决定。
+
+- `[[qq_command:/点赞 发送者 1]]`
+- `[[qq_command:/申请 列表]]`
+- `[[qq_command:/申请 同意 最新]]`
+- `[[qq_command:/申请 拒绝 #申请ID 理由]]`
+- `[[qq_command:/动态 最近 QQ号 10]]`
+- `[[qq_command:/发动态 内容]]`
+- `[[qq_command:/评论动态 QQ号 tid 内容]]`
+
+群管理显示在菜单中，并通过 `groupAdmin` 指令 key 控制授权：
+
+```text
+/群管理
+/禁言 @用户 10m
+/解禁言 @用户
+/踢人 @用户
+/全员禁言 开启
+/群禁言列表
+```
+
+NapCat 4.18.9 暂未提供主动发起好友申请或加群申请的公开 OneBot 动作。因此 `/主动加好友` 和 `/主动加群` 在未配置扩展桥时会明确返回“不支持”；配置 `CODEX_REMOTE_CONTACT_QQ_SOCIAL_API_BASE` 后才会调用本地扩展，并且只有上游真实成功才会报告成功。
+
 自定义数据路径：
 
 ```bash
@@ -398,6 +423,10 @@ export CODEX_REMOTE_CONTACT_UNIFIED_MEMORY_MODULE="/absolute/path/to/unified-mem
 /白名单
 /加群 群号
 /删群 群号
+/群管理
+/禁言 @用户 10m
+/解禁言 @用户
+/踢人 @用户
 /联网开
 /联网关
 /代理状态
@@ -439,6 +468,7 @@ CODEX_REMOTE_CONTACT_QQ_WEB_ATTEMPT_TIMEOUT_MS=6500
 CODEX_REMOTE_CONTACT_QQ_WEB_PRESET=balanced
 CODEX_REMOTE_CONTACT_QQ_WEB_PROVIDER=tavily
 CODEX_REMOTE_CONTACT_QQ_WEB_PROVIDERS=tavily,bing,baidu,so360,sogou,duckduckgo
+CODEX_REMOTE_CONTACT_QQ_SOCIAL_API_BASE=
 TAVILY_API_KEY=tvly-...
 
 CODEX_REMOTE_CONTACT_REMOTE_EXECUTION_MODEL=gpt-5.4
