@@ -27,6 +27,7 @@ export function createRuntimePaths({
     settingsPath: join(dataDir, "settings.json"),
     qqMemoryPath: join(dataDir, "qq-memory.json"),
     qqPublicMemoryPath: join(dataDir, "qq-public-memory.json"),
+    qqRequestsPath: join(dataDir, "qq-requests.json"),
     qqPersonasPath: join(dataDir, "qq-personas.json"),
     qqStickerLabelsPath: join(dataDir, "qq-sticker-labels.json"),
     imessageMemoryPath: join(dataDir, "imessage-memory.json"),

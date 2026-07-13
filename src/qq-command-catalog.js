@@ -47,6 +47,14 @@ export const qqCommandCatalog = [
     menuLines: ["/白名单", "/加群 群号", "/删群 群号"],
     aliases: ["白名单", "群白名单", "白名单列表", "加群", "添加白名单群", "删群", "移除白名单群"]
   },
+  {
+    key: "groupAdmin",
+    defaultPublic: false,
+    configurable: true,
+    menuLine: "/群管理",
+    menuLines: ["/群管理", "/禁言 @用户 10m", "/解禁言 @用户", "/踢人 @用户", "/全员禁言 开启|关闭", "/群禁言列表"],
+    aliases: ["群管理", "禁言", "解禁言", "解除禁言", "踢人", "全员禁言", "群禁言列表"]
+  },
   { key: "ban", defaultPublic: false, configurable: true, menuLine: "/ban @用户", aliases: ["ban", "封禁", "拉黑", "unban", "解禁", "banlist"] },
   { key: "permissions", defaultPublic: false, configurable: false, menuLine: "/菜单权限", aliases: ["菜单权限", "权限菜单", "公开指令", "允许指令", "禁用指令"] },
   { key: "shutdown", defaultPublic: false, configurable: true, menuLine: "/关闭QQ", aliases: ["关闭qq", "关掉qq", "停止qq", "切断qq"] }

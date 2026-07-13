@@ -371,6 +371,31 @@ Unified memory and recent Codex context search are built into `src/unified-memor
 - `[[qq_command:/统一记忆 添加 内容]]`
 - `[[qq_command:/统一记忆 状态]]`
 
+### QQ Social Actions and Group Administration
+
+The Bot also has built-in social tools that stay out of `/菜单`: likes, friend/group request review, QQ Space mood reading, text mood publishing, and mood comments. Incoming friend requests, group join requests, and group invitations are persisted in `data/qq-requests.json` and reported to every configured owner. Requests sent by a configured owner are trusted, automatically approved, and still reported; all other requests wait for an owner/Bot decision.
+
+- `[[qq_command:/点赞 发送者 1]]`
+- `[[qq_command:/申请 列表]]`
+- `[[qq_command:/申请 同意 最新]]`
+- `[[qq_command:/申请 拒绝 #申请ID 理由]]`
+- `[[qq_command:/动态 最近 QQ号 10]]`
+- `[[qq_command:/发动态 内容]]`
+- `[[qq_command:/评论动态 QQ号 tid 内容]]`
+
+Group administration is visible and permission-controlled under the `groupAdmin` command key:
+
+```text
+/群管理
+/禁言 @用户 10m
+/解禁言 @用户
+/踢人 @用户
+/全员禁言 开启
+/群禁言列表
+```
+
+NapCat 4.18.9 does not expose public OneBot actions for initiating a friend or group request. `/主动加好友` and `/主动加群` therefore return an explicit unsupported result unless a local extension bridge is configured through `CODEX_REMOTE_CONTACT_QQ_SOCIAL_API_BASE`; the Bot never reports success without a successful upstream response.
+
 Custom data paths:
 
 ```bash
@@ -398,6 +423,10 @@ export CODEX_REMOTE_CONTACT_UNIFIED_MEMORY_MODULE="/absolute/path/to/unified-mem
 /白名单
 /加群 群号
 /删群 群号
+/群管理
+/禁言 @用户 10m
+/解禁言 @用户
+/踢人 @用户
 /联网开
 /联网关
 /代理状态
@@ -439,6 +468,7 @@ CODEX_REMOTE_CONTACT_QQ_WEB_ATTEMPT_TIMEOUT_MS=6500
 CODEX_REMOTE_CONTACT_QQ_WEB_PRESET=balanced
 CODEX_REMOTE_CONTACT_QQ_WEB_PROVIDER=tavily
 CODEX_REMOTE_CONTACT_QQ_WEB_PROVIDERS=tavily,bing,baidu,so360,sogou,duckduckgo
+CODEX_REMOTE_CONTACT_QQ_SOCIAL_API_BASE=
 TAVILY_API_KEY=tvly-...
 
 CODEX_REMOTE_CONTACT_REMOTE_EXECUTION_MODEL=gpt-5.4

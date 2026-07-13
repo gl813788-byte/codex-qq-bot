@@ -14,6 +14,8 @@ import { createConcurrencyLimiter } from "./concurrency-limiter.js";
 import { createCodexModelCatalog, findCodexModel } from "./codex-model-catalog.js";
 import { buildCodexChildEnv } from "./codex-child-env.js";
 import { resolveAllowedQqMarkerPath, resolveQqMarkerPath } from "./qq-output-policy.js";
+import { createQqZoneClient } from "./qq-qzone.js";
+import { createQqRequestStore, formatQqRequestEntry } from "./qq-request-store.js";
 import { createQqStickerLabelStore, normalizeQqStickerTags } from "./qq-sticker-label-store.js";
 import { createRuntimePaths } from "./runtime-paths.js";
 import { createScopedReplyScheduler } from "./scoped-reply-scheduler.js";
@@ -39,6 +41,7 @@ const {
   settingsPath,
   qqMemoryPath,
   qqPublicMemoryPath,
+  qqRequestsPath,
   qqPersonasPath,
   qqStickerLabelsPath,
   imessageMemoryPath,
@@ -222,6 +225,7 @@ const qqWebLookupAttemptTimeoutMs = Number(
 const qqWebSearchProvider = String(process.env.CODEX_REMOTE_CONTACT_QQ_WEB_PROVIDER || "auto").trim().toLowerCase();
 const qqWebSearchPreset = String(process.env.CODEX_REMOTE_CONTACT_QQ_WEB_PRESET || "balanced").trim().toLowerCase();
 const qqWebSearchProviderConfig = String(process.env.CODEX_REMOTE_CONTACT_QQ_WEB_PROVIDERS || "").trim();
+const qqSocialExtensionBase = String(process.env.CODEX_REMOTE_CONTACT_QQ_SOCIAL_API_BASE || "").trim().replace(/\/$/, "");
 const tavilyApiKey = process.env.TAVILY_API_KEY || process.env.CODEX_REMOTE_CONTACT_TAVILY_API_KEY || "";
 const qqOwnerFileImageTasksEnabled = process.env.CODEX_REMOTE_CONTACT_QQ_OWNER_FILE_IMAGE_TASKS !== "0";
 const qqBubbleSeparator = normalizeQqBubbleSeparator(process.env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR || "|||");
@@ -303,6 +307,8 @@ let assistantMentionAliases = (process.env.CODEX_REMOTE_CONTACT_ASSISTANT_MENTIO
   .filter(Boolean);
 const unifiedMemory = createUnifiedMemory({ memoryPath: unifiedMemoryPath });
 const qqStickerLabels = createQqStickerLabelStore({ filePath: qqStickerLabelsPath });
+const qqRequestStore = createQqRequestStore({ filePath: qqRequestsPath });
+const qqZone = createQqZoneClient({ callOneBotAction });
 
 function defaultQqProactiveInterestPreset() {
   return {
@@ -2332,6 +2338,10 @@ async function buildQqCommandAction(event) {
     if (permissionAction) return permissionAction;
   }
 
+  if (isQqCommandAllowedForEvent("groupAdmin", event) && isQqGroupAdminCommand(normalized, compact)) {
+    return buildQqGroupAdminAction(normalized, event);
+  }
+
   if (isQqCommandAllowedForEvent("shutdown", event) && /^(关闭qq|关掉qq|停止qq|切断qq|qq关闭|qq关掉)$/i.test(compact)) {
     return {
       reply: `${pickActionBeat(event)}收到，QQ 群聊响应现在关闭。之后要重新打开的话，请从 iMessage 控制台发 /开启QQ。`,
@@ -2520,6 +2530,7 @@ function isAllowedPublicQqCommand(normalized, compact, event) {
     || (isQqCommandAllowedForEvent("shutdown", event) && /^(关闭qq|关掉qq|停止qq|切断qq|qq关闭|qq关掉)$/i.test(compact))
     || (isQqCommandAllowedForEvent("ban", event) && /^(ban|封禁|拉黑|unban|解禁|解除封禁|取消拉黑|banlist|封禁列表|ban列表)/i.test(normalized))
     || (isQqCommandAllowedForEvent("allowlist", event) && /^(白名单|群白名单|白名单列表|加群|添加群|加入群|群添加|群加入|白名单添加|添加白名单群|加入白名单群|删群|删除群|移除群|群删除|群移除|白名单删除|删除白名单群|移除白名单群)/i.test(normalized))
+    || (isQqCommandAllowedForEvent("groupAdmin", event) && isQqGroupAdminCommand(normalized, compact))
     || (isQqCommandAllowedForEvent("model", event) && (/^(5|5\.5|5\.4|5\.4mini|5\.4-mini|mini|5\.3|5\.3codex|5\.3-codex|codex)$/i.test(compact) || /^(模型|qq模型|切模型|切换模型)/i.test(normalized)))
     || (isQqCommandAllowedForEvent("reasoning", event) && /^(智能等级|智能|思考强度|qq智能等级|qq智能|qq思考强度)/i.test(normalized));
 }
@@ -2553,6 +2564,100 @@ function isPublicQqSummarizeContextCommand(normalized, compact) {
 function isQqInterestConfigCommand(normalized, compact) {
   return /^(兴趣|主动|兴趣配置|主动配置|主动响应配置|兴趣状态|主动状态|兴趣开关|主动开关|兴趣间隔|主动间隔|兴趣模型|主动模型|兴趣超时|主动超时|兴趣最近|主动最近|兴趣重置|主动重置|interest|proactive)(?:\s+.*)?$/i.test(normalized)
     || /^(兴趣|主动|兴趣配置|主动配置|兴趣状态|主动状态|interest|proactive)$/i.test(compact);
+}
+
+function isQqGroupAdminCommand(normalized, compact) {
+  return /^(群管理|禁言|解禁言|解除禁言|踢人|移出群|全员禁言|群禁言列表|禁言列表)(?:\s+.*)?$/i.test(normalized)
+    || /^(群管理|群禁言列表|禁言列表)$/i.test(compact);
+}
+
+async function buildQqGroupAdminAction(normalized, event) {
+  const groupId = event.groupId == null ? "" : String(event.groupId);
+  if (!groupId) return { reply: `${pickActionBeat(event)}群管理指令只能在目标群里使用。` };
+  const compact = String(normalized || "").replace(/\s+/g, "");
+  if (/^群管理$/i.test(compact)) {
+    return {
+      reply: [
+        "群管理命令：",
+        "/禁言 @用户 10m（默认 10 分钟，最长 30 天）",
+        "/解禁言 @用户",
+        "/踢人 @用户",
+        "/踢人 @用户 拒绝再加",
+        "/全员禁言 开启 或 /全员禁言 关闭",
+        "/群禁言列表"
+      ].join("\n")
+    };
+  }
+
+  if (/^(群禁言列表|禁言列表)$/i.test(compact)) {
+    const result = await callOneBotAction("get_group_shut_list", { group_id: Number(groupId) });
+    if (!result.ok) return { reply: formatOneBotActionFailure("读取群禁言列表", result) };
+    const members = Array.isArray(result.body?.data) ? result.body.data : [];
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const lines = members
+      .filter((member) => Number(member.shut_up_timestamp || member.shutUpTime || 0) > nowSeconds)
+      .map((member) => {
+        const userId = member.user_id || member.uin || member.uid || "未知";
+        const until = Number(member.shut_up_timestamp || member.shutUpTime || 0) * 1000;
+        return `${member.nickname || member.card || userId}(${userId})，到 ${formatQqBanUntil(until)}`;
+      });
+    return { reply: lines.length ? `当前群禁言成员：\n${lines.join("\n")}` : "当前群没有正在禁言的成员。" };
+  }
+
+  const wholeBanMatch = String(normalized || "").match(/^全员禁言\s*(开启|打开|启用|on|关闭|关掉|停用|off)$/i);
+  if (wholeBanMatch) {
+    const enable = /^(开启|打开|启用|on)$/i.test(wholeBanMatch[1]);
+    const result = await callOneBotAction("set_group_whole_ban", { group_id: Number(groupId), enable });
+    return {
+      reply: result.ok
+        ? `已${enable ? "开启" : "关闭"}群 ${groupId} 的全员禁言。`
+        : formatOneBotActionFailure(`${enable ? "开启" : "关闭"}全员禁言`, result)
+    };
+  }
+
+  const targetId = extractQqCommandTarget(event, normalized);
+  if (!targetId) return { reply: `${pickActionBeat(event)}请 @ 目标成员，或写出目标 QQ 号。` };
+  if (isProtectedQqOwnerTarget(targetId)) return { reply: `${ownerLabel}受保护，不能被群管工具禁言或踢出。` };
+  if (event.selfId && targetId === String(event.selfId)) return { reply: "不能对 Bot 自己执行群管动作。" };
+
+  if (/^(解禁言|解除禁言)/i.test(normalized)) {
+    const result = await callOneBotAction("set_group_ban", {
+      group_id: Number(groupId),
+      user_id: Number(targetId),
+      duration: 0
+    });
+    return { reply: result.ok ? `已解除 ${targetId} 在群 ${groupId} 的禁言。` : formatOneBotActionFailure("解除禁言", result) };
+  }
+
+  if (/^禁言/i.test(normalized)) {
+    const duration = parseQqGroupMuteDuration(normalized);
+    const result = await callOneBotAction("set_group_ban", {
+      group_id: Number(groupId),
+      user_id: Number(targetId),
+      duration: duration.seconds
+    });
+    return {
+      reply: result.ok
+        ? `已禁言 ${targetId}：${duration.label}。`
+        : formatOneBotActionFailure("禁言", result)
+    };
+  }
+
+  if (/^(踢人|移出群)/i.test(normalized)) {
+    const rejectAddRequest = /(拒绝再加|拒绝再次加群|禁止再加|不允许再加)/i.test(normalized);
+    const result = await callOneBotAction("set_group_kick", {
+      group_id: Number(groupId),
+      user_id: Number(targetId),
+      reject_add_request: rejectAddRequest
+    });
+    return {
+      reply: result.ok
+        ? `已将 ${targetId} 移出群 ${groupId}${rejectAddRequest ? "，并拒绝其再次加群" : ""}。`
+        : formatOneBotActionFailure("踢人", result)
+    };
+  }
+
+  return { reply: "未识别的群管理动作；发送 /群管理 查看用法。" };
 }
 
 function buildQqInterestConfigAction(normalized, event) {
@@ -2663,7 +2768,7 @@ function isProtectedQqOwnerTarget(targetId) {
 }
 
 function isOwnerOnlyQqCommand(normalized, compact) {
-  return /^(菜单权限|权限菜单|公开指令|指令权限|允许指令|开放指令|启用指令|禁用指令|关闭指令|禁止指令|状态|status|查看状态|详细配置|配置|config|settings|详细状态|兴趣|主动|兴趣配置|主动配置|主动响应配置|兴趣状态|主动状态|兴趣开关|主动开关|兴趣间隔|主动间隔|兴趣模型|主动模型|兴趣超时|主动超时|兴趣最近|主动最近|兴趣重置|主动重置|interest|proactive|ban|unban|封禁|拉黑|解禁|解除封禁|取消拉黑|banlist|封禁列表|ban列表|关闭qq|关掉qq|停止qq|切断qq|qq关闭|qq关掉|白名单|群白名单|白名单列表|加群|添加群|加入群|群添加|群加入|白名单添加|添加白名单群|加入白名单群|删群|删除群|移除群|群删除|群移除|白名单删除|删除白名单群|移除白名单群|模型|qq模型|切模型|切换模型|智能等级|智能|思考强度|qq智能等级|qq智能|qq思考强度)/i.test(normalized)
+  return /^(菜单权限|权限菜单|公开指令|指令权限|允许指令|开放指令|启用指令|禁用指令|关闭指令|禁止指令|状态|status|查看状态|详细配置|配置|config|settings|详细状态|兴趣|主动|兴趣配置|主动配置|主动响应配置|兴趣状态|主动状态|兴趣开关|主动开关|兴趣间隔|主动间隔|兴趣模型|主动模型|兴趣超时|主动超时|兴趣最近|主动最近|兴趣重置|主动重置|interest|proactive|群管理|禁言|解禁言|解除禁言|踢人|移出群|全员禁言|群禁言列表|禁言列表|ban|unban|封禁|拉黑|解禁|解除封禁|取消拉黑|banlist|封禁列表|ban列表|关闭qq|关掉qq|停止qq|切断qq|qq关闭|qq关掉|白名单|群白名单|白名单列表|加群|添加群|加入群|群添加|群加入|白名单添加|添加白名单群|加入白名单群|删群|删除群|移除群|群删除|群移除|白名单删除|删除白名单群|移除白名单群|模型|qq模型|切模型|切换模型|智能等级|智能|思考强度|qq智能等级|qq智能|qq思考强度)/i.test(normalized)
     || /^(5|5\.5|5\.4|5\.4mini|5\.4-mini|mini|5\.3|5\.3codex|5\.3-codex|codex)$/i.test(compact);
 }
 
@@ -2870,6 +2975,10 @@ function formatQqBotInternalToolContext(event) {
     "- [[qq_command:/聊天记录 关键词]] 搜索当前群聊或私聊最近聊天里的关键词。",
     "- [[qq_command:/联网 查询词]] 或 [[qq_command:/搜索 查询词]] 使用 QQ 联网查询工具搜索网页摘要。",
     "- [[qq_command:/拍一拍 发送者]] 拍回当前触发者；也可以写具体 QQ 号或“自己”。只在你确实想执行拍一拍动作时调用。",
+    "- [[qq_command:/点赞 发送者 1]] 给当前发送者点赞，次数 1 到 10；普通群友触发时只能点赞发送者、被 @ 或被引用的人。",
+    "- [[qq_command:/申请 列表]] 查看待处理的好友申请、入群申请和群邀请；[[qq_command:/申请 同意 最新]] 或 [[qq_command:/申请 拒绝 #申请ID 理由]] 处理申请。申请处理仅限主人上下文，可信主人发来的申请/群邀请会自动通过并通知主人。",
+    "- [[qq_command:/主动加好友 QQ号 验证信息]]、[[qq_command:/主动加群 群号 答案]] 发起好友或加群申请；仅限主人上下文。若当前 NapCat 没有相应扩展接口，工具会明确返回不支持，不能假装成功。",
+    "- [[qq_command:/动态 最近 10]] 或 [[qq_command:/动态 最近 QQ号 10]] 读取 QQ 空间最近动态；[[qq_command:/发动态 内容]] 发表文字动态；[[qq_command:/评论动态 QQ号 tid 内容]] 评论动态。空间写操作仅限主人上下文。",
     "- [[qq_command:/记忆 列表]] 查看 bot 自己维护的公共长期记忆。",
     "- [[qq_command:/记忆 添加 内容]] 添加一条公共长期记忆。",
     "- [[qq_command:/记忆 修改 编号 内容]] 修改一条公共长期记忆，编号可以用列表里的序号或 #id。",
@@ -3033,6 +3142,10 @@ async function executeQqBotInternalCommand(command, event) {
     };
   }
 
+  if (isQqBotSocialCommand(normalizedCommand)) {
+    return executeQqBotSocialCommand(normalizedCommand, event);
+  }
+
   const action = await buildQqCommandAction({
     ...event,
     text: normalizedCommand.startsWith("/") ? normalizedCommand : `/${normalizedCommand}`,
@@ -3056,6 +3169,211 @@ function normalizeQqBotInternalCommand(command) {
 
 function isQqBotHistoryCommand(command) {
   return /^\/?(聊天记录|查记录|搜索记录|搜记录|读记录|读取记录|看记录|记录|history|log|logs)(?:\s+.*)?$/i.test(command);
+}
+
+function isQqBotSocialCommand(command) {
+  return /^\/?(?:点赞|申请|好友申请|群申请|主动加好友|主动加群|动态|识别动态|发动态|评论动态)(?:\s+.*)?$/i.test(command);
+}
+
+async function executeQqBotSocialCommand(command, event) {
+  const body = String(command || "").replace(/^\/+/, "").trim();
+  if (/^点赞(?:\s|$)/i.test(body)) return executeQqLikeCommand(body, event);
+  if (/^(申请|好友申请|群申请)(?:\s|$)/i.test(body)) return executeQqRequestCommand(body, event);
+  if (/^(主动加好友|主动加群)(?:\s|$)/i.test(body)) return executeQqActiveAddCommand(body, event);
+  if (/^(动态|识别动态|发动态|评论动态)(?:\s|$)/i.test(body)) return executeQqZoneCommand(body, event);
+  return { ok: false, command, reply: "未识别的 QQ 社交工具命令。" };
+}
+
+async function executeQqLikeCommand(command, event) {
+  const match = String(command).match(/^点赞(?:\s+([^\s]+))?(?:\s+([0-9]{1,2}))?$/i);
+  if (!match) return { ok: false, command, reply: "用法：/点赞 发送者 [1-10]，或 /点赞 QQ号 [1-10]。" };
+  const selector = String(match[1] || "发送者");
+  const targetId = /^(发送者|对方|他|她)$/i.test(selector)
+    ? String(event.senderId || "")
+    : /^(自己|我|bot)$/i.test(selector)
+      ? String(event.selfId || "")
+      : (selector.match(/[1-9][0-9]{4,12}/) || [])[0] || extractQqCommandTarget(event, command);
+  if (!targetId) return { ok: false, command, reply: "没有找到要点赞的 QQ。" };
+  const allowedTargets = new Set([
+    String(event.senderId || ""),
+    String(event.replyContext?.senderId || ""),
+    ...(event.atTargets || []).map(String)
+  ].filter(Boolean));
+  if (!event.isOwner && !allowedTargets.has(targetId)) {
+    return { ok: false, command, reply: "普通群友触发时，只能给当前发送者、被 @ 或被引用的人点赞。" };
+  }
+  const times = Math.max(1, Math.min(10, Number(match[2]) || 1));
+  const result = await callOneBotAction("send_like", { user_id: Number(targetId), times });
+  return {
+    ok: result.ok,
+    command,
+    reply: result.ok ? `已给 ${targetId} 点赞 ${times} 次。` : formatOneBotActionFailure("点赞", result)
+  };
+}
+
+async function executeQqRequestCommand(command, event) {
+  if (!event.isOwner) return { ok: false, command, reply: "好友和群申请处理只允许主人触发。" };
+  const body = String(command).replace(/^(申请|好友申请|群申请)\s*/i, "").trim();
+  if (!body || /^(列表|待处理|查看|list)$/i.test(body) || /^列表\s*(待处理|全部)?$/i.test(body)) {
+    const all = /全部/i.test(body);
+    const entries = qqRequestStore.list({ status: all ? "all" : "pending", limit: 30 });
+    return {
+      ok: true,
+      command,
+      reply: entries.length
+        ? `${all ? "最近申请" : "待处理申请"}：\n${entries.map(formatQqRequestEntry).join("\n")}`
+        : `${all ? "最近没有申请记录" : "当前没有待处理申请"}。`
+    };
+  }
+  const match = body.match(/^(同意|通过|接受|拒绝|驳回)(?:\s+(#[a-f0-9]{10}|最新|latest|\S+))?(?:\s+([\s\S]+))?$/i);
+  if (!match) return { ok: false, command, reply: "用法：/申请 列表、/申请 同意 最新 [备注]、/申请 拒绝 #申请ID [理由]。" };
+  const approve = /^(同意|通过|接受)$/i.test(match[1]);
+  const selector = match[2] || "最新";
+  const entry = qqRequestStore.find(selector, { pendingOnly: true });
+  if (!entry) return { ok: false, command, reply: `没有找到待处理申请：${selector}` };
+  const handled = await handleQqRequest(entry, {
+    approve,
+    note: String(match[3] || "").trim(),
+    handledBy: String(event.senderId || "owner"),
+    autoHandled: false
+  });
+  await notifyQqOwners(`Bot 已${approve ? "同意" : "拒绝"}申请：\n${formatQqRequestEntry(handled.entry)}${handled.ok ? "" : `\n失败：${handled.error}`}`);
+  return { ok: handled.ok, command, reply: handled.reply };
+}
+
+async function handleQqRequest(entry, { approve, note = "", handledBy = "bot", autoHandled = false }) {
+  const endpoint = entry.requestType === "friend" ? "set_friend_add_request" : "set_group_add_request";
+  const payload = entry.requestType === "friend"
+    ? { flag: entry.flag, approve, remark: approve ? note : "" }
+    : { flag: entry.flag, sub_type: entry.subType, approve, reason: approve ? "" : note };
+  const result = await callOneBotAction(endpoint, payload);
+  if (!result.ok) {
+    const error = result.error || result.body?.message || result.body?.wording || "未知错误";
+    const updated = await qqRequestStore.update(entry.id, { lastError: error, handledBy, autoHandled });
+    return { ok: false, entry: updated || entry, error, reply: formatOneBotActionFailure(approve ? "同意申请" : "拒绝申请", result) };
+  }
+  const status = approve ? "approved" : "rejected";
+  const updated = await qqRequestStore.update(entry.id, {
+    status,
+    handledAt: new Date().toISOString(),
+    handledBy,
+    autoHandled,
+    lastError: ""
+  });
+  return {
+    ok: true,
+    entry: updated || { ...entry, status },
+    error: "",
+    reply: `${approve ? "已同意" : "已拒绝"}：${formatQqRequestEntry(updated || entry)}`
+  };
+}
+
+async function executeQqActiveAddCommand(command, event) {
+  if (!event.isOwner) return { ok: false, command, reply: "主动加好友或群只允许主人触发。" };
+  const match = String(command).match(/^(主动加好友|主动加群)\s+([1-9][0-9]{4,12})(?:\s+([\s\S]+))?$/i);
+  if (!match) return { ok: false, command, reply: "用法：/主动加好友 QQ号 [验证信息]，或 /主动加群 群号 [答案]。" };
+  const kind = match[1] === "主动加好友" ? "friend" : "group";
+  if (!qqSocialExtensionBase) {
+    return {
+      ok: false,
+      command,
+      reply: `NapCat 4.18.9 的公开 OneBot 接口没有“主动加${kind === "friend" ? "好友" : "群"}”动作；当前不会伪报成功。配置 CODEX_REMOTE_CONTACT_QQ_SOCIAL_API_BASE 扩展桥后即可由 Bot 调用。`
+    };
+  }
+  try {
+    const response = await fetch(`${qqSocialExtensionBase}/${kind === "friend" ? "add-friend" : "join-group"}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ target_id: match[2], message: String(match[3] || "").trim() })
+    });
+    const result = await response.json().catch(() => ({}));
+    const ok = response.ok && (result.ok === true || result.status === "ok" || Number(result.code) === 0);
+    return {
+      ok,
+      command,
+      reply: ok ? `已发起${kind === "friend" ? "好友" : "加群"}申请：${match[2]}。` : `发起申请失败：${result.error || `HTTP ${response.status}`}`
+    };
+  } catch (error) {
+    return { ok: false, command, reply: `发起申请失败：${error.message}` };
+  }
+}
+
+async function executeQqZoneCommand(command, event) {
+  const body = String(command).trim();
+  const publishMatch = body.match(/^发动态\s+([\s\S]+)$/i);
+  const commentMatch = body.match(/^评论动态\s+([1-9][0-9]{4,12})\s+(\S+)\s+([\s\S]+)$/i);
+  if ((publishMatch || commentMatch) && !event.isOwner) {
+    return { ok: false, command, reply: "发表或评论 QQ 空间动态只允许主人触发。" };
+  }
+  try {
+    if (publishMatch) {
+      const result = await qqZone.publish(publishMatch[1]);
+      return { ok: true, command, reply: `QQ 空间动态已发表${result.tid ? `，tid：${result.tid}` : ""}。` };
+    }
+    if (commentMatch) {
+      await qqZone.comment({ uin: commentMatch[1], tid: commentMatch[2], content: commentMatch[3] });
+      return { ok: true, command, reply: `已评论 ${commentMatch[1]} 的动态 ${commentMatch[2]}。` };
+    }
+    const listMatch = body.match(/^(?:动态|识别动态)(?:\s+最近)?(?:\s+([1-9][0-9]{4,12}))?(?:\s+([0-9]{1,2}))?$/i);
+    if (!listMatch) return { ok: false, command, reply: "用法：/动态 最近 [QQ号] [数量]、/发动态 内容、/评论动态 QQ号 tid 内容。" };
+    const items = await qqZone.list({ uin: listMatch[1], count: Number(listMatch[2]) || 10 });
+    if (!items.length) return { ok: true, command, reply: "没有读取到可见的 QQ 空间动态。" };
+    const lines = items.map((item, index) => {
+      const time = item.createdTime ? new Date(item.createdTime * 1000).toLocaleString("zh-CN") : "时间未知";
+      const content = item.content || (item.pictureCount ? `（${item.pictureCount} 张图片）` : "（空动态）");
+      return `${index + 1}. ${item.uin}/${item.tid}｜${time}｜${content}｜评论 ${item.commentCount}`;
+    });
+    return { ok: true, command, reply: `最近 QQ 空间动态：\n${lines.join("\n")}`.slice(0, 5000) };
+  } catch (error) {
+    return { ok: false, command, reply: `QQ 空间操作失败：${error.message}` };
+  }
+}
+
+async function notifyQqOwners(message) {
+  const owners = state.qq.ownerUserIds.filter(Boolean);
+  if (!owners.length) {
+    logger.warn("QQ request notification skipped because no owner is configured", {}, "qq");
+    return [];
+  }
+  return Promise.all(owners.map((ownerId) => callOneBotAction("send_private_msg", {
+    user_id: Number(ownerId),
+    message: String(message || "").slice(0, 3500)
+  }).catch((error) => ({ ok: false, error: error.message }))));
+}
+
+async function handleIncomingOneBotRequest(payload) {
+  const recorded = await qqRequestStore.record(payload);
+  if (!recorded.entry) return { ignored: true, reason: "Invalid OneBot request event" };
+  if (!recorded.isNew) return { status: "ok", duplicate: true, requestId: recorded.entry.id };
+
+  const entry = recorded.entry;
+  const trustedOwner = state.qq.ownerUserIds.includes(String(entry.userId || ""));
+  let handled = null;
+  if (trustedOwner) {
+    handled = await handleQqRequest(entry, {
+      approve: true,
+      handledBy: "bot:trusted-owner",
+      autoHandled: true
+    });
+  }
+  const title = handled?.ok
+    ? "Bot 已自动同意可信主人的 QQ 申请"
+    : handled
+      ? "Bot 尝试自动处理 QQ 申请，但操作失败"
+      : "Bot 收到新的 QQ 申请";
+  const instructions = handled
+    ? handled.ok ? "处理结果已记录。" : `错误：${handled.error}\n可稍后让 Bot 再次处理。`
+    : `可以对 Bot 说“同意申请 #${entry.id}”或“拒绝申请 #${entry.id} 理由”。`;
+  await notifyQqOwners(`${title}\n${formatQqRequestEntry(handled?.entry || entry)}\n${instructions}`);
+  logger.success("OneBot request captured", {
+    requestId: entry.id,
+    requestType: entry.requestType,
+    subType: entry.subType,
+    userId: entry.userId || null,
+    groupId: entry.groupId || null,
+    autoHandled: Boolean(handled)
+  }, "onebot");
+  return { status: "ok", requestId: entry.id, autoHandled: Boolean(handled), approved: handled?.ok === true };
 }
 
 function isQqBotPublicMemoryCommand(command) {
@@ -3514,6 +3832,26 @@ function parseQqBanDuration(command) {
     until,
     label: `到 ${formatQqBanUntil(until)}`
   };
+}
+
+function parseQqGroupMuteDuration(command) {
+  const text = String(command || "").trim();
+  const match = text.match(/(?:^|\s)([0-9]+(?:\.[0-9]+)?\s*(?:s|sec|secs|second|seconds|秒|m|min|mins|minute|minutes|分钟|分|h|hr|hrs|hour|hours|小时|时|d|day|days|天|日))\s*$/i);
+  if (!match) return { seconds: 10 * 60, label: "10 分钟" };
+  const amountMatch = match[1].trim().toLowerCase().match(/^([0-9]+(?:\.[0-9]+)?)\s*(.+)$/);
+  if (!amountMatch) return { seconds: 10 * 60, label: "10 分钟" };
+  const amount = Number(amountMatch[1]);
+  const unitMs = resolveQqBanDurationUnitMs(amountMatch[2].trim().toLowerCase());
+  if (!Number.isFinite(amount) || amount <= 0 || !unitMs) return { seconds: 10 * 60, label: "10 分钟" };
+  const seconds = Math.max(1, Math.min(30 * 24 * 60 * 60, Math.round((amount * unitMs) / 1000)));
+  return { seconds, label: formatQqDurationSeconds(seconds) };
+}
+
+function formatQqDurationSeconds(seconds) {
+  if (seconds % 86400 === 0) return `${seconds / 86400} 天`;
+  if (seconds % 3600 === 0) return `${seconds / 3600} 小时`;
+  if (seconds % 60 === 0) return `${seconds / 60} 分钟`;
+  return `${seconds} 秒`;
 }
 
 function resolveQqBanDurationUnitMs(unit) {
@@ -9437,6 +9775,11 @@ async function callOneBotAction(endpoint, payload) {
   };
 }
 
+function formatOneBotActionFailure(action, result) {
+  const detail = result?.error || result?.body?.message || result?.body?.wording || `HTTP ${result?.status || "未知"}`;
+  return `${action}失败：${detail}`;
+}
+
 function combineOneBotSendResults(messageResult, fileResults) {
   const results = [messageResult, ...(Array.isArray(fileResults) ? fileResults : [])].filter(Boolean);
   const required = results.filter((result) => !result.skipped);
@@ -9767,6 +10110,9 @@ async function handleApi(req, res) {
 
   if (req.method === "POST" && req.url === "/api/onebot/event") {
     const payload = await readBody(req);
+    if (payload.post_type === "request") {
+      return sendJson(res, 200, await handleIncomingOneBotRequest(payload));
+    }
     if (isOneBotPokeNotice(payload)) {
       if (!isOneBotPokeToSelf(payload)) {
         logger.debug("OneBot poke ignored because it did not target the bot", {
@@ -9856,6 +10202,7 @@ await mkdir(qqStickerDir, { recursive: true });
 await loadQqMemory();
 await loadQqPublicMemory();
 await loadQqPersonas();
+await qqRequestStore.load().catch((error) => logger.warn("Unable to load QQ request store", { error }, "qq"));
 await loadIMessageMemory();
 await loadRemoteExecutionMemory();
 updateIMessagePoller();
