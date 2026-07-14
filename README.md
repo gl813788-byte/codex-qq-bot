@@ -310,6 +310,12 @@ The hub uses the built-in `src/qq-enhancer/` and `src/unified-memory/` implement
 
 QQ enhancer is built into `src/qq-enhancer/` and works out of the box. It provides group-chat style guidance, conservative proactive reply decisions, image extraction and preparation, local, QQ-favorite, and observed marketplace sticker catalogs, native QQ sticker labels, animated-sticker frame inspection, bubble splitting, and QQ media marker handling. Animated stickers are marked in the catalog; inspection defaults to three middle frames, while the reply model may choose the number of animations, frame count, or exact positions. Only a message already selected for a Bot reply can trigger the model's optional decision to save one of that message's stickers into the real QQ account favorites. Proactive interest routing lives in `src/qq-enhancer/proactive-interest.js`, which controls whether the bot is genuinely interested enough to reply when it was not mentioned. Recent group memory retains bounded image references, including image-only messages. The lightweight proactive judge receives image counts but not image URLs; only an affirmative final decision forwards up to four deduplicated images from its exact context window to the formal vision-capable reply. An explicit @Bot or reply-to-Bot trigger uses the newest 18 consecutive messages from all speakers (28 on expanded retry) and may likewise attach up to four of their most recent images.
 
+Interest judging merges the current message, quoted message, recent context, global-persona keywords, and the sender's interaction distance into one decision. The Bot's own name is always a fixed interest keyword. A direct @Bot or reply-to-Bot still always enters the reply path, while the first bubble independently chooses a quote, sender mention, or plain delivery based on messages and minutes since the previous interaction. Immediately after an interaction, ordinary interest cadence may contract to a minimum of one message or one minute, then smoothly decay back to the configured `/兴趣间隔` and `/兴趣分钟` baselines.
+
+The Hub creates a separate anonymous, non-identifying summary for every group and private scope. After enough messages and Bot replies accumulate, the current QQ reply model generates a global Bot persona whose name is forced to the logged-in QQ nickname. The persona includes traits, a self-description, interest keywords, a full interest paragraph, weighted interests, and proactive topics, and is stored in `data/qq-self-persona.json`. Scopes contribute summaries only; private raw text is never copied across conversations. The QQ dashboard shows the current persona, keywords, and generation progress.
+
+Timed outreach uses learned active hours per group or contact. Cold-group outreach lowers interest and exponentially lengthens retries as unanswered Bot messages accumulate instead of blocking forever. Private proactive interest follows an interaction-frequency-aware short-high, middle-low, long-rising probability curve, with the same unanswered-message suppression and backoff. The dashboard exposes learned hours, unanswered streaks, interest multipliers, private phases, candidate probabilities, and next-check times. Keyword hits, relationship distance, quote/@ selection, persona refreshes, and group/private proactive outcomes are persisted as structured `interest` or `learning` logs.
+
 Enable in `data/settings.json`:
 
 ```json
@@ -489,6 +495,10 @@ CODEX_REMOTE_CONTACT_QQ_MEMORY_LIMIT=10
 CODEX_REMOTE_CONTACT_QQ_GROUP_MEMORY_LIMIT=200
 CODEX_REMOTE_CONTACT_QQ_SCOPE_LIMIT=500
 CODEX_REMOTE_CONTACT_QQ_PERSONA_MEMBER_LIMIT=500
+CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_SCOPE_MESSAGES=24
+CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_SCOPE_BOT_REPLIES=6
+CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_GENERATION_MESSAGES=80
+CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_GENERATION_BOT_REPLIES=20
 CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES=20971520
 CODEX_REMOTE_CONTACT_QQ_WEB_LOOKUP=1
 CODEX_REMOTE_CONTACT_QQ_WEB_TIMEOUT_MS=12000

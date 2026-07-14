@@ -414,6 +414,14 @@ kbd { padding: 4px 7px; border: 1px solid var(--line); border-bottom-color: var(
 .behavior-frequency-item strong { font: 700 10px "SF Mono", Menlo, monospace; }
 .behavior-frequency-item div { display: flex; gap: 6px; flex-wrap: wrap; }
 .behavior-frequency-item span { padding: 4px 7px; border-radius: 8px; color: var(--muted); background: var(--surface-solid); font-size: 10px; }
+.persona-summary-card { gap: 9px; }
+.persona-summary-card .persona-summary-head { align-items: center; justify-content: space-between; }
+.persona-summary-card small { color: var(--muted); font-size: 9px; }
+.persona-summary-card > p { color: var(--muted); font-size: 9px; line-height: 1.5; }
+.persona-summary-card .persona-summary-copy { padding: 9px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--surface-solid); font-size: 10px; }
+.persona-summary-card section { min-width: 0; }
+.persona-summary-card h4 { margin-bottom: 6px; font-size: 10px; }
+.persona-summary-card section > div { display: flex; gap: 5px; flex-wrap: wrap; }
 .compact-button { flex: 0 0 auto; padding: 4px 0; font-size: 9px; }
 .adaptive-learning-item { padding: 0; overflow: hidden; }
 .adaptive-learning-item > summary { padding: 10px 11px; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; }

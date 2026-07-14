@@ -310,6 +310,12 @@ Projects/
 
 QQ enhancer 已内置在 `src/qq-enhancer/`，默认安装即可使用。它提供群聊风格提示、保守主动回复判断、图片提取、看图准备、本地表情、QQ 账号收藏表情和已识别商城表情目录、QQ 原生表情标签、动图抽帧识别、气泡拆分和 QQ 媒体 marker 处理。目录会标记动图；识别默认抽取中段 3 帧，回复模型也可以自己决定查看几个动图、每个抽几帧及具体帧位。只有消息已经进入 Bot 回复流程且消息中含表情时，模型才会判断是否把其中一个真正收藏到当前 QQ 账号；普通未触发回复的表情消息不会调用模型做收藏判断。主动回复兴趣策略单独放在 `src/qq-enhancer/proactive-interest.js`，用于控制 bot 在未被 @ 时是否真的对当前话题感兴趣。最近群聊记忆会保留有上限的图片引用，纯图片消息也会进入上下文。轻量兴趣判定模型只收到图片数量，不收到图片地址；只有最终明确判定回复时，才会把该判定窗口中最多 4 张去重图片交给正式视觉回复模型。群友明确 @Bot 或回复 Bot 时，会携带所有发言者最近 18 条连续消息（扩展重试为 28 条），并同样可附带其中最近最多 4 张图片。
 
+兴趣判断会把当前消息、被引用消息、最近上下文、全局人设关键词和与发言者的互动距离合并成一次判断；Bot 自己的名字始终是固定兴趣关键词。直接 @Bot 或回复 Bot 时一定进入回复流程，但首个气泡会根据距离上次双方互动的消息数和分钟数，自由选择引用原消息、@ 发言者或普通发送。刚互动后，普通兴趣检查最低可缩短到 1 条消息或 1 分钟，随后平滑回落到 `/兴趣间隔` 与 `/兴趣分钟` 的配置值。
+
+Hub 会把每个群和私聊分别压缩成不含身份与私密原文的摘要，并在累计到足够消息和 Bot 回复后，用当前 QQ 回复模型生成全局 Bot 人设，名称强制等于登录 QQ 昵称。全局人设包含性格、自我描述、兴趣关键词、完整兴趣段落、加权兴趣和主动话题，保存在 `data/qq-self-persona.json`；各会话只贡献摘要，私聊原文不会被带到其他会话。网页的 QQ 通道页会显示当前人设、关键词和生成进度。
+
+定时主动发言使用按群/联系人学习的活跃时段。冷群分支按未回复次数降低兴趣并指数延长重试，不再永久等待一次真人回复；私聊分支依据互动频率采用“短期较高、中期很低、长期回升”的候选概率，连续未回复同样会降低概率并延长间隔。网页会显示每个群的动态开放时段、未回复次数和兴趣系数，以及私聊阶段、候选概率和下次判断时间；所有关键词命中、关系距离、引用/@ 选择、人设更新和群/私聊主动结果均写入结构化 `interest` 或 `learning` 日志。
+
 在 `data/settings.json` 中启用：
 
 ```json
@@ -489,6 +495,10 @@ CODEX_REMOTE_CONTACT_QQ_MEMORY_LIMIT=10
 CODEX_REMOTE_CONTACT_QQ_GROUP_MEMORY_LIMIT=200
 CODEX_REMOTE_CONTACT_QQ_SCOPE_LIMIT=500
 CODEX_REMOTE_CONTACT_QQ_PERSONA_MEMBER_LIMIT=500
+CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_SCOPE_MESSAGES=24
+CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_SCOPE_BOT_REPLIES=6
+CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_GENERATION_MESSAGES=80
+CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_GENERATION_BOT_REPLIES=20
 CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES=20971520
 CODEX_REMOTE_CONTACT_QQ_WEB_LOOKUP=1
 CODEX_REMOTE_CONTACT_QQ_WEB_TIMEOUT_MS=12000

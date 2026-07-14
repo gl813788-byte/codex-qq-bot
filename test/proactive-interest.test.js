@@ -327,6 +327,47 @@ test("uses per-group learned proactive intervals supplied by the runtime", async
   assert.equal(second.judgeEveryMinutes, 1);
 });
 
+test("persona keyword immediately triggers one contextual judge with all interest signals combined", async () => {
+  const state = proactiveState(1500, { judgeEveryMessages: 20, judgeEveryMinutes: 5 });
+  let requestBody;
+  const result = await shouldProactivelyReplyToQq({ ...event, text: "小星看看这个编程问题" }, state, {
+    openRouterApiKey: "configured-for-test",
+    interestKeywordMatch: { matched: true, keywords: ["小星", "编程"], nameMatched: true },
+    relationshipInterest: {
+      hasInteraction: true,
+      messagesSinceInteraction: 1,
+      minutesSinceInteraction: 0.5,
+      recency: 0.9,
+      interestBoost: 28,
+      unansweredBotStreak: 0,
+      interestMultiplier: 1
+    },
+    selfPersona: "Bot 全局人格名称：小星\n兴趣关键词：小星、编程\n完整兴趣描述：喜欢定位技术问题。",
+    interestSignals: {
+      currentAndQuotedKeywords: ["小星", "编程"],
+      recentContextKeywords: ["部署", "Node"],
+      cadence: { judgeEveryMessages: 1, judgeEveryMinutes: 1 }
+    },
+    recentMessages: [
+      { senderId: "100", text: "前面在聊 Node 部署" },
+      { senderId: "200", text: "小星也许会对这个感兴趣" }
+    ],
+    fetch: async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return jsonJudgeResponse({ shouldReply: true, interest: 80 });
+    }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.triggerReason, "persona_keyword");
+  assert.equal(result.consumedMessageCount, 1);
+  const input = JSON.parse(requestBody.messages[1].content);
+  assert.deepEqual(input.personaKeywordMatch.keywords, ["小星", "编程"]);
+  assert.deepEqual(input.combinedInterestSignals.recentContextKeywords, ["部署", "Node"]);
+  assert.equal(input.ruleAssessment.relationshipScore, 28);
+  assert.equal(input.ruleAssessment.personaKeywordScore, 16);
+  assert.equal(input.recentMessages.length, 2);
+});
+
 test("messages arriving during a judge stay in the next cycle", async () => {
   const state = proactiveState(1500, { judgeEveryMessages: 1, judgeEveryMinutes: 5 });
   let releaseJudge;

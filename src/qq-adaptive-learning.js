@@ -6,7 +6,7 @@ import {
   isQqStickerStyleMessage
 } from "./qq-human-behavior.js";
 
-const profileVersion = 2;
+const profileVersion = 3;
 const bootstrapVersion = 1;
 const hourCount = 24;
 const weekdayCount = 7;
@@ -15,6 +15,7 @@ const recentGapLimit = 64;
 const maxCounter = 1_000_000_000;
 const styleReviewIntervalMs = 24 * 60 * 60 * 1000;
 const coldProactiveCheckCooldownMs = 3 * 60 * 60 * 1000;
+const privateProactiveBaseCheckCooldownMs = 30 * 60 * 1000;
 const emojiPattern = /\p{Extended_Pictographic}/u;
 const formatterCache = new Map();
 
@@ -35,6 +36,8 @@ export function recordQqAdaptiveHumanMessage(group, member, event = {}, {
       groupLearning.coldProactiveAwaitingHuman = false;
     }
   }
+  clearUnansweredBotStreak(groupLearning, observedAt);
+  clearUnansweredBotStreak(memberLearning, observedAt);
   notePostBotFollowUp(groupLearning, memberLearning, event.senderId, observedAt);
   applyHumanSample(groupLearning, features, clock, observedAt, String(event.senderId), true);
   applyHumanSample(memberLearning, features, clock, observedAt, String(event.senderId), false);
@@ -62,6 +65,9 @@ export function recordQqAdaptiveBotReply(group, member, event = {}, reply = "", 
     learning.botReplyCharSum = boundedNumber(learning.botReplyCharSum + chars);
     learning.botTrackingStartedAt ||= observedAt.toISOString();
     learning.lastBotReplyAt = observedAt.toISOString();
+    learning.unansweredBotStreak = boundedNumber(
+      learning.unansweredBotStreak + Math.max(1, Math.min(6, bubbles))
+    );
   }
   groupLearning.lastBotTargetId = normalizeId(event.senderId);
   groupLearning.awaitingBotFollowUp = true;
@@ -136,8 +142,18 @@ export function getQqAdaptiveColdProactivePlan(signals = {}, {
   const latestActivityAt = Date.parse(lastActivityAt || "");
   const lastCheckAt = Date.parse(group.lastColdProactiveCheckAt || "");
   const idleHoursByActivity = { high: 4, typical: 6, low: 10, unknown: 8 };
-  const idleHoursRequired = idleHoursByActivity[group.activityLevel] || idleHoursByActivity.unknown;
+  const unansweredBotStreak = Math.max(
+    boundedNumber(group.unansweredBotStreak),
+    group.coldProactiveAwaitingHuman ? 1 : 0
+  );
+  const unansweredBackoff = Math.min(5, 1 + unansweredBotStreak * 0.75);
+  const idleHoursRequired = round((idleHoursByActivity[group.activityLevel] || idleHoursByActivity.unknown) * unansweredBackoff);
   const idleMsRequired = idleHoursRequired * 60 * 60 * 1000;
+  const socialHours = normalizeSocialHours(group.socialHours, { allowedStartHour, allowedEndHour });
+  const checkCooldownMs = Math.min(
+    72 * 60 * 60 * 1000,
+    coldProactiveCheckCooldownMs * (2 ** Math.min(5, unansweredBotStreak))
+  );
   const resolvedLastActivityAt = Number.isFinite(latestActivityAt)
     ? Math.max(lastHumanAt, latestActivityAt)
     : Math.max(lastHumanAt, Number.isFinite(lastBotAt) ? lastBotAt : lastHumanAt);
@@ -153,27 +169,28 @@ export function getQqAdaptiveColdProactivePlan(signals = {}, {
       : null,
     lastCheckAt: Number.isFinite(lastCheckAt) ? new Date(lastCheckAt).toISOString() : null,
     lastProactiveAt: group.lastColdProactiveAt || null,
-    awaitingHuman: Boolean(group.coldProactiveAwaitingHuman)
+    awaitingHuman: Boolean(group.coldProactiveAwaitingHuman),
+    unansweredBotStreak,
+    interestMultiplier: round(Math.max(0.08, 1 / (1 + unansweredBotStreak * 0.85))),
+    nextCheckAfterMs: checkCooldownMs,
+    socialHours
   };
 
   if (Number(group.sampleSize || 0) < 20) {
     return { ...base, eligible: false, reason: "learning_sample_low", nextCheckAt: null };
   }
-  if (!Number.isFinite(currentHour) || currentHour < allowedStartHour || currentHour >= allowedEndHour) {
+  if (!Number.isFinite(currentHour) || !socialHours.openHours.includes(currentHour)) {
     return { ...base, eligible: false, reason: "outside_social_hours", nextCheckAt: base.thresholdReachedAt };
   }
   if (!Number.isFinite(lastHumanAt)) {
     return { ...base, eligible: false, reason: "no_human_context", nextCheckAt: null };
   }
-  if (group.coldProactiveAwaitingHuman) {
-    return { ...base, eligible: false, reason: "awaiting_human_after_cold_proactive", nextCheckAt: null };
-  }
-  if (Number.isFinite(lastCheckAt) && currentAt.getTime() - lastCheckAt < coldProactiveCheckCooldownMs) {
+  if (Number.isFinite(lastCheckAt) && currentAt.getTime() - lastCheckAt < checkCooldownMs) {
     return {
       ...base,
       eligible: false,
       reason: "cold_check_cooldown",
-      nextCheckAt: new Date(lastCheckAt + coldProactiveCheckCooldownMs).toISOString()
+      nextCheckAt: new Date(lastCheckAt + checkCooldownMs).toISOString()
     };
   }
   if (idleMs == null || idleMs < idleMsRequired) {
@@ -192,8 +209,151 @@ export function getQqAdaptiveColdProactivePlan(signals = {}, {
     ...base,
     eligible: true,
     reason: "cold_group_time_due",
-    nextCheckAt: currentAt.toISOString(),
-    nextCheckAfterMs: coldProactiveCheckCooldownMs
+    nextCheckAt: currentAt.toISOString()
+  };
+}
+
+export function getQqAdaptivePrivateProactivePlan(signals = {}, {
+  now = Date.now(),
+  lastActivityAt
+} = {}) {
+  const contact = signals?.group || {};
+  const currentAt = resolveObservedAt({}, now);
+  const currentHour = Number(signals.currentHour);
+  const lastHumanAt = Date.parse(contact.lastMessageAt || "");
+  const lastBotAt = Date.parse(contact.lastBotReplyAt || "");
+  const latestAt = Date.parse(lastActivityAt || "");
+  const lastCheckAt = Date.parse(contact.lastPrivateProactiveCheckAt || "");
+  const lastProactiveAt = Date.parse(contact.lastPrivateProactiveAt || "");
+  const resolvedLastActivityAt = Number.isFinite(latestAt)
+    ? latestAt
+    : Math.max(lastHumanAt, Number.isFinite(lastBotAt) ? lastBotAt : lastHumanAt);
+  const idleMs = Number.isFinite(resolvedLastActivityAt)
+    ? Math.max(0, currentAt.getTime() - resolvedLastActivityAt)
+    : null;
+  const gapSeconds = Number(contact.medianGapSeconds || 0);
+  const dailyMessages = Number(contact.messagesPerActiveDay || 0);
+  const frequency = gapSeconds > 0 && gapSeconds <= 20 * 60 || dailyMessages >= 20
+    ? "high"
+    : gapSeconds > 0 && gapSeconds <= 4 * 60 * 60 || dailyMessages >= 5 ? "typical" : "low";
+  const shortDelayMinutes = { high: 3, typical: 8, low: 20 }[frequency];
+  const shortWindowHours = { high: 1.5, typical: 3, low: 6 }[frequency];
+  const longWindowHours = { high: 12, typical: 36, low: 72 }[frequency];
+  const unansweredBotStreak = boundedNumber(contact.unansweredBotStreak);
+  const backoff = 2 ** Math.min(6, unansweredBotStreak);
+  const socialHours = normalizeSocialHours(contact.socialHours, { allowedStartHour: 9, allowedEndHour: 23 });
+  const idleMinutes = idleMs == null ? null : idleMs / 60_000;
+  const idleHours = idleMs == null ? null : idleMs / 3_600_000;
+  const effectiveShortDelayMinutes = shortDelayMinutes * Math.min(16, backoff);
+  let phase = "middle";
+  let probability = 0.008;
+  let checkCooldownMs = 6 * 60 * 60 * 1000;
+  if (idleMinutes != null && idleMinutes <= shortWindowHours * 60) {
+    phase = "short";
+    const progress = clamp((idleMinutes - effectiveShortDelayMinutes) / Math.max(1, shortWindowHours * 60 - effectiveShortDelayMinutes), 0, 1);
+    probability = 0.34 - progress * 0.24;
+    checkCooldownMs = privateProactiveBaseCheckCooldownMs * (frequency === "high" ? 0.5 : frequency === "typical" ? 1 : 2);
+  } else if (idleHours != null && idleHours >= longWindowHours * Math.min(8, Math.max(1, backoff / 2))) {
+    phase = "long";
+    const progress = clamp((idleHours - longWindowHours) / Math.max(1, longWindowHours * 3), 0, 1);
+    probability = 0.08 + progress * 0.24;
+    checkCooldownMs = (frequency === "high" ? 4 : frequency === "typical" ? 8 : 12) * 60 * 60 * 1000;
+  }
+  const unansweredMultiplier = phase === "long"
+    ? Math.max(0.2, 1 / (1 + unansweredBotStreak * 0.9))
+    : Math.max(0.03, 1 / (1 + unansweredBotStreak * 1.4));
+  probability = round(clamp(probability * unansweredMultiplier * clamp(Number(contact.confidence || 0) + 0.35, 0.35, 1), 0.001, 0.45));
+  checkCooldownMs = Math.min(7 * 24 * 60 * 60 * 1000, checkCooldownMs * Math.min(16, backoff));
+  const base = {
+    phase,
+    frequency,
+    probability,
+    idleHours: idleHours == null ? null : round(idleHours),
+    lastActivityAt: Number.isFinite(resolvedLastActivityAt) ? new Date(resolvedLastActivityAt).toISOString() : null,
+    lastHumanAt: Number.isFinite(lastHumanAt) ? new Date(lastHumanAt).toISOString() : null,
+    lastBotAt: Number.isFinite(lastBotAt) ? new Date(lastBotAt).toISOString() : null,
+    lastCheckAt: Number.isFinite(lastCheckAt) ? new Date(lastCheckAt).toISOString() : null,
+    lastProactiveAt: Number.isFinite(lastProactiveAt) ? new Date(lastProactiveAt).toISOString() : null,
+    shortDelayMinutes: round(effectiveShortDelayMinutes),
+    shortWindowHours,
+    longWindowHours: round(longWindowHours * Math.min(8, Math.max(1, backoff / 2))),
+    unansweredBotStreak,
+    interestMultiplier: round(unansweredMultiplier),
+    socialHours,
+    nextCheckAfterMs: Math.round(checkCooldownMs)
+  };
+  if (Number(contact.sampleSize || 0) < 4) return { ...base, eligible: false, reason: "learning_sample_low", nextCheckAt: null };
+  if (!Number.isFinite(lastHumanAt)) return { ...base, eligible: false, reason: "no_human_context", nextCheckAt: null };
+  if (!Number.isFinite(currentHour) || !socialHours.openHours.includes(currentHour)) {
+    return { ...base, eligible: false, reason: "outside_social_hours", nextCheckAt: null };
+  }
+  if (idleMinutes == null || idleMinutes < effectiveShortDelayMinutes) {
+    return {
+      ...base,
+      eligible: false,
+      reason: "private_too_soon",
+      nextCheckAt: Number.isFinite(resolvedLastActivityAt)
+        ? new Date(resolvedLastActivityAt + effectiveShortDelayMinutes * 60_000).toISOString()
+        : null
+    };
+  }
+  if (Number.isFinite(lastCheckAt) && currentAt.getTime() - lastCheckAt < checkCooldownMs) {
+    return { ...base, eligible: false, reason: "private_check_cooldown", nextCheckAt: new Date(lastCheckAt + checkCooldownMs).toISOString() };
+  }
+  return { ...base, eligible: true, reason: `private_${phase}_candidate`, nextCheckAt: currentAt.toISOString() };
+}
+
+export function markQqAdaptivePrivateProactiveCheck(container, {
+  at = Date.now(),
+  sent = false
+} = {}) {
+  if (!container) return false;
+  const learning = ensureQqAdaptiveLearning(container);
+  const observedAt = resolveObservedAt({}, at).toISOString();
+  learning.lastPrivateProactiveCheckAt = observedAt;
+  if (sent) learning.lastPrivateProactiveAt = observedAt;
+  return true;
+}
+
+export function deriveQqLearnedSocialHours(hourCounts = [], sampleSize = 0, {
+  fallbackStartHour = 9,
+  fallbackEndHour = 23
+} = {}) {
+  const fallback = buildSocialHoursRange(fallbackStartHour, fallbackEndHour, "fallback");
+  const counts = normalizeCounterArray(hourCounts, hourCount);
+  const total = counts.reduce((sum, count) => sum + count, 0);
+  if (Number(sampleSize || total) < 20 || total <= 0) return fallback;
+
+  const peakHour = counts.indexOf(Math.max(...counts));
+  let best = null;
+  for (let length = 6; length <= 18; length += 1) {
+    let bestForLength = null;
+    for (let start = 0; start < hourCount; start += 1) {
+      const openHours = Array.from({ length }, (_, offset) => (start + offset) % hourCount);
+      const covered = openHours.reduce((sum, hour) => sum + counts[hour], 0);
+      const peakOffset = openHours.indexOf(peakHour);
+      const centerPenalty = peakOffset < 0 ? 100 : Math.abs(peakOffset - (length - 1) / 2);
+      const candidate = { start, length, openHours, covered, centerPenalty };
+      if (!bestForLength
+        || candidate.covered > bestForLength.covered
+        || candidate.covered === bestForLength.covered && candidate.centerPenalty < bestForLength.centerPenalty) {
+        bestForLength = candidate;
+      }
+    }
+    if (bestForLength?.covered / total >= 0.85) {
+      best = bestForLength;
+      break;
+    }
+  }
+  best ||= { start: fallback.startHour, length: fallback.openHours.length, openHours: fallback.openHours };
+  const endHour = (best.start + best.length) % hourCount;
+  return {
+    source: "learned",
+    startHour: best.start,
+    endHour,
+    wrapsMidnight: endHour <= best.start,
+    openHours: best.openHours,
+    label: formatSocialHoursLabel(best.start, endHour)
   };
 }
 
@@ -378,7 +538,10 @@ function createQqAdaptiveLearning() {
     styleBotSampleSize: 0,
     lastColdProactiveCheckAt: null,
     lastColdProactiveAt: null,
-    coldProactiveAwaitingHuman: false
+    coldProactiveAwaitingHuman: false,
+    unansweredBotStreak: 0,
+    lastPrivateProactiveCheckAt: null,
+    lastPrivateProactiveAt: null
   };
 }
 
@@ -390,7 +553,8 @@ function normalizeQqAdaptiveLearning(value) {
     "stickerCount", "imageCount", "emojiCount", "replyCount", "mentionCount", "questionCount",
     "directBotInteractionCount", "burstContinuationCount", "botReplyCount", "botStickerReplyCount",
     "botMultiBubbleReplyCount", "botReplyCharSum", "botReplyFollowUpCount",
-    "lastStyleReviewSampleCount", "lastStyleReviewBotReplyCount", "styleHumanSampleSize", "styleBotSampleSize"
+    "lastStyleReviewSampleCount", "lastStyleReviewBotReplyCount", "styleHumanSampleSize", "styleBotSampleSize",
+    "unansweredBotStreak"
   ]) base[key] = boundedNumber(source[key]);
   base.version = profileVersion;
   base.bootstrapVersion = clamp(Math.floor(Number(source.bootstrapVersion || 0)), 0, bootstrapVersion);
@@ -404,7 +568,7 @@ function normalizeQqAdaptiveLearning(value) {
     .map(Number)
     .filter((seconds) => Number.isFinite(seconds) && seconds >= 0 && seconds <= 86400)
     .slice(-recentGapLimit);
-  for (const key of ["firstSeenAt", "lastMessageAt", "lastBotReplyAt", "botTrackingStartedAt", "lastStyleReviewAt", "styleReviewWindowStartedAt", "lastColdProactiveCheckAt", "lastColdProactiveAt"]) {
+  for (const key of ["firstSeenAt", "lastMessageAt", "lastBotReplyAt", "botTrackingStartedAt", "lastStyleReviewAt", "styleReviewWindowStartedAt", "lastColdProactiveCheckAt", "lastColdProactiveAt", "lastPrivateProactiveCheckAt", "lastPrivateProactiveAt"]) {
     base[key] = validIsoDate(source[key]);
   }
   base.lastSenderId = normalizeId(source.lastSenderId);
@@ -455,6 +619,13 @@ function notePostBotFollowUp(groupLearning, memberLearning, senderId, observedAt
   increment(groupLearning, "botReplyFollowUpCount");
   if (groupLearning.lastBotTargetId === String(senderId)) increment(memberLearning, "botReplyFollowUpCount");
   groupLearning.awaitingBotFollowUp = false;
+}
+
+function clearUnansweredBotStreak(learning, observedAt) {
+  const lastBotAt = Date.parse(learning.lastBotReplyAt || "");
+  if (!Number.isFinite(lastBotAt) || observedAt.getTime() >= lastBotAt) {
+    learning.unansweredBotStreak = 0;
+  }
 }
 
 function touchTimeBucket(learning, clock) {
@@ -512,6 +683,7 @@ function summarizeLearning(learning, currentHour, { confidenceAt }) {
     gapSampleSize: learning.recentGapSeconds.length,
     medianGapSeconds: quantile(learning.recentGapSeconds, 0.5),
     activeHours,
+    socialHours: deriveQqLearnedSocialHours(learning.hourCounts, samples),
     activeDays: learning.activeDays.length,
     messagesPerActiveDay: learning.activeDays.length > 0 ? round(samples / learning.activeDays.length) : 0,
     activityLevel,
@@ -536,7 +708,10 @@ function summarizeLearning(learning, currentHour, { confidenceAt }) {
     lastBotReplyAt: learning.lastBotReplyAt,
     lastColdProactiveCheckAt: learning.lastColdProactiveCheckAt,
     lastColdProactiveAt: learning.lastColdProactiveAt,
-    coldProactiveAwaitingHuman: learning.coldProactiveAwaitingHuman
+    coldProactiveAwaitingHuman: learning.coldProactiveAwaitingHuman,
+    unansweredBotStreak: learning.unansweredBotStreak,
+    lastPrivateProactiveCheckAt: learning.lastPrivateProactiveCheckAt,
+    lastPrivateProactiveAt: learning.lastPrivateProactiveAt
   };
 }
 
@@ -575,6 +750,48 @@ function compactGuidance(value) {
       return true;
     })
     .slice(0, 5);
+}
+
+function normalizeSocialHours(value, { allowedStartHour, allowedEndHour }) {
+  const openHours = (Array.isArray(value?.openHours) ? value.openHours : [])
+    .map(Number)
+    .filter((hour) => Number.isInteger(hour) && hour >= 0 && hour < 24);
+  if (openHours.length > 0) {
+    const startHour = Number.isInteger(Number(value.startHour)) ? Number(value.startHour) : openHours[0];
+    const endHour = Number.isInteger(Number(value.endHour)) ? Number(value.endHour) : (openHours.at(-1) + 1) % 24;
+    return {
+      source: value.source === "learned" ? "learned" : "fallback",
+      startHour,
+      endHour,
+      wrapsMidnight: Boolean(value.wrapsMidnight ?? endHour <= startHour),
+      openHours: [...new Set(openHours)],
+      label: String(value.label || formatSocialHoursLabel(startHour, endHour))
+    };
+  }
+  return buildSocialHoursRange(allowedStartHour, allowedEndHour, "fallback");
+}
+
+function buildSocialHoursRange(startValue, endValue, source) {
+  const startHour = clamp(Math.floor(Number(startValue)), 0, 23);
+  const endHour = clamp(Math.floor(Number(endValue)), 0, 24) % 24;
+  const openHours = [];
+  let hour = startHour;
+  do {
+    openHours.push(hour);
+    hour = (hour + 1) % 24;
+  } while (hour !== endHour && openHours.length < 24);
+  return {
+    source,
+    startHour,
+    endHour,
+    wrapsMidnight: endHour <= startHour,
+    openHours,
+    label: formatSocialHoursLabel(startHour, endHour)
+  };
+}
+
+function formatSocialHoursLabel(startHour, endHour) {
+  return `${String(startHour).padStart(2, "0")}:00–${String(endHour).padStart(2, "0")}:00`;
 }
 
 function getClockParts(date, requestedTimeZone) {

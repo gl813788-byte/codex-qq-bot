@@ -141,9 +141,11 @@ export function buildQqHumanBehaviorPlan(event = {}, intent = {}, style = {}, { 
   let maxSentences = privateChat ? 2 : 1;
   let compact = true;
 
-  if (event.qqColdProactive) {
-    mode = "cold_proactive";
-    goal = "结合最近聊天自然发起一句新话题；没有具体、合时宜的话就保持沉默";
+  if (event.qqColdProactive || event.qqPrivateProactive) {
+    mode = event.qqPrivateProactive ? "private_proactive" : "cold_proactive";
+    goal = event.qqPrivateProactive
+      ? "结合这段私聊的频率、最近话题和自己的兴趣自然联系一次；没有具体内容就保持沉默"
+      : "结合最近聊天和自己的兴趣自然发起一句新话题；没有具体内容就保持沉默";
     maxChars = Math.min(Number(style.casualMax || 28), 32);
     maxSentences = 1;
   } else if (barePing) {
@@ -267,7 +269,7 @@ export function formatQqHumanBehaviorContext(style = {}, plan = {}, { proactive 
     "- 对方只是在分享、感叹或发图时，先给具体反应；没有求建议就不要自动分析、科普、安慰教程或列能力清单。",
     "- 可以自然用短句、语气词、问号或一个合适表情，但不要强塞网络黑话、错别字、口癖或装作真人。被问身份时仍如实说是 QQ 上的 AI 助手。",
     proactive
-      ? "- 这是兴趣触发。如果话题已经转走、正在两人对话、你只能重复别人或没有新增价值，只输出 [[qq_silent]]；被 @ 或被回复时不能用这个标记。"
+      ? "- 这是兴趣触发。优先判断话题是否符合自己的全局兴趣、是否真有具体想说的内容；如果只能重复、催回复或没有新增价值，只输出 [[qq_silent]]。被 @ 或被回复时不能用这个标记。"
       : null
   ].filter(Boolean).join("\n");
 }
