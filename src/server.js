@@ -88,6 +88,7 @@ import { createWebSearch, formatWebSearchProviderName } from "./web-search.js";
 import { isSupportedImageContentType, readResponseJson, writeResponseBodyToFile } from "./bounded-stream.js";
 import { runJsonProcess, runProcess } from "./process-runner.js";
 import { createDashboardAssetHandler } from "./dashboard-assets.js";
+import { selectLanAccessAddresses } from "./network-access.js";
 import { requestHasValidToken } from "./request-auth.js";
 import {
   buildOneBotPokeAttempts,
@@ -1503,14 +1504,7 @@ function isTrustedLoopbackRequest(req) {
 
 function buildLanAccessUrls() {
   if (!isLanAccessEnabled()) return [];
-  const addresses = new Set();
-  for (const entries of Object.values(networkInterfaces())) {
-    for (const entry of entries || []) {
-      if (entry?.family === "IPv4" && !entry.internal && entry.address) addresses.add(entry.address);
-    }
-  }
-  return [...addresses]
-    .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }))
+  return selectLanAccessAddresses(networkInterfaces())
     .map((address) => `http://${address}:${hubPort}`);
 }
 
