@@ -67,6 +67,23 @@ test("supports HEAD, conditional requests, and in-memory asset caching", async (
   assert.equal(loads, 1);
 });
 
+test("serves the generated dashboard hero with its optimized image type", async () => {
+  let loadedPath = "";
+  const handler = createDashboardAssetHandler({
+    directory: "/virtual/dashboard",
+    loadAsset: async (path) => {
+      loadedPath = path;
+      return Buffer.from("webp");
+    }
+  });
+  const response = createResponse();
+
+  assert.equal(await handler({ method: "GET", url: "/images/nexus-core.webp", headers: {} }, response), true);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["content-type"], "image/webp");
+  assert.equal(loadedPath, "/virtual/dashboard/images/nexus-core.webp");
+});
+
 test("publishes the expected stable browser routes", () => {
-  assert.deepEqual(dashboardAssetRoutes, ["/", "/dashboard", "/client.css", "/client.js"]);
+  assert.deepEqual(dashboardAssetRoutes, ["/", "/dashboard", "/client.css", "/client.js", "/images/nexus-core.webp"]);
 });
