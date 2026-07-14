@@ -4,7 +4,7 @@ const validViews = new Set(["overview", "channels", "memory", "activity", "setti
 
 const translations = {
   zh: {
-    mainNavigation: "主导航", mobileNavigation: "移动端导航", brandHome: "Nexus 首页", runtimeSummary: "运行摘要", navOverview: "总览", navChannels: "通道", navMemory: "记忆", navActivity: "活动与日志", navActivityShort: "日志", navSettings: "设置",
+    mainNavigation: "主导航", mobileNavigation: "移动端导航", brandHome: "Nexus 首页", runtimeSummary: "运行摘要", runtimeBrief: "运行建议", skipToContent: "跳到主要内容", openQuickActions: "打开快速操作", quickActions: "快速操作", searchActions: "搜索页面或操作", commandCenter: "COMMAND CENTER", commandHint: "↑↓ 选择 · Enter 执行", navOverview: "总览", navChannels: "通道", navMemory: "记忆", navActivity: "活动与日志", navActivityShort: "日志", navSettings: "设置",
     connecting: "正在连接", workspace: "工作台", overviewTitle: "运行总览", channelsTitle: "消息通道", memoryTitle: "记忆中心", activityTitle: "活动与日志", settingsTitle: "偏好设置",
     waitingSync: "等待同步", refreshCurrent: "刷新当前页面", toggleTheme: "切换主题", hubUnavailable: "Hub 暂时不可用", offlineHint: "请确认本地服务已启动。", retry: "重试",
     heroTitle: "你的本地智能通讯中枢", heroBody: "在一个安静、清晰的界面里掌握 QQ、iMessage、Codex 和记忆系统。", manageChannels: "管理通道", openApi: "打开 API",
@@ -17,7 +17,7 @@ const translations = {
     preferences: "PREFERENCES", settingsHeading: "让控制台适合你的节奏", settingsBody: "外观和刷新偏好只保存在当前设备，不会影响机器人运行配置。", appearance: "外观", appearanceHint: "跟随系统，或固定使用明亮 / 深色主题。", theme: "主题", system: "系统", light: "明亮", dark: "深色", language: "界面语言", languageHint: "完整切换控制台文案和时间显示。", autoRefresh: "自动刷新", autoRefreshHint: "页面隐藏时会自动暂停，减少无意义开销。", refreshInterval: "刷新间隔", hubEndpoint: "Hub 地址", hubEndpointHint: "控制台默认仅连接本机回环地址。", copy: "复制", rawState: "原始状态", aboutBody: "QQ / OneBot、iMessage 与 Codex CLI 的本地优先通讯中枢。",
     confirmAction: "确认操作", cancel: "取消", confirm: "确认", logDetail: "日志详情", close: "关闭", copyJson: "复制 JSON", done: "完成",
     hubOnline: "Hub 在线", hubOffline: "Hub 离线", syncedNow: "刚刚同步", syncedAt: "同步于 {time}", online: "在线", offline: "离线", enabled: "已启用", disabled: "已停用", running: "运行中", idle: "空闲", healthy: "正常", attention: "注意", staleData: "健康信息已过期：{value}",
-    uptime: "运行时长", serviceOnline: "在线服务", activeTasks: "活动任务", memoryEntries: "记忆条目", active: "活动", pending: "排队", concurrency: "并发上限", groups: "群", contacts: "联系人",
+    uptime: "运行时长", serviceOnline: "在线服务", activeTasks: "活动任务", memoryEntries: "记忆条目", active: "活动", pending: "排队", concurrency: "并发上限", groups: "群", contacts: "联系人", systemReady: "系统已就绪", systemReadyBody: "关键服务运行正常，可以随时接收和处理消息。", systemAttention: "有配置项需要留意", systemAttentionBody: "{count} 个服务当前停用或尚未配置，不影响其余通道运行。", systemCritical: "检测到运行异常", systemCriticalBody: "{count} 个服务需要处理，建议先查看服务健康详情。", healthyServices: "{count} 个服务正常", issuesCount: "{count} 项需处理", inspectHealth: "查看健康详情", noMatchingActions: "没有匹配的操作", actionRefresh: "刷新当前视图", actionRefreshHint: "重新同步当前页面的最新数据", actionHealth: "检查服务健康", actionHealthHint: "立即重新探测本地服务与通道", actionTheme: "切换明暗主题", actionThemeHint: "在明亮与深色外观之间切换", actionApi: "查看原始状态", actionApiHint: "打开 Hub 返回的原始 JSON 状态", actionAddGroup: "添加 QQ 群", actionAddGroupHint: "前往通道页并定位群白名单输入框", actionAddContact: "添加可信联系人", actionAddContactHint: "前往通道页并定位联系人输入框", actionOverviewHint: "查看核心指标、额度与服务健康", actionChannelsHint: "管理通道、白名单和可信联系人", actionMemoryHint: "搜索和清理本地上下文记忆", actionLogsHint: "筛选结构化日志并追踪运行问题", actionSettingsHint: "调整主题、语言和自动刷新",
     qqChannelHint: "白名单群与私聊入口", imessageChannelHint: "可信联系人私聊入口", groupsAllowed: "{count} 个白名单群", contactsTrusted: "{count} 位可信联系人", recentEventsCount: "{count} 条最近事件",
     quotaUnavailable: "暂无可用额度快照", fiveHours: "5 小时", sevenDays: "7 天", remaining: "剩余 {value}%", resetsAt: "{time} 重置", recordedAt: "记录于 {time}", noReset: "时间未知",
     oneBot: "OneBot", codexCli: "Codex CLI", webLookup: "联网查询", qqChannel: "QQ 通道", pathReady: "命令路径可用", pathMissing: "命令路径缺失", neverRun: "尚未运行", lastRun: "上次运行 {time}", trustedCount: "{count} 位可信联系人", provider: "提供方 {value}", lastQuery: "查询：{value}", noQuery: "尚无查询", model: "模型 {value}", reasoning: "推理 {value}", queueState: "活动 {active} · 排队 {pending}/{max}", noRecentActivity: "还没有最近活动。",
@@ -28,7 +28,7 @@ const translations = {
     runtimeModel: "当前模型", runtimeReasoning: "推理等级", runtimeStarted: "启动时间", apiTokenPrompt: "此 Hub 已启用 API Token。请输入 Token（只保存在当前标签页）：", authRequired: "需要 API Token 才能连接。", requestFailed: "请求失败", networkError: "无法连接到本地 Hub。", copyFailed: "复制失败，请手动选择内容。", unknown: "未知"
   },
   en: {
-    mainNavigation: "Main navigation", mobileNavigation: "Mobile navigation", brandHome: "Nexus home", runtimeSummary: "Runtime summary", navOverview: "Overview", navChannels: "Channels", navMemory: "Memory", navActivity: "Activity & Logs", navActivityShort: "Logs", navSettings: "Settings",
+    mainNavigation: "Main navigation", mobileNavigation: "Mobile navigation", brandHome: "Nexus home", runtimeSummary: "Runtime summary", runtimeBrief: "Runtime guidance", skipToContent: "Skip to main content", openQuickActions: "Open quick actions", quickActions: "Quick actions", searchActions: "Search pages or actions", commandCenter: "COMMAND CENTER", commandHint: "↑↓ select · Enter run", navOverview: "Overview", navChannels: "Channels", navMemory: "Memory", navActivity: "Activity & Logs", navActivityShort: "Logs", navSettings: "Settings",
     connecting: "Connecting", workspace: "Workspace", overviewTitle: "Runtime Overview", channelsTitle: "Message Channels", memoryTitle: "Memory Center", activityTitle: "Activity & Logs", settingsTitle: "Preferences",
     waitingSync: "Waiting to sync", refreshCurrent: "Refresh current view", toggleTheme: "Toggle theme", hubUnavailable: "Hub is unavailable", offlineHint: "Make sure the local service is running.", retry: "Retry",
     heroTitle: "Your local intelligent communication hub", heroBody: "A calm, clear place to manage QQ, iMessage, Codex, and memory.", manageChannels: "Manage channels", openApi: "Open API",
@@ -41,7 +41,7 @@ const translations = {
     preferences: "PREFERENCES", settingsHeading: "Make the console fit your rhythm", settingsBody: "Appearance and refresh preferences stay on this device and do not alter bot runtime configuration.", appearance: "Appearance", appearanceHint: "Follow the system or lock light / dark mode.", theme: "Theme", system: "System", light: "Light", dark: "Dark", language: "Language", languageHint: "Switch all console copy and time formatting.", autoRefresh: "Auto refresh", autoRefreshHint: "Automatically pauses while the page is hidden.", refreshInterval: "Refresh interval", hubEndpoint: "Hub endpoint", hubEndpointHint: "The console connects to loopback by default.", copy: "Copy", rawState: "Raw state", aboutBody: "A local-first QQ / OneBot, iMessage, and Codex CLI communication hub.",
     confirmAction: "Confirm action", cancel: "Cancel", confirm: "Confirm", logDetail: "Log detail", close: "Close", copyJson: "Copy JSON", done: "Done",
     hubOnline: "Hub online", hubOffline: "Hub offline", syncedNow: "Synced just now", syncedAt: "Synced at {time}", online: "Online", offline: "Offline", enabled: "Enabled", disabled: "Disabled", running: "Running", idle: "Idle", healthy: "Healthy", attention: "Check", staleData: "Health data is stale: {value}",
-    uptime: "Uptime", serviceOnline: "Services online", activeTasks: "Active tasks", memoryEntries: "Memory entries", active: "Active", pending: "Pending", concurrency: "Concurrency", groups: "Groups", contacts: "Contacts",
+    uptime: "Uptime", serviceOnline: "Services online", activeTasks: "Active tasks", memoryEntries: "Memory entries", active: "Active", pending: "Pending", concurrency: "Concurrency", groups: "Groups", contacts: "Contacts", systemReady: "System ready", systemReadyBody: "Critical services are healthy and ready to receive messages.", systemAttention: "A few settings need attention", systemAttentionBody: "{count} services are disabled or not configured; other channels remain available.", systemCritical: "Runtime issue detected", systemCriticalBody: "{count} services need attention. Check service health first.", healthyServices: "{count} services healthy", issuesCount: "{count} to review", inspectHealth: "Inspect health", noMatchingActions: "No matching actions", actionRefresh: "Refresh current view", actionRefreshHint: "Sync the latest data for the current page", actionHealth: "Check service health", actionHealthHint: "Probe local services and channels now", actionTheme: "Toggle color theme", actionThemeHint: "Switch between light and dark appearance", actionApi: "View raw state", actionApiHint: "Open the raw JSON returned by the Hub", actionAddGroup: "Add QQ group", actionAddGroupHint: "Open Channels and focus the group allowlist field", actionAddContact: "Add trusted contact", actionAddContactHint: "Open Channels and focus the contact field", actionOverviewHint: "Review core metrics, usage, and service health", actionChannelsHint: "Manage channels, allowlists, and trusted contacts", actionMemoryHint: "Search and clear local contextual memory", actionLogsHint: "Filter structured logs and trace runtime issues", actionSettingsHint: "Adjust theme, language, and auto refresh",
     qqChannelHint: "Allowlisted groups and private chats", imessageChannelHint: "Trusted-contact private messages", groupsAllowed: "{count} allowlisted groups", contactsTrusted: "{count} trusted contacts", recentEventsCount: "{count} recent events",
     quotaUnavailable: "No usage snapshot available", fiveHours: "5 hours", sevenDays: "7 days", remaining: "{value}% remaining", resetsAt: "Resets {time}", recordedAt: "Recorded {time}", noReset: "Unknown reset",
     oneBot: "OneBot", codexCli: "Codex CLI", webLookup: "Web lookup", qqChannel: "QQ channel", pathReady: "Command path ready", pathMissing: "Command path missing", neverRun: "Not run yet", lastRun: "Last run {time}", trustedCount: "{count} trusted contacts", provider: "Provider {value}", lastQuery: "Query: {value}", noQuery: "No query yet", model: "Model {value}", reasoning: "Reasoning {value}", queueState: "Active {active} · pending {pending}/{max}", noRecentActivity: "No recent activity yet.",
@@ -73,7 +73,9 @@ const app = {
   authPromptPromise: null,
   lastFetch: { state: 0, maintenance: 0, memory: 0, logs: 0 },
   logCategories: new Set(),
-  selectedLog: null
+  selectedLog: null,
+  commandIndex: 0,
+  lastSyncAt: 0
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -94,6 +96,7 @@ function applyI18n() {
   $("#languageSelect").value = app.language;
   updatePageIdentity();
   renderAll();
+  if ($("#commandDialog").open) renderCommands();
 }
 
 function setTheme(theme) {
@@ -285,6 +288,8 @@ function setSync(status, detail = "") {
   $("#syncText").textContent = text;
   root.title = detail;
   $("#refreshButton").classList.toggle("loading", status === "loading");
+  $("#refreshButton").setAttribute("aria-busy", String(status === "loading"));
+  if (status === "ok") app.lastSyncAt = Date.now();
 }
 
 function setConnection(ok, reason = "") {
@@ -310,6 +315,7 @@ function renderState() {
   $("#qqToggle").checked = Boolean(state.channels?.qq);
   $("#imessageToggle").checked = Boolean(state.channels?.imessage);
   renderOverviewStats();
+  renderOverviewBrief();
   renderQuickChannels();
   renderChannelSettings();
   renderEvents();
@@ -320,13 +326,15 @@ function renderState() {
 function renderOverviewStats() {
   const state = app.state || {};
   const maintenance = app.maintenance || {};
-  const onlineServices = [
+  const trackedServices = [
     maintenance.oneBot?.ok,
     maintenance.codex?.pathExists && maintenance.codex?.lastOk !== false,
     maintenance.channels?.qq && maintenance.oneBot?.ok,
     maintenance.channels?.imessage && maintenance.imessage?.status !== "error",
+    maintenance.remoteExecution?.enabled && !maintenance.remoteExecution?.lastError,
     maintenance.webLookup?.enabled && maintenance.webLookup?.lastOk !== false
-  ].filter(Boolean).length;
+  ];
+  const onlineServices = trackedServices.filter(Boolean).length;
   const codexActive = Number(maintenance.codex?.queue?.active || 0);
   const qqActive = Number(maintenance.qq?.activeGenerations || 0);
   const activeTasks = Math.max(codexActive, qqActive, maintenance.remoteExecution?.busy ? 1 : 0);
@@ -342,7 +350,7 @@ function renderOverviewStats() {
   const uptime = formatDuration(Date.now() - Date.parse(maintenance.startedAt || ""));
   const stats = [
     { value: uptime || "—", label: t("uptime"), kind: "", icon: icons.clock },
-    { value: `${onlineServices}/5`, label: t("serviceOnline"), kind: "sky", icon: icons.pulse },
+    { value: `${onlineServices}/${trackedServices.length}`, label: t("serviceOnline"), kind: "sky", icon: icons.pulse },
     { value: formatNumber(activeTasks), label: t("activeTasks"), kind: "violet", icon: icons.activity },
     { value: formatNumber(memoryTotal), label: t("memoryEntries"), kind: "warn", icon: icons.memory }
   ];
@@ -357,6 +365,38 @@ function statCard({ value, label, kind = "", icon = "" }) {
   return `<article class="stat-card ${kind}"><div class="stat-head"><span class="stat-icon">${icon}</span></div><strong>${escapeHtml(value)}</strong><p>${escapeHtml(label)}</p></article>`;
 }
 
+function renderOverviewBrief() {
+  if (!app.maintenance) return;
+  const h = app.maintenance;
+  const services = [
+    { state: h.oneBot?.ok ? "ok" : "bad" },
+    { state: h.codex?.pathExists && h.codex?.lastOk !== false ? "ok" : "bad" },
+    { state: !h.channels?.imessage ? "off" : h.imessage?.status === "error" ? "bad" : "ok" },
+    { state: !h.remoteExecution?.enabled ? "off" : h.remoteExecution?.busy ? "ok" : "ok" },
+    { state: h.channels?.qq ? "ok" : "off" },
+    { state: !h.webLookup?.enabled ? "off" : h.webLookup?.lastOk === false ? "bad" : "ok" }
+  ];
+  const critical = services.filter((service) => service.state === "bad").length;
+  const attention = services.filter((service) => service.state === "off").length;
+  const healthy = services.filter((service) => service.state === "ok").length;
+  const mode = critical ? "critical" : attention ? "attention" : "ready";
+  const title = mode === "critical" ? t("systemCritical") : mode === "attention" ? t("systemAttention") : t("systemReady");
+  const body = mode === "critical" ? t("systemCriticalBody", { count: critical }) : mode === "attention" ? t("systemAttentionBody", { count: attention }) : t("systemReadyBody");
+  const issueCount = critical + attention;
+  const root = $("#overviewBrief");
+  root.className = `overview-brief ${mode === "ready" ? "" : mode}`;
+  root.innerHTML = `
+    <div class="brief-main">
+      <span class="brief-icon">${mode === "ready" ? icons.shieldCheck : icons.warning}</span>
+      <div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(body)}</p></div>
+    </div>
+    <div class="brief-signals">
+      <span class="brief-signal">${escapeHtml(t("healthyServices", { count: healthy }))}</span>
+      ${issueCount ? `<span class="brief-signal ${critical ? "bad" : "warn"}">${escapeHtml(t("issuesCount", { count: issueCount }))}</span>` : ""}
+      <button class="button compact ghost" type="button" data-scroll-health>${escapeHtml(t("inspectHealth"))}</button>
+    </div>`;
+}
+
 function renderQuickChannels() {
   const state = app.state || {};
   const channels = [
@@ -365,7 +405,7 @@ function renderQuickChannels() {
   ];
   $("#quickChannels").innerHTML = channels.map((channel) => `
     <article class="quick-channel">
-      <span class="channel-avatar ${channel.id}">${channel.id === "qq" ? "Q" : "i"}</span>
+      <span class="channel-avatar ${channel.id}">${channel.id === "qq" ? icons.qq : icons.imessage}</span>
       <div><h3>${channel.name}</h3><p>${escapeHtml(channel.hint)} · ${escapeHtml(channel.detail)}</p></div>
       <span class="channel-state"><span class="status-dot ${channel.enabled ? "" : "pending"}"></span>${escapeHtml(channel.enabled ? t("enabled") : t("disabled"))}</span>
     </article>`).join("");
@@ -374,6 +414,7 @@ function renderQuickChannels() {
 function renderMaintenance() {
   if (!app.maintenance) return;
   renderOverviewStats();
+  renderOverviewBrief();
   renderHealthCards();
   renderQuota();
   renderChannelSettings();
@@ -384,17 +425,17 @@ function renderHealthCards() {
   const h = app.maintenance || {};
   const queue = h.codex?.queue || {};
   const cards = [
-    { name: t("oneBot"), state: h.oneBot?.ok ? "ok" : "bad", lines: [h.oneBot?.nickname || null, h.oneBot?.selfId ? `QQ ${h.oneBot.selfId}` : null, h.oneBot?.lastError] },
-    { name: t("codexCli"), state: h.codex?.pathExists && h.codex?.lastOk !== false ? "ok" : "bad", lines: [h.codex?.pathExists ? t("pathReady") : t("pathMissing"), h.codex?.lastRunAt ? t("lastRun", { time: formatTime(h.codex.lastRunAt) }) : t("neverRun"), t("queueState", { active: queue.active || 0, pending: queue.pending || 0, max: queue.maxPending ?? "∞" }), h.codex?.lastError] },
-    { name: "iMessage", state: !h.channels?.imessage ? "off" : h.imessage?.status === "error" ? "bad" : "ok", lines: [h.channels?.imessage ? t("enabled") : t("disabled"), t("trustedCount", { count: h.imessage?.trustedHandles || 0 }), h.imessage?.lastError] },
-    { name: t("remoteExecution"), state: !h.remoteExecution?.enabled ? "off" : h.remoteExecution?.busy ? "busy" : "ok", lines: [h.remoteExecution?.enabled ? t("enabled") : t("disabled"), t("model", { value: h.remoteExecution?.model || t("unknown") }), t("reasoning", { value: h.remoteExecution?.reasoningEffort || t("unknown") })] },
-    { name: t("qqChannel"), state: h.channels?.qq ? "ok" : "off", lines: [h.channels?.qq ? t("enabled") : t("disabled"), t("groupsAllowed", { count: h.qq?.allowedGroups || 0 }), t("recentEventsCount", { count: h.qq?.recentEvents || 0 })] },
-    { name: t("webLookup"), state: !h.webLookup?.enabled ? "off" : h.webLookup?.lastOk === false ? "bad" : "ok", lines: [h.webLookup?.enabled ? t("enabled") : t("disabled"), t("provider", { value: h.webLookup?.effectiveProvider || t("unknown") }), h.webLookup?.lastQuery ? t("lastQuery", { value: h.webLookup.lastQuery }) : t("noQuery"), h.webLookup?.lastError] }
+    { name: t("oneBot"), icon: icons.oneBot, state: h.oneBot?.ok ? "ok" : "bad", lines: [h.oneBot?.nickname || null, h.oneBot?.selfId ? `QQ ${h.oneBot.selfId}` : null, h.oneBot?.lastError] },
+    { name: t("codexCli"), icon: icons.codex, state: h.codex?.pathExists && h.codex?.lastOk !== false ? "ok" : "bad", lines: [h.codex?.pathExists ? t("pathReady") : t("pathMissing"), h.codex?.lastRunAt ? t("lastRun", { time: formatTime(h.codex.lastRunAt) }) : t("neverRun"), t("queueState", { active: queue.active || 0, pending: queue.pending || 0, max: queue.maxPending ?? "∞" }), h.codex?.lastError] },
+    { name: "iMessage", icon: icons.imessage, state: !h.channels?.imessage ? "off" : h.imessage?.status === "error" ? "bad" : "ok", lines: [h.channels?.imessage ? t("enabled") : t("disabled"), t("trustedCount", { count: h.imessage?.trustedHandles || 0 }), h.imessage?.lastError] },
+    { name: t("remoteExecution"), icon: icons.remote, state: !h.remoteExecution?.enabled ? "off" : h.remoteExecution?.busy ? "busy" : "ok", lines: [h.remoteExecution?.enabled ? t("enabled") : t("disabled"), t("model", { value: h.remoteExecution?.model || t("unknown") }), t("reasoning", { value: h.remoteExecution?.reasoningEffort || t("unknown") })] },
+    { name: t("qqChannel"), icon: icons.qq, state: h.channels?.qq ? "ok" : "off", lines: [h.channels?.qq ? t("enabled") : t("disabled"), t("groupsAllowed", { count: h.qq?.allowedGroups || 0 }), t("recentEventsCount", { count: h.qq?.recentEvents || 0 })] },
+    { name: t("webLookup"), icon: icons.globe, state: !h.webLookup?.enabled ? "off" : h.webLookup?.lastOk === false ? "bad" : "ok", lines: [h.webLookup?.enabled ? t("enabled") : t("disabled"), t("provider", { value: h.webLookup?.effectiveProvider || t("unknown") }), h.webLookup?.lastQuery ? t("lastQuery", { value: h.webLookup.lastQuery }) : t("noQuery"), h.webLookup?.lastError] }
   ];
   $("#healthGrid").classList.remove("stale");
   $("#healthGrid").innerHTML = cards.map((card) => `
     <article class="health-card ${card.state}">
-      <div class="health-title"><div><span class="status-dot ${card.state === "bad" ? "bad" : card.state === "ok" ? "" : "pending"}"></span><h3>${escapeHtml(card.name)}</h3></div><span class="health-badge">${escapeHtml(card.state === "ok" ? t("healthy") : card.state === "bad" ? t("attention") : card.state === "busy" ? t("running") : t("disabled"))}</span></div>
+      <div class="health-title"><div><span class="health-service-icon">${card.icon}</span><h3>${escapeHtml(card.name)}</h3></div><span class="health-badge">${escapeHtml(card.state === "ok" ? t("healthy") : card.state === "bad" ? t("attention") : card.state === "busy" ? t("running") : t("disabled"))}</span></div>
       <div class="health-lines">${card.lines.filter(Boolean).slice(0, 4).map((line) => `<p>${escapeHtml(line)}</p>`).join("")}</div>
     </article>`).join("");
 }
@@ -471,7 +512,7 @@ function renderRecentTimeline() {
   const qq = (app.state.qq?.events || []).map((record) => ({ kind: "qq", at: record.receivedAt, title: record.event?.senderLabel || record.event?.senderName || "QQ", text: record.reply || record.event?.text || "" }));
   const imessage = (app.state.imessage?.events || []).map((record) => ({ kind: "imessage", at: record.receivedAt, title: record.event?.handle || "iMessage", text: record.reply || record.event?.text || "" }));
   const rows = [...qq, ...imessage].sort((a, b) => Date.parse(b.at || "") - Date.parse(a.at || "")).slice(0, 7);
-  $("#recentTimeline").innerHTML = rows.length ? rows.map((row) => `<article class="timeline-item"><span class="timeline-avatar ${row.kind}">${row.kind === "qq" ? "Q" : "i"}</span><div class="timeline-copy"><strong>${escapeHtml(row.title)}</strong><p>${escapeHtml(row.text || "—")}</p></div><time class="timeline-time">${escapeHtml(formatRelative(row.at))}</time></article>`).join("") : emptyState(t("noRecentActivity"));
+  $("#recentTimeline").innerHTML = rows.length ? rows.map((row) => `<article class="timeline-item"><span class="timeline-avatar ${row.kind}">${row.kind === "qq" ? icons.qq : icons.imessage}</span><div class="timeline-copy"><strong>${escapeHtml(row.title)}</strong><p>${escapeHtml(row.text || "—")}</p></div><time class="timeline-time">${escapeHtml(formatRelative(row.at))}</time></article>`).join("") : emptyState(t("noRecentActivity"));
 }
 
 function renderMemory() {
@@ -739,14 +780,118 @@ const icons = {
   activity: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V9m5 9V5m5 13v-7m5 7V3"/></svg>',
   memory: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7c0-2 3-3 7-3s7 1 7 3-3 3-7 3-7-1-7-3Zm0 0v5c0 2 3 3 7 3s7-1 7-3V7m-14 5v5c0 2 3 3 7 3s7-1 7-3v-5"/></svg>',
   logs: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M5 10h14M5 15h9M5 20h6"/></svg>',
-  trace: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M8 6h4a3 3 0 0 1 3 3v6m-6 3h7"/></svg>'
+  trace: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M8 6h4a3 3 0 0 1 3 3v6m-6 3h7"/></svg>',
+  shieldCheck: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 6v5c0 4.8-3.1 8.3-8 10-4.9-1.7-8-5.2-8-10V6l8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg>',
+  warning: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.4 2.7 18a1.5 1.5 0 0 0 1.3 2.2h16a1.5 1.5 0 0 0 1.3-2.2L13.7 4.4a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4m0 3.2v.1"/></svg>',
+  qq: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M10.5 22.5c-2.6-1.8-3.2-5.4-1.3-7.7-.2-5.1 2.4-8.8 6.8-8.8s7 3.7 6.8 8.8c1.9 2.3 1.3 5.9-1.3 7.7M11 18c.7 5.6 9.3 5.6 10 0M12.5 26l1.8-3m5.2 3-1.8-3"/></svg>',
+  imessage: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 15.5C7 10.8 11 7 16 7s9 3.8 9 8.5S21 24 16 24c-1.5 0-3-.4-4.2-1l-4.3 2 1.2-4.1A8.2 8.2 0 0 1 7 15.5Z"/><path d="M12 15.5h.1m3.9 0h.1m3.9 0h.1"/></svg>',
+  oneBot: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="4"/><path d="M9 7V5m6 2V5M8 12h.1m7.9 0h.1M9 16h6"/></svg>',
+  codex: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5-6 7 6 7m6-14 6 7-6 7m1-16-8 18"/></svg>',
+  remote: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4m-5-10 3-3m0 0v3m0-3H7"/></svg>',
+  globe: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.3 2.5 3.5 5.5 3.5 9S14.3 18.5 12 21c-2.3-2.5-3.5-5.5-3.5-9S9.7 5.5 12 3Z"/></svg>',
+  overview: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/></svg>',
+  channels: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 9h8m-8 3h5"/></svg>',
+  settings: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2-.7-.7-1.7.9-1.9-2.1-2.1-1.9.9-1.7-.7-.7-2h-3l-.7 2-1.7.7-1.9-.9-2.1 2.1.9 1.9-.7 1.7-2 .7v3l2 .7.7 1.7-.9 1.9 2.1 2.1 1.9-.9 1.7.7.7 2h3l.7-2 1.7-.7 1.9.9 2.1-2.1-.9-1.9.7-1.7 2-.7Z"/></svg>',
+  refresh: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 8a8 8 0 1 0 .1 7M20 3v5h-5"/></svg>',
+  theme: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.4A8.5 8.5 0 0 1 8.6 3.8 8.5 8.5 0 1 0 20.2 15.4Z"/></svg>',
+  raw: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5-5 7 5 7m8-14 5 7-5 7m-2-16-4 18"/></svg>',
+  add: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v8m-4-4h8"/></svg>'
 };
+
+function getCommands() {
+  return [
+    { id: "view-overview", label: t("navOverview"), hint: t("actionOverviewHint"), icon: icons.overview, keywords: "dashboard home status 总览 首页 状态" },
+    { id: "view-channels", label: t("navChannels"), hint: t("actionChannelsHint"), icon: icons.channels, keywords: "qq imessage group contact 通道 群 联系人" },
+    { id: "view-memory", label: t("navMemory"), hint: t("actionMemoryHint"), icon: icons.memory, keywords: "context recall search 记忆 上下文 搜索" },
+    { id: "view-activity", label: t("navActivity"), hint: t("actionLogsHint"), icon: icons.logs, keywords: "logs trace debug 日志 追踪 调试" },
+    { id: "view-settings", label: t("navSettings"), hint: t("actionSettingsHint"), icon: icons.settings, keywords: "preferences language refresh 设置 主题 语言" },
+    { id: "refresh", label: t("actionRefresh"), hint: t("actionRefreshHint"), icon: icons.refresh, keywords: "reload sync 刷新 同步" },
+    { id: "health", label: t("actionHealth"), hint: t("actionHealthHint"), icon: icons.pulse, keywords: "diagnose service status 检查 健康 服务" },
+    { id: "theme", label: t("actionTheme"), hint: t("actionThemeHint"), icon: icons.theme, keywords: "dark light appearance 深色 明亮 外观" },
+    { id: "raw", label: t("actionApi"), hint: t("actionApiHint"), icon: icons.raw, keywords: "api json state raw 原始 状态" },
+    { id: "add-group", label: t("actionAddGroup"), hint: t("actionAddGroupHint"), icon: icons.add, keywords: "qq allowlist whitelist 群 白名单 添加" },
+    { id: "add-contact", label: t("actionAddContact"), hint: t("actionAddContactHint"), icon: icons.add, keywords: "imessage trusted phone email 联系人 手机 邮箱" }
+  ];
+}
+
+function filteredCommands() {
+  const query = $("#commandSearch").value.trim().toLowerCase();
+  if (!query) return getCommands();
+  return getCommands().filter((command) => `${command.label} ${command.hint} ${command.keywords}`.toLowerCase().includes(query));
+}
+
+function renderCommands() {
+  const commands = filteredCommands();
+  app.commandIndex = Math.max(0, Math.min(app.commandIndex, Math.max(0, commands.length - 1)));
+  const results = $("#commandResults");
+  results.innerHTML = commands.length ? commands.map((command, index) => `
+    <button id="command-${escapeHtml(command.id)}" class="command-item ${index === app.commandIndex ? "active" : ""}" type="button" role="option" aria-selected="${index === app.commandIndex}" data-command-id="${escapeHtml(command.id)}">
+      <span class="command-icon">${command.icon}</span>
+      <span class="command-copy"><strong>${escapeHtml(command.label)}</strong><span>${escapeHtml(command.hint)}</span></span>
+      <span class="command-key" aria-hidden="true">›</span>
+    </button>`).join("") : `<div class="command-empty">${escapeHtml(t("noMatchingActions"))}</div>`;
+  const active = commands[app.commandIndex];
+  if (active) $("#commandSearch").setAttribute("aria-activedescendant", `command-${active.id}`); else $("#commandSearch").removeAttribute("aria-activedescendant");
+}
+
+function openCommands() {
+  const dialog = $("#commandDialog");
+  if (dialog.open) return;
+  $("#commandSearch").value = "";
+  app.commandIndex = 0;
+  renderCommands();
+  dialog.showModal();
+  requestAnimationFrame(() => $("#commandSearch").focus());
+}
+
+function moveCommandSelection(direction) {
+  const commands = filteredCommands();
+  if (!commands.length) return;
+  app.commandIndex = (app.commandIndex + direction + commands.length) % commands.length;
+  renderCommands();
+  $("#commandResults").querySelector(".command-item.active")?.scrollIntoView({ block: "nearest" });
+}
+
+async function runCommand(id) {
+  $("#commandDialog").close();
+  if (id.startsWith("view-")) {
+    setView(id.slice(5), { focus: true });
+    return;
+  }
+  if (id === "refresh") { await refreshView().catch(() => undefined); return; }
+  if (id === "health") {
+    setView("overview", { focus: false });
+    await refreshMaintenance({ force: true }).catch(() => undefined);
+    $("#healthGrid").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+    return;
+  }
+  if (id === "theme") {
+    const dark = app.theme === "dark" || (app.theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+    setTheme(dark ? "light" : "dark");
+    return;
+  }
+  if (id === "raw") { await openApi(); return; }
+  if (id === "add-group" || id === "add-contact") {
+    setView("channels", { focus: false });
+    requestAnimationFrame(() => $(id === "add-group" ? "#groupInput" : "#handleInput").focus());
+  }
+}
+
+function renderInitialShell() {
+  if (app.state || app.maintenance) return;
+  $("#overviewStats").innerHTML = Array.from({ length: 4 }, () => `<article class="stat-card loading"><span class="stat-icon skeleton"></span><strong class="skeleton"></strong><p class="skeleton"></p></article>`).join("");
+  $("#overviewBrief").className = "overview-brief loading";
+  $("#overviewBrief").innerHTML = `<div><div class="skeleton skeleton-line"></div><div class="skeleton skeleton-line"></div></div>`;
+  $("#quickChannels").innerHTML = Array.from({ length: 2 }, () => `<article class="quick-channel"><span class="channel-avatar skeleton"></span><div><div class="skeleton skeleton-line medium"></div><div class="skeleton skeleton-line"></div></div></article>`).join("");
+}
 
 document.addEventListener("click", async (event) => {
   const nav = event.target.closest("[data-view]");
   if (nav) { setView(nav.dataset.view, { focus: true }); return; }
   const go = event.target.closest("[data-go-view]");
   if (go) { setView(go.dataset.goView, { focus: true }); return; }
+  const scrollHealth = event.target.closest("[data-scroll-health]");
+  if (scrollHealth) { $("#healthGrid").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" }); return; }
   const removeGroup = event.target.closest("[data-remove-group]");
   if (removeGroup && app.state) {
     const id = removeGroup.dataset.removeGroup;
@@ -783,6 +928,32 @@ document.addEventListener("click", async (event) => {
   }
 });
 
+$("#commandTrigger").addEventListener("click", openCommands);
+$("#commandClose").addEventListener("click", () => $("#commandDialog").close());
+$("#commandDialog").addEventListener("click", (event) => { if (event.target === event.currentTarget) event.currentTarget.close(); });
+$("#commandSearch").addEventListener("input", () => { app.commandIndex = 0; renderCommands(); });
+$("#commandSearch").addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    moveCommandSelection(event.key === "ArrowDown" ? 1 : -1);
+    return;
+  }
+  if (event.key === "Enter") {
+    const command = filteredCommands()[app.commandIndex];
+    if (command) { event.preventDefault(); void runCommand(command.id); }
+  }
+});
+$("#commandResults").addEventListener("click", (event) => {
+  const command = event.target.closest("[data-command-id]");
+  if (command) void runCommand(command.dataset.commandId);
+});
+document.addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    if ($("#commandDialog").open) $("#commandDialog").close(); else openCommands();
+  }
+});
+
 $("#refreshButton").addEventListener("click", () => refreshView().catch(() => undefined));
 $("#offlineRetry").addEventListener("click", () => refreshView().catch(() => undefined));
 $("#refreshHealth").addEventListener("click", () => refreshMaintenance({ force: true }).catch(() => undefined));
@@ -790,12 +961,14 @@ $("#refreshMemory").addEventListener("click", () => refreshMemory().catch(() => 
 $("#refreshLogs").addEventListener("click", () => refreshLogs().catch(() => undefined));
 $("#qqToggle").addEventListener("change", (event) => setChannel("qq", event.target.checked, event.target));
 $("#imessageToggle").addEventListener("change", (event) => setChannel("imessage", event.target.checked, event.target));
+for (const selector of ["#groupInput", "#handleInput"]) $(selector).addEventListener("input", (event) => event.target.removeAttribute("aria-invalid"));
 
 $("#addGroupForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = $("#groupInput");
   const value = input.value.trim();
-  if (!/^\d{4,20}$/.test(value)) { showToast(t("groupInvalid"), "error"); input.focus(); return; }
+  if (!/^\d{4,20}$/.test(value)) { input.setAttribute("aria-invalid", "true"); showToast(t("groupInvalid"), "error"); input.focus(); return; }
+  input.removeAttribute("aria-invalid");
   const groups = [...new Set([...(app.state?.qq?.allowedGroups || []), value])];
   await saveGroups(groups, event.submitter).then(() => { input.value = ""; }).catch(() => undefined);
 });
@@ -804,7 +977,8 @@ $("#addHandleForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = $("#handleInput");
   const value = input.value.trim();
-  if (!value || value.length > 160 || !/^[+\w@.() -]{3,160}$/.test(value)) { showToast(t("handleInvalid"), "error"); input.focus(); return; }
+  if (!value || value.length > 160 || !/^[+\w@.() -]{3,160}$/.test(value)) { input.setAttribute("aria-invalid", "true"); showToast(t("handleInvalid"), "error"); input.focus(); return; }
+  input.removeAttribute("aria-invalid");
   const handles = [...new Set([...(app.state?.imessage?.trustedHandles || []), value])];
   await saveHandles(handles, event.submitter).then(() => { input.value = ""; }).catch(() => undefined);
 });
@@ -830,7 +1004,12 @@ $("#memoryTabs").addEventListener("keydown", (event) => {
   const next = tabs[nextIndex];
   next.focus(); next.click();
 });
-$("#memorySearch").addEventListener("input", (event) => { app.memoryQuery = event.target.value; renderMemory(); });
+let memorySearchTimer = null;
+$("#memorySearch").addEventListener("input", (event) => {
+  app.memoryQuery = event.target.value;
+  clearTimeout(memorySearchTimer);
+  memorySearchTimer = setTimeout(renderMemory, 100);
+});
 $("#memoryView").addEventListener("change", async (event) => {
   const input = event.target.closest("[data-unified-setting]");
   if (!input || !app.memory?.unified) return;
@@ -913,4 +1092,5 @@ setInterval(() => {
 
 setTheme(app.theme);
 applyI18n();
+renderInitialShell();
 setView(app.view, { updateHash: true, quiet: false });

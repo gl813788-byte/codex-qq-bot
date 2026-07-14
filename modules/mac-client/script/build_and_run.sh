@@ -9,7 +9,7 @@ MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 BINARY="$MACOS/CodexRemoteContactClient"
 
-mkdir -p "$MACOS" "$RESOURCES"
+mkdir -p "$MACOS" "$RESOURCES/images"
 
 if pgrep -x CodexRemoteContactClient >/dev/null 2>&1; then
   pkill -x CodexRemoteContactClient || true
@@ -26,6 +26,7 @@ cp "$ROOT/Resources/Info.plist" "$CONTENTS/Info.plist"
 cp "$ROOT/Resources/client.html" "$RESOURCES/client.html"
 cp "$ROOT/Resources/client.css" "$RESOURCES/client.css"
 cp "$ROOT/Resources/client.js" "$RESOURCES/client.js"
+cp "$ROOT/Resources/images/nexus-core.webp" "$RESOURCES/images/nexus-core.webp"
 
 chmod +x "$BINARY"
 

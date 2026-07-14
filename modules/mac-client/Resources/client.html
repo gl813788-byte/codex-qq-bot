@@ -6,9 +6,11 @@
     <meta name="description" content="Codex Remote Contact 本地通讯中枢控制台" />
     <meta name="color-scheme" content="light dark" />
     <title>Nexus · Codex Remote Contact</title>
+    <link rel="preload" href="/images/nexus-core.webp" as="image" type="image/webp" />
     <link rel="stylesheet" href="client.css" />
   </head>
   <body>
+    <a class="skip-link" href="#mainContent" data-i18n="skipToContent">跳到主要内容</a>
     <div class="ambient-layer" aria-hidden="true">
       <span class="ambient-orb orb-a"></span>
       <span class="ambient-orb orb-b"></span>
@@ -71,6 +73,11 @@
             <h1 id="pageTitle" tabindex="-1" data-i18n="overviewTitle">运行总览</h1>
           </div>
           <div class="top-actions">
+            <button id="commandTrigger" class="command-trigger" type="button" aria-haspopup="dialog" aria-controls="commandDialog" data-i18n-aria-label="openQuickActions">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg>
+              <span data-i18n="quickActions">快速操作</span>
+              <kbd aria-hidden="true">⌘K</kbd>
+            </button>
             <div id="syncState" class="sync-state" aria-live="polite">
               <span class="sync-dot"></span>
               <span id="syncText" data-i18n="waitingSync">等待同步</span>
@@ -112,30 +119,44 @@
                 </div>
               </div>
               <div class="hero-visual" aria-hidden="true">
-                <svg class="hero-curve" viewBox="0 0 520 290" preserveAspectRatio="none">
+                <svg class="hero-network" viewBox="0 0 620 340" preserveAspectRatio="xMidYMid meet">
                   <defs>
-                    <linearGradient id="curveA" x1="0" y1="0" x2="1" y2="1">
+                    <linearGradient id="networkGradient" x1="0" y1="0" x2="1" y2="1">
                       <stop offset="0" stop-color="#5ce1bb" />
                       <stop offset="1" stop-color="#7667f7" />
                     </linearGradient>
-                    <linearGradient id="curveB" x1="0" y1="1" x2="1" y2="0">
-                      <stop offset="0" stop-color="#4cb7f5" />
-                      <stop offset="1" stop-color="#9e8cff" />
-                    </linearGradient>
+                    <radialGradient id="networkHalo"><stop offset="0" stop-color="#5ce1bb" stop-opacity=".22" /><stop offset="1" stop-color="#5ce1bb" stop-opacity="0" /></radialGradient>
                   </defs>
-                  <path class="curve-glow" d="M-20 238C80 82 181 312 295 146 360 51 437 78 548-25" />
-                  <path class="curve-main" d="M-20 238C80 82 181 312 295 146 360 51 437 78 548-25" />
-                  <path class="curve-secondary" d="M-42 278C78 152 166 301 270 207 382 106 438 192 554 62" />
+                  <circle class="network-halo" cx="350" cy="170" r="150" />
+                  <circle class="network-ring ring-outer" cx="350" cy="170" r="126" />
+                  <circle class="network-ring ring-inner" cx="350" cy="170" r="78" />
+                  <path id="linkQq" class="network-link" d="M138 92C224 92 238 142 350 170" />
+                  <path id="linkMessage" class="network-link" d="M150 264C238 252 250 198 350 170" />
+                  <path id="linkCodex" class="network-link" d="M350 170C444 142 472 90 554 92" />
+                  <path id="linkMemory" class="network-link" d="M350 170C443 195 470 250 552 258" />
+                  <path class="network-flow flow-a" d="M138 92C224 92 238 142 350 170" />
+                  <path class="network-flow flow-b" d="M150 264C238 252 250 198 350 170" />
+                  <path class="network-flow flow-c" d="M350 170C444 142 472 90 554 92" />
+                  <path class="network-flow flow-d" d="M350 170C443 195 470 250 552 258" />
+                  <g class="network-packet packet-a"><circle r="4" /><circle class="packet-glow" r="10" /></g>
+                  <g class="network-packet packet-b"><circle r="4" /><circle class="packet-glow" r="10" /></g>
+                  <g class="network-packet packet-c"><circle r="4" /><circle class="packet-glow" r="10" /></g>
                 </svg>
                 <div class="orbital-core">
                   <span></span><span></span><span></span>
-                  <strong>N</strong>
+                  <img src="/images/nexus-core.webp" alt="" width="720" height="720" />
                 </div>
+                <div class="network-node node-qq"><span><svg viewBox="0 0 32 32"><path d="M10.5 22.5c-2.6-1.8-3.2-5.4-1.3-7.7-.2-5.1 2.4-8.8 6.8-8.8s7 3.7 6.8 8.8c1.9 2.3 1.3 5.9-1.3 7.7M11 18c.7 5.6 9.3 5.6 10 0M12.5 26l1.8-3m5.2 3-1.8-3" /></svg></span><small>QQ</small></div>
+                <div class="network-node node-imessage"><span><svg viewBox="0 0 32 32"><path d="M7 15.5C7 10.8 11 7 16 7s9 3.8 9 8.5S21 24 16 24c-1.5 0-3-.4-4.2-1l-4.3 2 1.2-4.1A8.2 8.2 0 0 1 7 15.5Z" /><path d="M12 15.5h.1m3.9 0h.1m3.9 0h.1" /></svg></span><small>iMessage</small></div>
+                <div class="network-node node-codex"><span><svg viewBox="0 0 32 32"><path d="m13 8-7 8 7 8m6-16 7 8-7 8m0-19-6 22" /></svg></span><small>Codex</small></div>
+                <div class="network-node node-memory"><span><svg viewBox="0 0 32 32"><path d="M8 9c0-2 3.6-3.5 8-3.5S24 7 24 9s-3.6 3.5-8 3.5S8 11 8 9Zm0 0v7c0 2 3.6 3.5 8 3.5s8-1.5 8-3.5V9M8 16v7c0 2 3.6 3.5 8 3.5s8-1.5 8-3.5v-7" /></svg></span><small>Memory</small></div>
               </div>
               <div id="heroMetrics" class="hero-metrics" aria-label="运行摘要" data-i18n-aria-label="runtimeSummary"></div>
             </article>
 
             <div id="overviewStats" class="stat-grid"></div>
+
+            <section id="overviewBrief" class="overview-brief" aria-live="polite" aria-label="运行建议" data-i18n-aria-label="runtimeBrief"></section>
 
             <div class="overview-grid">
               <section class="surface channel-overview">
@@ -197,7 +218,7 @@
               <article class="surface channel-card qq-card">
                 <div class="channel-card-head">
                   <div class="channel-identity">
-                    <span class="channel-icon qq">Q</span>
+                    <span class="channel-icon qq"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M10.5 22.5c-2.6-1.8-3.2-5.4-1.3-7.7-.2-5.1 2.4-8.8 6.8-8.8s7 3.7 6.8 8.8c1.9 2.3 1.3 5.9-1.3 7.7M11 18c.7 5.6 9.3 5.6 10 0M12.5 26l1.8-3m5.2 3-1.8-3" /></svg></span>
                     <div><h2>QQ</h2><p id="qqStatusText">—</p></div>
                   </div>
                   <label class="toggle-control">
@@ -223,7 +244,7 @@
               <article class="surface channel-card imessage-card">
                 <div class="channel-card-head">
                   <div class="channel-identity">
-                    <span class="channel-icon imessage"><span></span></span>
+                    <span class="channel-icon imessage"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 15.5C7 10.8 11 7 16 7s9 3.8 9 8.5S21 24 16 24c-1.5 0-3-.4-4.2-1l-4.3 2 1.2-4.1A8.2 8.2 0 0 1 7 15.5Z" /><path d="M12 15.5h.1m3.9 0h.1m3.9 0h.1" /></svg></span>
                     <div><h2>iMessage</h2><p id="imessageStatusText">—</p></div>
                   </div>
                   <label class="toggle-control">
@@ -422,6 +443,24 @@
         <pre id="logDetailContent"></pre>
         <footer><button id="copyLogDetail" class="button ghost" value="copy" type="button" data-i18n="copyJson">复制 JSON</button><button class="button primary" value="close" data-i18n="done">完成</button></footer>
       </form>
+    </dialog>
+
+    <dialog id="commandDialog" class="command-dialog" aria-labelledby="commandTitle">
+      <div class="command-shell">
+        <header class="command-search-wrap">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg>
+          <input id="commandSearch" type="search" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="commandResults" autocomplete="off" spellcheck="false" placeholder="搜索页面或操作" data-i18n-placeholder="searchActions" />
+          <button id="commandClose" class="command-close" type="button" data-i18n-aria-label="close">ESC</button>
+        </header>
+        <div class="command-heading">
+          <div>
+            <span class="section-kicker" data-i18n="commandCenter">COMMAND CENTER</span>
+            <h2 id="commandTitle" data-i18n="quickActions">快速操作</h2>
+          </div>
+          <span id="commandHint" class="quiet-label" data-i18n="commandHint">↑↓ 选择 · Enter 执行</span>
+        </div>
+        <div id="commandResults" class="command-results" role="listbox" aria-label="快速操作" data-i18n-aria-label="quickActions"></div>
+      </div>
     </dialog>
 
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
