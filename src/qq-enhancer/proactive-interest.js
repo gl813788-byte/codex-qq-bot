@@ -86,9 +86,10 @@ export async function shouldProactivelyReplyToQq(event = {}, state = {}, helpers
 
   const lastJudgeAt = Number(proactiveState.lastJudgeAtByGroupId[groupId] || now());
   const elapsedMs = Math.max(0, now() - lastJudgeAt);
+  const keywordTriggerDue = triggerMode === "message" && Boolean(helpers.interestKeywordMatch?.matched);
   const messageTriggerDue = currentCount >= judgeEveryMessages;
   const timeTriggerDue = judgeEveryMinutes > 0 && currentCount > 0 && elapsedMs >= judgeEveryMinutes * minuteMs;
-  const triggerDue = triggerMode === "time" ? timeTriggerDue : messageTriggerDue;
+  const triggerDue = triggerMode === "time" ? timeTriggerDue : (keywordTriggerDue || messageTriggerDue);
   if (!triggerDue) {
     return {
       ok: false,
@@ -117,7 +118,10 @@ export async function shouldProactivelyReplyToQq(event = {}, state = {}, helpers
       judgeEveryMessages,
       judgeEveryMinutes,
       triggerMode,
-      triggerReason: triggerMode === "time" ? "minute_interval" : "message_count",
+      triggerReason: triggerMode === "time" ? "minute_interval" : keywordTriggerDue ? "persona_keyword" : "message_count",
+      interestKeywordMatch: helpers.interestKeywordMatch || null,
+      interestSignals: helpers.interestSignals || null,
+      relationshipInterest: helpers.relationshipInterest || null,
       consumedMessageCount
     };
 
@@ -152,9 +156,17 @@ export async function shouldProactivelyReplyToQq(event = {}, state = {}, helpers
           recentMessages: helpers.recentMessages || [],
           humanStyle: helpers.humanStyle || null,
           assistantName: helpers.assistantName || "assistant",
-          ownerLabel: helpers.ownerLabel || "主人"
+          ownerLabel: helpers.ownerLabel || "主人",
+          relationshipInterest: helpers.relationshipInterest || null,
+          selfPersona: helpers.selfPersona || null,
+          interestKeywordMatch: helpers.interestKeywordMatch || null,
+          interestSignals: helpers.interestSignals || null
         });
-        if (judge.ok && judge.shouldReply && judge.interest >= judgeConfig.minInterest) {
+        const interestMultiplier = Math.max(0.08, Math.min(1, Number(helpers.relationshipInterest?.interestMultiplier ?? 1)));
+        const effectiveInterest = judge.ok ? Math.round(judge.interest * interestMultiplier * 1000) / 1000 : 0;
+        judge.effectiveInterest = effectiveInterest;
+        judge.interestMultiplier = interestMultiplier;
+        if (judge.ok && judge.shouldReply && effectiveInterest >= judgeConfig.minInterest) {
           result = buildDecision("model final decision", assessment, judge, {
             ...commonMeta,
             replyContext: formatRecentMessages(helpers.recentMessages || [], judgeConfig.maxRecentMessages, {
@@ -203,6 +215,8 @@ export function evaluateQqProactiveInterest(text, event = {}, helpers = {}) {
     directness: 0,
     likedTopicScore: 0,
     contextScore: 0,
+    relationshipScore: 0,
+    personaKeywordScore: 0,
     penalty: 0,
     labels: [],
     blockers: [],
@@ -221,15 +235,32 @@ export function evaluateQqProactiveInterest(text, event = {}, helpers = {}) {
   applyDirectness(result, normalized, event);
   applyLikedTopics(result, normalized, event);
   applyContext(result, normalized, event, recent, helpers.ownerUserIds || []);
+  applyRelationshipInterest(result, helpers.relationshipInterest);
+  applyPersonaKeywordInterest(result, helpers.interestKeywordMatch);
   applyMessageQuality(result, normalized, event);
   applyPenalties(result, normalized, event, recent);
 
-  result.score = Math.max(0, result.directness + result.likedTopicScore + result.contextScore + result.penalty);
+  result.score = Math.max(0, result.directness + result.likedTopicScore + result.contextScore + result.relationshipScore + result.personaKeywordScore + result.penalty);
   if (result.blockers.length && result.directness < 7) {
     result.blocked = true;
     result.reason = result.blockers[0];
   }
   return result;
+}
+
+function applyRelationshipInterest(result, relationship = null) {
+  if (!relationship?.hasInteraction) return;
+  const boost = Math.max(0, Math.min(32, Math.round(Number(relationship.interestBoost || 0))));
+  if (boost <= 0) return;
+  result.relationshipScore += boost;
+  result.labels.push(`近期与 Bot 互动 +${boost}`);
+}
+
+function applyPersonaKeywordInterest(result, match = null) {
+  if (!match?.matched) return;
+  const score = match.nameMatched ? 16 : Math.min(14, 7 + Math.max(0, Number(match.keywords?.length || 0) - 1) * 2);
+  result.personaKeywordScore += score;
+  result.labels.push(`全局兴趣关键词：${(match.keywords || []).slice(0, 3).join(" / ")}`);
 }
 
 function applyDirectness(result, text, event) {
@@ -499,11 +530,11 @@ function buildJudgeMessages(event, assessment, config) {
     {
       role: "system",
       content: [
-        "你是 QQ 群聊 bot 的主动回复判定器，只判断未被 @ 时是否值得主动插一句。",
+        "你是 QQ 群聊 Bot 的话题兴趣判定器，只判断未被 @ 时，当前话题是否真的吸引这个 Bot。",
         "达到配置的消息数或分钟间隔时，普通群消息会交给你判断；规则评分、blockers、labels 只作为参考信号，不是硬性过滤器。",
-        "兴趣不等于应该说话。先判断最新消息属于谁的对话、话题是否仍在继续、Bot 能否增加一个具体新信息或真正好笑的接点。",
-        "如果是两个人的来回、已经有人回答、只是生活碎片/短反应、话题已转走，或 Bot 只能复述与泛泛赞同，应当不回复；Bot 不需要抢答群里的每个问题。",
-        "只有插话不会打断当前节奏，而且内容比沉默更有价值时，才判定回复。",
+        "最主要的标准是话题是否符合 Bot 自己长期形成的兴趣，以及 Bot 是否产生了具体想法、信息或好笑的接点；不要把“现在适不适合插话”当成主要标准。",
+        "两个人正在来回、已经有人回答或普通生活碎片只能作为轻微降权；只在话题已经结束、回复必然答错对象、只能复述或连续无人回应时明显降低。",
+        "关系距离越近会提高短期兴趣，连续无人回应会降低有效兴趣；这些数值由 Hub 提供，不要自行改写。",
         "先在普通回复正文中输出一行简短的 ANALYSIS:，用不超过 200 个汉字完成判断；不要把分析放进 reasoning 字段。",
         "最后必须单独输出一行 FINAL_JSON: {\"shouldReply\":boolean,\"interest\":0-100,\"reason\":\"string\",\"replyStyle\":\"string\"}。",
         "Hub 只读取最后的 FINAL_JSON；shouldReply 和 interest 是最终依据。不要使用 Markdown。"
@@ -539,10 +570,24 @@ function buildJudgeMessages(event, assessment, config) {
           likedTopicScore: assessment.likedTopicScore,
           contextScore: assessment.contextScore,
           penalty: assessment.penalty,
+          relationshipScore: assessment.relationshipScore,
+          personaKeywordScore: assessment.personaKeywordScore,
           labels: assessment.labels,
           blockers: assessment.blockers
         },
         botInterestPreset: preset,
+        generatedBotPersona: config.selfPersona || null,
+        personaKeywordMatch: config.interestKeywordMatch || null,
+        combinedInterestSignals: config.interestSignals || null,
+        relationshipInterest: config.relationshipInterest ? {
+          hasInteraction: Boolean(config.relationshipInterest.hasInteraction),
+          messagesSinceInteraction: config.relationshipInterest.messagesSinceInteraction,
+          minutesSinceInteraction: config.relationshipInterest.minutesSinceInteraction,
+          recency: Number(config.relationshipInterest.recency || 0),
+          interestBoost: Number(config.relationshipInterest.interestBoost || 0),
+          unansweredBotStreak: Number(config.relationshipInterest.unansweredBotStreak || 0),
+          interestMultiplier: Number(config.relationshipInterest.interestMultiplier ?? 1)
+        } : null,
         groupHumanRhythm: config.humanStyle ? {
           sampleSize: Number(config.humanStyle.sampleSize || 0),
           messagesPerHour: Number(config.humanStyle.messagesPerHour || 0),
@@ -558,6 +603,7 @@ function buildJudgeMessages(event, assessment, config) {
         outputPolicy: {
           replyOnlyIfInterestAtLeast: config.minInterest,
           finalResultOnly: "最后一行 FINAL_JSON 是唯一生效结果；前面的分析不会被当作结论。",
+          primaryDecision: "先判断话题是否符合 Bot 自身兴趣，再把时机作为次要修正。",
           ifReplyStyle: "短、自然、像群友顺口接话；不要解释触发规则；不要频繁叫主人；不要服务式结尾。"
         }
       })
@@ -699,12 +745,15 @@ function buildDecision(reason, assessment, judge = null, meta = {}) {
     judgeEveryMinutes: meta.judgeEveryMinutes,
     triggerMode: meta.triggerMode,
     triggerReason: meta.triggerReason,
+    interestKeywordMatch: meta.interestKeywordMatch || null,
+    interestSignals: meta.interestSignals || null,
+    relationshipInterest: meta.relationshipInterest || null,
     consumedMessageCount: meta.consumedMessageCount,
     interestScore: assessment.score,
     interest: assessment,
     modelJudge: judge,
     replyContext: meta.replyContext || [],
-    promptHint: `触发原因：这条群聊命中了你的主动回复兴趣（${topic}，规则分 ${assessment.score}${judge ? `，模型兴趣 ${judge.interest}` : ""}）。${judgeHint}请像自然被喜欢的话题吸引一样短促接话，不要假装对方直接 @ 了你，不要解释触发规则，也不要连续刷屏。`
+    promptHint: `触发原因：这条群聊命中了你的主动回复兴趣（${topic}，规则分 ${assessment.score}${judge ? `，模型兴趣 ${judge.interest}${judge.effectiveInterest == null ? "" : `，抑制后 ${judge.effectiveInterest}`}` : ""}）。${judgeHint}请像自然被喜欢的话题吸引一样短促接话，不要假装对方直接 @ 了你，不要解释触发规则，也不要连续刷屏。`
   };
 }
 

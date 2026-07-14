@@ -73,14 +73,38 @@ import {
   ensureQqAdaptiveLearning,
   formatQqAdaptiveLearningContext,
   getQqAdaptiveColdProactivePlan,
+  getQqAdaptivePrivateProactivePlan,
   getQqAdaptiveProactiveIntervals,
   markQqAdaptiveColdProactiveCheck,
+  markQqAdaptivePrivateProactiveCheck,
   maybeReviewQqAdaptiveLanguageStyle,
   personalizeQqHumanStyle,
   recordQqAdaptiveBotReply,
   recordQqAdaptiveHumanMessage,
   summarizeQqAdaptiveGroupLearning
 } from "./qq-adaptive-learning.js";
+import {
+  applyGeneratedQqSelfPersona,
+  applyQqSelfPersonaScopeSummary,
+  buildQqSelfPersonaGenerationPrompt,
+  buildQqSelfPersonaScopeSummaryPrompt,
+  createEmptyQqSelfPersona,
+  formatQqSelfPersonaContext,
+  getDueQqSelfPersonaScopes,
+  matchQqSelfPersonaInterestKeywords,
+  normalizeQqSelfPersona,
+  noteQqSelfPersonaGenerationFailure,
+  parseQqSelfPersonaJson,
+  recordQqSelfPersonaActivity,
+  shouldRegenerateQqSelfPersona,
+  summarizeQqSelfPersona,
+  syncQqSelfPersonaActivity,
+  updateQqSelfPersonaAccount
+} from "./qq-self-persona.js";
+import {
+  chooseQqReplyAddressing,
+  getQqRelationshipInterestPlan
+} from "./qq-relationship-interest.js";
 import { createRuntimePaths } from "./runtime-paths.js";
 import { createScopedReplyScheduler } from "./scoped-reply-scheduler.js";
 import { serializeFileOperation, writeJsonAtomically } from "./file-store.js";
@@ -128,6 +152,7 @@ const {
   qqPublicMemoryPath,
   qqRequestsPath,
   qqPersonasPath,
+  qqSelfPersonaPath,
   qqConversationMemoryPath,
   qqStickerLabelsPath,
   qqStickerInventoryPath,
@@ -315,6 +340,10 @@ const defaultQqProactiveJudgeModel = "nousresearch/hermes-3-llama-3.1-405b:free"
 const qqProactiveJudgeModel = process.env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_MODEL || defaultQqProactiveJudgeModel;
 const qqProactiveJudgeTimeoutMs = Number(process.env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_TIMEOUT_MS || 6500);
 const qqProactiveJudgeMinInterest = 20;
+const qqSelfPersonaScopeMessages = Math.max(8, Math.min(200, Math.floor(Number(process.env.CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_SCOPE_MESSAGES || 24))));
+const qqSelfPersonaScopeBotReplies = Math.max(2, Math.min(80, Math.floor(Number(process.env.CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_SCOPE_BOT_REPLIES || 6))));
+const qqSelfPersonaGenerationMessages = Math.max(20, Math.min(1000, Math.floor(Number(process.env.CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_GENERATION_MESSAGES || 80))));
+const qqSelfPersonaGenerationBotReplies = Math.max(6, Math.min(300, Math.floor(Number(process.env.CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_GENERATION_BOT_REPLIES || 20))));
 const openRouterApiKey = process.env.OPENROUTER_API_KEY || process.env.CODEX_REMOTE_CONTACT_OPENROUTER_API_KEY || "";
 const openRouterBaseUrl = process.env.OPENROUTER_BASE_URL || process.env.CODEX_REMOTE_CONTACT_OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
 const imessageMemoryLimit = Number(process.env.CODEX_REMOTE_CONTACT_IMESSAGE_MEMORY_LIMIT || 120);
@@ -558,6 +587,7 @@ const state = {
     personas: {
       groups: createSafeRecord()
     },
+    selfPersona: createEmptyQqSelfPersona(),
     conversationMemory: createEmptyQqConversationMemory()
   },
   imessage: {
@@ -634,6 +664,7 @@ const seenOneBotMessageIds = new Map();
 const qqProactiveLatestEventByGroupId = new Map();
 const qqGroupActivityVersionByGroupId = new Map();
 const qqColdInterestStatusByGroupId = new Map();
+const qqPrivateInterestStatusByUserId = new Map();
 const qqAdaptiveLearningSnapshotLoggedGroups = new Set();
 const seenMessageTtlMs = 10 * 60 * 1000;
 const stoppedQqGenerationIds = new Set();
@@ -651,6 +682,7 @@ let imessagePollTimer = null;
 let remoteExecutionIdleTimer = null;
 let qqProactiveMinuteTimer = null;
 let qqProactiveMinuteChecking = false;
+let qqSelfPersonaRefreshPromise = null;
 let imessagePolling = false;
 let shuttingDown = false;
 const seenIMessageGuids = new Map();
@@ -731,6 +763,16 @@ async function loadQqPersonas() {
     if (error.code !== "ENOENT") {
       logger.warn("Unable to load QQ personas", { error }, "memory");
     }
+  }
+}
+
+async function loadQqSelfPersona() {
+  await mkdir(dataDir, { recursive: true });
+  try {
+    state.qq.selfPersona = normalizeQqSelfPersona(JSON.parse(await readFile(qqSelfPersonaPath, "utf8")));
+  } catch (error) {
+    if (error.code !== "ENOENT") logger.warn("Unable to load QQ self persona", { error }, "learning");
+    state.qq.selfPersona = createEmptyQqSelfPersona();
   }
 }
 
@@ -1336,15 +1378,15 @@ function pruneQqStateScopes() {
     delete state.qq.memory.entries[scopeId];
     delete state.qq.memory.recentMessages[scopeId];
     delete state.qq.pendingReplies[scopeId];
+    delete state.qq.personas.groups[scopeId];
+    qqGroupActivityVersionByGroupId.delete(scopeId);
     if (scopeId.startsWith("private:")) {
       delete state.qq.conversationMemory.privateChats[scopeId.slice("private:".length)];
     } else {
-      delete state.qq.personas.groups[scopeId];
       delete state.qq.conversationMemory.groups[scopeId];
       delete state.qq.proactive.messageCountByGroupId[scopeId];
       delete state.qq.proactive.lastJudgeAtByGroupId[scopeId];
       qqProactiveLatestEventByGroupId.delete(scopeId);
-      qqGroupActivityVersionByGroupId.delete(scopeId);
     }
     changed = true;
   }
@@ -1416,6 +1458,145 @@ const qqPersonasWriter = createCoalescingWriter(async () => {
 
 async function saveQqPersonas() {
   return qqPersonasWriter.schedule();
+}
+
+const qqSelfPersonaWriter = createCoalescingWriter(async () => {
+  await serializeFileOperation(qqSelfPersonaPath, async () => {
+    await writeJsonAtomically(qqSelfPersonaPath, {
+      ...state.qq.selfPersona,
+      version: 1,
+      updatedAt: new Date().toISOString()
+    });
+  });
+}, { delayMs: 150 });
+
+async function saveQqSelfPersona() {
+  return qqSelfPersonaWriter.schedule();
+}
+
+function maybeScheduleQqSelfPersonaRefresh() {
+  if (qqSelfPersonaRefreshPromise || shuttingDown) return qqSelfPersonaRefreshPromise;
+  const failedAt = Date.parse(state.qq.selfPersona.generation?.lastAttemptAt || "");
+  if (state.qq.selfPersona.generation?.lastError && Number.isFinite(failedAt) && Date.now() - failedAt < 30 * 60 * 1000) {
+    return null;
+  }
+  const refresh = refreshQqSelfPersona().finally(() => {
+    if (qqSelfPersonaRefreshPromise === refresh) qqSelfPersonaRefreshPromise = null;
+  });
+  qqSelfPersonaRefreshPromise = refresh;
+  trackBackgroundTask(refresh, (error) => logger.warn("QQ self persona refresh failed", { error }, "learning"));
+  return refresh;
+}
+
+async function refreshQqSelfPersona() {
+  const oneBotHealth = await checkOneBotHealth().catch(() => null);
+  if (!oneBotHealth?.ok || !oneBotHealth.nickname) {
+    logger.debug("QQ self persona refresh deferred until OneBot identity is available", {
+      oneBotOk: Boolean(oneBotHealth?.ok),
+      hasNickname: Boolean(oneBotHealth?.nickname)
+    }, "learning");
+    return false;
+  }
+  const accountUpdate = updateQqSelfPersonaAccount(state.qq.selfPersona, {
+    userId: oneBotHealth.selfId,
+    nickname: oneBotHealth.nickname
+  });
+  state.qq.selfPersona = accountUpdate.store;
+  const dueScopes = getDueQqSelfPersonaScopes(state.qq.selfPersona, {
+    messagesPerSummary: qqSelfPersonaScopeMessages,
+    botRepliesPerSummary: qqSelfPersonaScopeBotReplies,
+    limit: 2
+  });
+  for (const scope of dueScopes) {
+    const entries = state.qq.memory.recentMessages[scope.scopeId] || [];
+    if (entries.length === 0) continue;
+    try {
+      const prompt = buildQqSelfPersonaScopeSummaryPrompt(scope.scopeId, entries, {
+        botName: state.qq.selfPersona.account.nickname || assistantName
+      });
+      const output = await runQqSelfPersonaModelPrompt(prompt, `scope-${scope.kind}`);
+      const summary = parseQqSelfPersonaJson(output);
+      if (!summary) throw new Error("scope summarizer did not return valid FINAL_JSON");
+      state.qq.selfPersona = applyQqSelfPersonaScopeSummary(state.qq.selfPersona, scope.scopeId, summary);
+      await saveQqSelfPersona();
+      logger.info("QQ self persona scope summarized", {
+        scopeType: scope.kind,
+        humanMessages: scope.humanMessages,
+        botReplies: scope.botReplies,
+        summaryRevision: Number(state.qq.selfPersona.scopes[scope.scopeId]?.summaryRevision || 0)
+      }, "learning");
+    } catch (error) {
+      state.qq.selfPersona = noteQqSelfPersonaGenerationFailure(state.qq.selfPersona, error);
+      await saveQqSelfPersona();
+      throw error;
+    }
+  }
+
+  const generationPlan = shouldRegenerateQqSelfPersona(state.qq.selfPersona, {
+    minScopeSummaries: 1,
+    messagesPerGeneration: qqSelfPersonaGenerationMessages,
+    botRepliesPerGeneration: qqSelfPersonaGenerationBotReplies,
+    scopeSummariesPerGeneration: 4
+  });
+  if (!generationPlan.due) {
+    if (accountUpdate.changed) await saveQqSelfPersona();
+    return false;
+  }
+  try {
+    const output = await runQqSelfPersonaModelPrompt(
+      buildQqSelfPersonaGenerationPrompt(state.qq.selfPersona),
+      "global"
+    );
+    const persona = parseQqSelfPersonaJson(output);
+    if (!persona) throw new Error("global persona generator did not return valid FINAL_JSON");
+    state.qq.selfPersona = applyGeneratedQqSelfPersona(state.qq.selfPersona, persona);
+    await saveQqSelfPersona();
+    logger.info("QQ global self persona updated", {
+      revision: state.qq.selfPersona.generation.revision,
+      name: state.qq.selfPersona.persona.name,
+      interestKeywordCount: state.qq.selfPersona.persona.interestKeywords.length,
+      interestCount: state.qq.selfPersona.persona.interests.length,
+      summarizedScopes: generationPlan.summarizedScopes,
+      humanMessages: state.qq.selfPersona.totals.humanMessages,
+      botReplies: state.qq.selfPersona.totals.botReplies
+    }, "learning");
+    return true;
+  } catch (error) {
+    state.qq.selfPersona = noteQqSelfPersonaGenerationFailure(state.qq.selfPersona, error);
+    await saveQqSelfPersona();
+    throw error;
+  }
+}
+
+async function runQqSelfPersonaModelPrompt(prompt, label) {
+  await ensureCodexReplyWorkspace();
+  const outputPath = join(codexTmpDir, `${crypto.randomUUID()}.qq-self-persona-${label}.txt`);
+  const args = [
+    "exec",
+    "--ephemeral",
+    "--skip-git-repo-check",
+    "--ignore-rules",
+    "-s",
+    "read-only",
+    "-m",
+    state.ai.model,
+    "-c",
+    `model_reasoning_effort="${state.ai.reasoningEffort}"`,
+    "-C",
+    codexWorkspaceDir,
+    "-o",
+    outputPath,
+    "-"
+  ];
+  await runCodexCli(args, prompt, {
+    cwd: codexWorkspaceDir,
+    timeout: 90_000,
+    env: {
+      ...process.env,
+      CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_MODE: "1"
+    }
+  });
+  return cleanCodexReply(await readCodexOutputAndRemove(outputPath));
 }
 
 const qqConversationMemoryWriter = createCoalescingWriter(async () => {
@@ -1566,7 +1747,7 @@ function buildPublicState() {
       })
   );
   const qqAdaptiveLearning = Object.fromEntries(
-    Object.entries(state.qq.personas.groups).map(([groupId, group]) => {
+    Object.entries(state.qq.personas.groups).filter(([scopeId]) => !scopeId.startsWith("private:")).map(([groupId, group]) => {
       const signals = buildQqAdaptiveLearningSignals(group, null);
       const summary = summarizeQqAdaptiveGroupLearning(group, group?.members || {});
       const latestEntry = (state.qq.memory.recentMessages[groupId] || []).at(-1);
@@ -1584,6 +1765,17 @@ function buildPublicState() {
             judgeEveryMinutes: state.qq.proactive.judgeEveryMinutes
           }
         )
+      }];
+    })
+  );
+  const qqPrivateAdaptiveLearning = Object.fromEntries(
+    Object.entries(state.qq.personas.groups).filter(([scopeId]) => scopeId.startsWith("private:")).map(([scopeId, contact]) => {
+      const userId = scopeId.slice("private:".length);
+      const signals = buildQqAdaptiveLearningSignals(contact, contact?.members?.[userId] || null);
+      const latestEntry = (state.qq.memory.recentMessages[scopeId] || []).at(-1);
+      return [userId, {
+        ...signals.group,
+        privateInterest: getQqAdaptivePrivateProactivePlan(signals, { lastActivityAt: latestEntry?.at })
       }];
     })
   );
@@ -1618,9 +1810,17 @@ function buildPublicState() {
         judgeEveryMinutes: state.qq.proactive.judgeEveryMinutes,
         coldGroupInterest: {
           enabled: state.qq.proactive.enabled,
-          allowedHours: "09:00-23:00",
+          allowedHours: "learned-per-group",
+          fallbackAllowedHours: "09:00-23:00",
           retryCooldownHours: 3,
-          requiresHumanReplyBeforeRepeating: true,
+          unansweredBackoff: true,
+          logCategory: "interest"
+        },
+        privateInterest: {
+          enabled: state.qq.proactive.enabled,
+          probabilityShape: "short_high_middle_low_long_rising",
+          learnedActiveHours: true,
+          unansweredBackoff: true,
           logCategory: "interest"
         }
       },
@@ -1643,11 +1843,13 @@ function buildPublicState() {
       pendingReplies: pendingReplyCounts,
       pendingReplyCounts,
       personas: { groupMemberCounts: personaCounts },
+      selfPersona: summarizeQqSelfPersona(state.qq.selfPersona),
       conversationMemory: summarizeQqConversationMemory(state.qq.conversationMemory),
       humanBehavior: {
         groupStyles: humanGroupStyles,
         stickerFrequency: qqStickerFrequency,
-        adaptiveLearning: qqAdaptiveLearning
+        adaptiveLearning: qqAdaptiveLearning,
+        privateAdaptiveLearning: qqPrivateAdaptiveLearning
       }
     },
     imessage: {
@@ -1710,7 +1912,8 @@ function sanitizePublicQqEvent(record) {
         ? Math.max(0, Math.floor(Number(event.imageCount)))
         : (Array.isArray(event.images) ? event.images.length : 0),
       hasReplySegment: Boolean(event.hasReplySegment),
-      coldProactive: Boolean(event.qqColdProactive || event.coldProactive)
+      coldProactive: Boolean(event.qqColdProactive || event.coldProactive),
+      privateProactive: Boolean(event.qqPrivateProactive || event.privateProactive)
     },
     decision: record?.decision ? {
       ok: Boolean(record.decision.ok),
@@ -1725,6 +1928,13 @@ function sanitizePublicQqEvent(record) {
         idleHoursRequired: Number(record.decision.coldInterest.idleHoursRequired || 0),
         lastActivityAt: record.decision.coldInterest.lastActivityAt || null,
         thresholdReachedAt: record.decision.coldInterest.thresholdReachedAt || null
+      } : null,
+      privateInterest: record.decision.privateInterest ? {
+        phase: String(record.decision.privateInterest.phase || "").slice(0, 40),
+        frequency: String(record.decision.privateInterest.frequency || "").slice(0, 40),
+        probability: Number(record.decision.privateInterest.probability || 0),
+        idleHours: Number(record.decision.privateInterest.idleHours || 0),
+        unansweredBotStreak: Number(record.decision.privateInterest.unansweredBotStreak || 0)
       } : null
     } : null,
     reply: record?.reply == null ? null : String(record.reply).slice(0, 2_000),
@@ -2417,6 +2627,13 @@ async function performOneBotHealthCheck() {
       selfId: body.data?.user_id == null ? null : String(body.data.user_id),
       nickname: body.data?.nickname || null
     };
+    const accountUpdate = updateQqSelfPersonaAccount(state.qq.selfPersona, {
+      userId: state.maintenance.oneBot.selfId,
+      nickname: state.maintenance.oneBot.nickname,
+      at: checkedAt
+    });
+    state.qq.selfPersona = accountUpdate.store;
+    if (accountUpdate.changed) await saveQqSelfPersona();
     if (!previous.ok || previous.selfId !== state.maintenance.oneBot.selfId) {
       logger.debug("OneBot health check succeeded", {
         selfId: state.maintenance.oneBot.selfId,
@@ -2766,15 +2983,36 @@ async function shouldRespondToQq(event) {
 async function judgeQqProactiveEvent(event, { triggerMode = "message", countMessage = true } = {}) {
   const activityVersion = Number(event.groupActivityVersion || 0);
   const adaptive = getQqAdaptiveRuntimeForEvent(event);
+  const recentMessages = state.qq.memory.recentMessages[event.groupId] || [];
+  const interestKeywordMatch = matchQqSelfPersonaInterestKeywords(
+    state.qq.selfPersona,
+    [
+      normalizeQqDisplayText(stripMentionText(event.text) || event.text || ""),
+      normalizeQqDisplayText(event.replyContext?.text || "")
+    ].filter(Boolean).join("\n")
+  );
+  const recentContextKeywordHits = [...new Set(recentMessages.slice(-12)
+    .flatMap((entry) => matchQqSelfPersonaInterestKeywords(state.qq.selfPersona, entry?.text || "").keywords || []))]
+    .slice(0, 16);
+  const interestSignals = {
+    currentAndQuotedKeywords: interestKeywordMatch.keywords || [],
+    recentContextKeywords: recentContextKeywordHits,
+    relationship: adaptive.relationshipInterest,
+    cadence: adaptive.proactiveIntervals
+  };
   const proactiveDecision = await Promise.resolve(shouldProactivelyReplyToQq(event, state.qq, {
     stripMentionText,
-    recentMessages: state.qq.memory.recentMessages[event.groupId] || [],
+    recentMessages,
     humanStyle: adaptive.style,
     judgeEveryMessages: adaptive.proactiveIntervals.judgeEveryMessages,
     judgeEveryMinutes: adaptive.proactiveIntervals.judgeEveryMinutes,
     openRouterApiKey,
     assistantName,
     ownerLabel,
+    relationshipInterest: adaptive.relationshipInterest,
+    selfPersona: formatQqSelfPersonaContext(state.qq.selfPersona, { interestOnly: true }),
+    interestKeywordMatch,
+    interestSignals,
     triggerMode,
     countMessage
   })).catch((error) => ({
@@ -2834,6 +3072,7 @@ async function runQqProactiveMinuteChecks() {
   qqProactiveMinuteChecking = true;
   try {
     await runQqTimedAdaptiveStyleReviews();
+    maybeScheduleQqSelfPersonaRefresh();
     if (!state.qq.enhancer.enabled || !state.qq.proactive.enabled) return;
     for (const [groupId, cachedEvent] of qqProactiveLatestEventByGroupId) {
       if (!state.qq.allowedGroups.includes(groupId)) {
@@ -2856,6 +3095,7 @@ async function runQqProactiveMinuteChecks() {
       });
     }
     await runQqColdGroupInterestCheck();
+    await runQqPrivateInterestCheck();
   } finally {
     qqProactiveMinuteChecking = false;
   }
@@ -2967,7 +3207,8 @@ async function runQqColdGroupInterestCheck() {
       },
       promptHint: [
         `这是兴趣回复的冷群时间分支：群里最后一条消息距今约 ${plan.idleHours} 小时，目前没有任何人刚刚输入。`,
-        "结合最近聊天、当前时间和群的说话风格，判断现在是否真有一句具体、自然、不会打扰人的新话题可说。",
+        `本群开放时段由活跃统计得到：${plan.socialHours?.label || "样本不足时 09:00–23:00"}；连续未回复消息数 ${plan.unansweredBotStreak || 0}，兴趣抑制系数 ${plan.interestMultiplier ?? 1}。`,
+        "主要根据自己的全局兴趣与最近话题判断是否真有一句具体内容想说；当前时机只作次要修正。",
         "合适时只发一句短消息，可以接一个尚有余味的话题或轻量分享；不要点名催人、不要说群冷了、不要自称出来冒泡，也不要连续发多条。",
         "如果只能尬聊、重复旧话、像通知或客服，必须只输出 [[qq_silent]]。"
       ].join("\n"),
@@ -2980,6 +3221,92 @@ async function runQqColdGroupInterestCheck() {
     };
     markQqAdaptiveColdProactiveCheck(group);
     await saveQqPersonas();
+    await processQqReplyEvent(event, {
+      source: "onebot",
+      alreadyRemembered: true,
+      decisionOverride: decision
+    });
+    return;
+  }
+}
+
+async function runQqPrivateInterestCheck() {
+  for (const userId of qqPrivateInterestStatusByUserId.keys()) {
+    if (!state.qq.memory.recentMessages[`private:${userId}`]) qqPrivateInterestStatusByUserId.delete(userId);
+  }
+  for (const [scopeId, entries] of Object.entries(state.qq.memory.recentMessages)) {
+    if (!scopeId.startsWith("private:") || !Array.isArray(entries) || entries.length === 0) continue;
+    const userId = normalizeQqIdentifier(scopeId.slice("private:".length));
+    if (!userId) continue;
+    pruneExpiredQqBans();
+    if (state.qq.bannedUserIds.includes(userId)) continue;
+    const lastHumanEntry = [...entries].reverse().find((entry) => !entry?.isAssistant && entry?.senderId !== "assistant");
+    const latestEntry = entries.at(-1);
+    if (!lastHumanEntry || !latestEntry) continue;
+    const contact = getQqPersonaGroup(scopeId);
+    const member = getQqPersonaMember(scopeId, userId, lastHumanEntry.senderLabel);
+    const signals = buildQqAdaptiveLearningSignals(contact, member);
+    let plan = getQqAdaptivePrivateProactivePlan(signals, { lastActivityAt: latestEntry.at });
+    if (qqReplyScheduler.get(scopeId) || state.qq.activeGenerations[scopeId]
+      || Array.isArray(state.qq.pendingReplies[scopeId]?.events) && state.qq.pendingReplies[scopeId].events.length > 0) {
+      plan = { ...plan, eligible: false, reason: "reply_generation_active" };
+    }
+    logQqPrivateInterestStatus(userId, plan, signals.group);
+    if (!plan.eligible) continue;
+
+    markQqAdaptivePrivateProactiveCheck(contact);
+    await saveQqPersonas();
+    if (Math.random() >= Number(plan.probability || 0)) {
+      logger.info("QQ private proactive probability declined", {
+        userId,
+        phase: plan.phase,
+        frequency: plan.frequency,
+        probability: plan.probability,
+        idleHours: plan.idleHours,
+        unansweredBotStreak: plan.unansweredBotStreak,
+        nextCheckAfterMs: plan.nextCheckAfterMs
+      }, "interest");
+      return;
+    }
+
+    const event = {
+      type: "private_message",
+      senderId: userId,
+      senderName: lastHumanEntry.senderLabel || `QQ ${userId}`,
+      senderLabel: lastHumanEntry.senderLabel || `QQ ${userId}`,
+      text: "",
+      images: [],
+      atTargets: [],
+      isOwner: state.qq.ownerUserIds.includes(userId),
+      qqPrivateProactive: true,
+      proactiveObservedAtMs: Date.now(),
+      proactiveSource: "private_interest_timer",
+      qqScopeActivityVersion: Number(qqGroupActivityVersionByGroupId.get(scopeId) || 0),
+      raw: {
+        message_id: `private-interest-${Date.now()}-${userId}`,
+        time: Math.floor(Date.now() / 1000)
+      }
+    };
+    const decision = {
+      ok: true,
+      proactive: true,
+      privateProactive: true,
+      triggerMode: `private_${plan.phase}`,
+      reason: `private ${plan.phase} interest candidate`,
+      privateInterest: { ...plan, sampleSize: signals.group.sampleSize },
+      promptHint: [
+        `这是私聊主动兴趣分支，当前处于 ${plan.phase} 阶段，距离最近互动约 ${plan.idleHours} 小时。`,
+        `根据互动频率计算的本轮候选概率为 ${Math.round(plan.probability * 100)}%，连续未回复消息数为 ${plan.unansweredBotStreak}，兴趣抑制系数为 ${plan.interestMultiplier}。`,
+        "主要依据自己的全局兴趣和这段私聊尚有余味的话题决定是否真有一句想说；不要问为什么不回，不要机械问在吗，也不要透露概率。",
+        "没有具体内容时只输出 [[qq_silent]]。"
+      ].join("\n"),
+      replyContext: entries.slice(-12).map((entry) => ({
+        sender: entry.isAssistant ? (state.qq.selfPersona.account.nickname || assistantName) : "contact",
+        text: entry.text || "（非文字消息）",
+        imageCount: Array.isArray(entry.images) ? entry.images.length : 0,
+        replyToBot: Boolean(entry.replyContext?.isSelf)
+      }))
+    };
     await processQqReplyEvent(event, {
       source: "onebot",
       alreadyRemembered: true,
@@ -3027,7 +3354,12 @@ function logQqColdGroupInterestStatus(event, plan = {}, learning = {}) {
     nextCheckAt: plan.nextCheckAt || null,
     lastCheckAt: plan.lastCheckAt || null,
     lastProactiveAt: plan.lastProactiveAt || null,
-    awaitingHuman: Boolean(plan.awaitingHuman)
+    awaitingHuman: Boolean(plan.awaitingHuman),
+    unansweredBotStreak: Number(plan.unansweredBotStreak || 0),
+    interestMultiplier: Number(plan.interestMultiplier ?? 1),
+    socialHours: plan.socialHours?.label || null,
+    socialHoursSource: plan.socialHours?.source || null,
+    nextCheckAfterMs: plan.nextCheckAfterMs ?? null
   };
   logger[plan.eligible ? "info" : "debug"](
     "QQ cold-group interest status changed",
@@ -3035,6 +3367,33 @@ function logQqColdGroupInterestStatus(event, plan = {}, learning = {}) {
     "interest",
     qqLogContext(event)
   );
+}
+
+function logQqPrivateInterestStatus(userId, plan = {}, learning = {}) {
+  const fingerprint = [
+    Boolean(plan.eligible),
+    plan.reason || "",
+    plan.phase || "",
+    plan.probability ?? "",
+    plan.unansweredBotStreak ?? ""
+  ].join("|");
+  if (qqPrivateInterestStatusByUserId.get(userId) === fingerprint) return;
+  qqPrivateInterestStatusByUserId.set(userId, fingerprint);
+  logger[plan.eligible ? "info" : "debug"]("QQ private proactive interest status changed", {
+    userId,
+    eligible: Boolean(plan.eligible),
+    reason: plan.reason || null,
+    phase: plan.phase || null,
+    frequency: plan.frequency || null,
+    probability: plan.probability ?? null,
+    humanSampleSize: Number(learning.sampleSize || 0),
+    idleHours: plan.idleHours ?? null,
+    unansweredBotStreak: plan.unansweredBotStreak ?? 0,
+    interestMultiplier: plan.interestMultiplier ?? 1,
+    socialHours: plan.socialHours?.label || null,
+    nextCheckAt: plan.nextCheckAt || null,
+    nextCheckAfterMs: plan.nextCheckAfterMs ?? null
+  }, "interest", { senderId: userId });
 }
 
 function logQqColdGroupInterestOutcome(record) {
@@ -3061,6 +3420,8 @@ function logQqColdGroupInterestOutcome(record) {
     nextCheckAt: plan.nextCheckAt || null,
     replyChars: String(record.reply || "").length,
     sendStatus: record.send?.status || record.send?.results?.[0]?.status || null,
+    addressingMode: event.qqAddressing?.mode || null,
+    addressingProbability: event.qqAddressing?.probability ?? null,
     error: record.error || record.send?.error || null,
     generationDurationMs: record.timings?.generationDurationMs || 0,
     sendDurationMs: record.timings?.sendDurationMs || 0,
@@ -3068,6 +3429,35 @@ function logQqColdGroupInterestOutcome(record) {
   };
   const level = outcome === "failed" ? "error" : outcome === "sent" ? "success" : "info";
   logger[level]("QQ cold-group interest decision", details, "interest", qqLogContext(event));
+}
+
+function logQqPrivateInterestOutcome(record) {
+  const event = record?.event || {};
+  if (!event.qqPrivateProactive) return;
+  const decision = record.decision || {};
+  const plan = decision.privateInterest || {};
+  const sendFailed = record.send?.ok === false;
+  let outcome = "silent";
+  if (record.error || sendFailed) outcome = "failed";
+  else if (decision.superseded) outcome = "superseded";
+  else if (record.reply && record.send?.ok !== false) outcome = "sent";
+  const level = outcome === "failed" ? "error" : outcome === "sent" ? "success" : "info";
+  logger[level]("QQ private proactive interest decision", {
+    outcome,
+    userId: event.senderId || null,
+    triggerMode: decision.triggerMode || null,
+    phase: plan.phase || null,
+    frequency: plan.frequency || null,
+    probability: plan.probability ?? null,
+    idleHours: plan.idleHours ?? null,
+    unansweredBotStreak: plan.unansweredBotStreak ?? 0,
+    interestMultiplier: plan.interestMultiplier ?? 1,
+    socialHours: plan.socialHours?.label || null,
+    nextCheckAfterMs: plan.nextCheckAfterMs ?? null,
+    replyChars: String(record.reply || "").length,
+    sendStatus: record.send?.status || record.send?.results?.[0]?.status || null,
+    error: record.error || record.send?.error || null
+  }, "interest", qqLogContext(event));
 }
 
 function hasQqProactiveQuietWindowElapsed(event) {
@@ -3103,11 +3493,22 @@ function logQqProactiveInterestDecision(event, decision = {}) {
     judgeEveryMessages: decision.judgeEveryMessages || state.qq.proactive.judgeEveryMessages,
     judgeEveryMinutes: decision.judgeEveryMinutes ?? state.qq.proactive.judgeEveryMinutes,
     triggerMode: decision.triggerMode,
+    triggerReason: decision.triggerReason,
     messageCountRemaining: decision.messageCountRemaining,
     ruleScore: decision.interestScore ?? interest.score,
     directness: interest.directness,
     likedTopicScore: interest.likedTopicScore,
     contextScore: interest.contextScore,
+    relationshipScore: interest.relationshipScore,
+    personaKeywordScore: interest.personaKeywordScore,
+    personaKeywordHits: decision.interestKeywordMatch?.keywords || [],
+    personaNameMatched: Boolean(decision.interestKeywordMatch?.nameMatched),
+    recentContextKeywordHits: decision.interestSignals?.recentContextKeywords || [],
+    relationshipMessagesSinceInteraction: decision.relationshipInterest?.messagesSinceInteraction ?? null,
+    relationshipMinutesSinceInteraction: decision.relationshipInterest?.minutesSinceInteraction ?? null,
+    relationshipInterestBoost: decision.relationshipInterest?.interestBoost ?? null,
+    relationshipCadenceMessages: decision.relationshipInterest?.judgeEveryMessages ?? null,
+    relationshipCadenceMinutes: decision.relationshipInterest?.judgeEveryMinutes ?? null,
     penalty: interest.penalty,
     labels: interest.labels || [],
     blockers: interest.blockers || [],
@@ -3117,6 +3518,8 @@ function logQqProactiveInterestDecision(event, decision = {}) {
     judgeApiKeyConfigured: Boolean(openRouterApiKey),
     modelShouldReply: judge.shouldReply,
     modelInterest: judge.interest,
+    modelEffectiveInterest: judge.effectiveInterest,
+    interestMultiplier: judge.interestMultiplier,
     modelReason: judge.reason,
     modelReplyStyle: judge.replyStyle,
     modelDurationMs: judge.durationMs,
@@ -5188,6 +5591,7 @@ function isFilesystemProbe(text) {
 async function buildAssistantInstructions(event) {
   const speaker = event.qqColdProactive
     ? "兴趣回复定时器（没有新发送者）"
+    : event.qqPrivateProactive ? "私聊兴趣定时器（没有新消息）"
     : event.isOwner ? ownerLabel : event.senderLabel || "群友";
   const assistantSkillBrief = await loadAssistantSkillBrief();
   const privateChat = isQqPrivateEvent(event);
@@ -5200,8 +5604,11 @@ async function buildAssistantInstructions(event) {
     event.qqColdProactive
       ? "这是兴趣回复的冷群时间分支，没有群友刚刚发消息。只能结合已有上下文选择发一句自然的新消息，或输出 [[qq_silent]] 保持沉默。"
       : null,
+    event.qqPrivateProactive
+      ? "这是兴趣回复的私聊主动联系分支，对方刚刚没有发消息。只能结合已有私聊上下文、关系频率和全局兴趣选择发一句自然消息，或输出 [[qq_silent]] 保持沉默。"
+      : null,
     "只输出最终要发送出去的中文文本，不要解释，不要写前后缀，不要使用 Markdown。",
-    `你是接入 QQ 的 ${assistantName}。公开群聊里不要说出本机路径、自定义 profile 细节或宿主个人信息；如果必须提到自己的代号，只说 ${assistantName}。`,
+    `你是接入 QQ 的 ${state.qq.selfPersona.account.nickname || state.qq.selfPersona.persona.name || assistantName}。公开群聊里不要说出本机路径、自定义 profile 细节或宿主个人信息。`,
     privateChat
       ? "自称用“我”；私聊自然、清楚、略亲近，通常 1 到 4 句。"
       : "自称用“我”；群聊像普通群友自然接话，通常 1 到 3 句，避免刷屏。",
@@ -5370,7 +5777,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     scopeId ? state.qq.memory.recentMessages[scopeId] || [] : [],
     { privateChat: isQqPrivateEvent(event) }
   );
-  const adaptiveSignals = event.groupId ? getQqAdaptiveSignalsForEvent(event) : null;
+  const adaptiveSignals = getQqAdaptiveSignalsForEvent(event);
   const humanChatStyle = adaptiveSignals
     ? personalizeQqHumanStyle(baseHumanChatStyle, adaptiveSignals)
     : baseHumanChatStyle;
@@ -5396,6 +5803,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     adaptiveStyleReviewAt: adaptiveSignals?.group?.lastStyleReviewAt || null
   };
   const conversationMemoryContext = formatQqConversationMemoryContext(state.qq.conversationMemory, event);
+  const selfPersonaContext = formatQqSelfPersonaContext(state.qq.selfPersona);
   const unifiedMemoryContext = await unifiedMemory.formatForPrompt({ query: text, limit: 6 });
   const personaContext = formatQqPersonaContext(event);
   const repetitionGuard = state.qq.enhancer.enabled ? buildQqRepetitionGuard(event) : "";
@@ -5461,6 +5869,8 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       humanBehaviorContext ? "" : null,
       botToolContext,
       botToolContext ? "" : null,
+      selfPersonaContext,
+      selfPersonaContext ? "" : null,
       conversationMemoryContext,
       conversationMemoryContext ? "" : null,
       publicMemoryContext,
@@ -5509,16 +5919,21 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       "",
       event.qqColdProactive
         ? "兴趣回复冷群时间检查："
+        : event.qqPrivateProactive ? "兴趣回复私聊主动联系检查："
         : isQqPrivateEvent(event) ? "收到的 QQ 私聊：" : "收到的群消息：",
       event.queuedAggregate ? `下面是你上一轮生成期间继续收到的 ${event.queuedMessageCount || "多"} 条消息，Hub 已按“消息一/消息二/...”标注；请把它们当作连续上下文一起回应，不要逐条机械复读标签，除非需要澄清。` : null,
       event.qqColdProactive
         ? "当前没有新消息。请仅依据上面的最近群聊和时间信号判断是否自然发一句。"
+        : event.qqPrivateProactive
+        ? "当前没有新消息。请仅依据上面的私聊记录、关系频率、未回复抑制和全局兴趣判断是否自然联系对方。"
         : text || "对方只 @ 了你，没有附加具体内容。",
       "",
       forceLocalReply ? "你正在 agent 工具循环中。请根据上面的全部工具结果判断下一步：如果还缺信息，可以继续只输出新的 [[qq_command:/...]]；如果工具调用结束，请输出最终 QQ 回复并包含 [[qq_done]]。不要把内部标记解释给群友，不要复述工具日志。" : null,
       forceLocalReply ? "" : null,
       event.qqColdProactive
         ? "如果决定开口，只输出一句要发到群里的短消息；否则只输出 [[qq_silent]]。"
+        : event.qqPrivateProactive
+        ? "如果决定主动联系，只输出一句要发给对方的自然短消息；否则只输出 [[qq_silent]]。不要催回复，不要因为沉默而质问对方。"
         : isQqPrivateEvent(event)
         ? "请直接给出要发送到 QQ 私聊里的最终回复。不要追加服务式追问或“我还能继续帮你”的结尾。"
         : "请直接给出要发送到 QQ 群里的最终回复。不要追加服务式追问或“我还能继续帮你”的结尾。"
@@ -5541,7 +5956,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       prompt = await buildReplyPrompt(memoryContext, 1, true);
       baseReply = await runReplyPrompt(prompt);
     }
-    if (!event.qqColdProactive) {
+    if (!event.qqColdProactive && !event.qqPrivateProactive) {
       baseReply = await runQqBotToolLoop({
         initialReply: baseReply,
         event,
@@ -5573,7 +5988,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       ...(event.qqConversationMemoryPatches || []),
       ...parsedMemory.patches
     ];
-    if (!parsedMemory.visibleText) return event.qqColdProactive ? "" : buildAssistantReply(event);
+    if (!parsedMemory.visibleText) return event.qqColdProactive || event.qqPrivateProactive ? "" : buildAssistantReply(event);
     return parsedMemory.visibleText.slice(0, 900);
   } finally {
     event.imagePaths = imagePaths;
@@ -6528,13 +6943,14 @@ function formatQqConversationContextLine(entry) {
 async function rememberQqExchange(event, reply) {
   const scopeId = getQqMemoryScopeId(event);
   if (!state.qq.memory.enabled || !scopeId || !reply) return;
+  const timedProactive = Boolean(event.qqColdProactive || event.qqPrivateProactive);
   const visibleReply = flattenQqReplyForMemory(event, reply);
   const entry = {
     at: new Date().toISOString(),
-    senderId: event.qqColdProactive ? "system" : event.senderId,
-    senderLabel: event.qqColdProactive ? "冷群兴趣触发" : event.senderLabel || event.senderName || "群友",
+    senderId: timedProactive ? "system" : event.senderId,
+    senderLabel: event.qqColdProactive ? "冷群兴趣触发" : event.qqPrivateProactive ? "私聊兴趣触发" : event.senderLabel || event.senderName || "群友",
     isOwner: Boolean(event.isOwner),
-    userText: event.qqColdProactive ? "" : compactMemoryText(stripMentionText(event.text) || ""),
+    userText: timedProactive ? "" : compactMemoryText(stripMentionText(event.text) || ""),
     quotedText: compactMemoryText(event.replyContext?.text || ""),
     reply: compactMemoryText(visibleReply)
   };
@@ -6547,25 +6963,32 @@ async function rememberQqExchange(event, reply) {
     replyTargetId: event.qqColdProactive ? "" : event.senderId
   });
   let adaptiveChanged = false;
-  if (event.groupId) {
-    const group = getQqPersonaGroup(event.groupId);
+  if (scopeId) {
+    const group = getQqPersonaGroup(scopeId);
     const member = event.qqColdProactive
       ? null
-      : getQqPersonaMember(event.groupId, event.senderId, event.senderName);
+      : getQqPersonaMember(scopeId, event.senderId, event.senderName);
     adaptiveChanged = recordQqAdaptiveBotReply(group, member, event, reply, { bubbleCount });
     if (event.qqColdProactive) {
       markQqAdaptiveColdProactiveCheck(group, { sent: true });
       adaptiveChanged = true;
     }
+    if (event.qqPrivateProactive) {
+      markQqAdaptivePrivateProactiveCheck(group, { sent: true });
+      adaptiveChanged = true;
+    }
     adaptiveChanged = maybeReviewQqAdaptiveLanguageStyle(
       group,
-      state.qq.memory.recentMessages[event.groupId] || []
+      state.qq.memory.recentMessages[scopeId] || []
     ) || adaptiveChanged;
   }
+  state.qq.selfPersona = recordQqSelfPersonaActivity(state.qq.selfPersona, scopeId, { botReplies: 1 });
   await Promise.all([
     saveQqMemory(),
+    saveQqSelfPersona(),
     adaptiveChanged ? saveQqPersonas() : Promise.resolve()
   ]);
+  maybeScheduleQqSelfPersonaRefresh();
 }
 
 function rememberQqConversationAssistantMessage(scopeId, reply, {
@@ -6625,18 +7048,21 @@ async function rememberQqGroupMessage(event) {
   };
   const current = state.qq.memory.recentMessages[scopeId] || [];
   state.qq.memory.recentMessages[scopeId] = [...current, entry].slice(-state.qq.memory.groupRecentLimit);
-  const personaChanged = event.groupId ? updateQqPersonaFromEvent(event) : false;
-  const styleReviewed = event.groupId ? maybeReviewQqAdaptiveLanguageStyle(
-    getQqPersonaGroup(event.groupId),
+  const personaChanged = updateQqPersonaFromEvent(event);
+  const styleReviewed = personaChanged ? maybeReviewQqAdaptiveLanguageStyle(
+    getQqPersonaGroup(scopeId),
     state.qq.memory.recentMessages[scopeId] || []
   ) : false;
+  state.qq.selfPersona = recordQqSelfPersonaActivity(state.qq.selfPersona, scopeId, { humanMessages: 1 });
   state.qq.conversationMemory = updateQqConversationMemoryFromEvent(state.qq.conversationMemory, event);
   const scopesPruned = pruneQqStateScopes();
   await Promise.all([
     saveQqMemory(),
     saveQqConversationMemory(),
+    saveQqSelfPersona(),
     personaChanged || styleReviewed || scopesPruned ? saveQqPersonas() : Promise.resolve()
   ]);
+  maybeScheduleQqSelfPersonaRefresh();
 }
 
 async function processQqReplyEvent(event, options = {}) {
@@ -6662,10 +7088,11 @@ async function processQqReplyEvent(event, options = {}) {
   }, "lifecycle", { traceId });
   if (!options.alreadyRemembered) {
     const rememberStartedAt = Date.now();
-    if (event.groupId) {
-      const groupId = String(event.groupId);
-      const activityVersion = Number(qqGroupActivityVersionByGroupId.get(groupId) || 0) + 1;
-      qqGroupActivityVersionByGroupId.set(groupId, activityVersion);
+    const activityScopeId = getQqMemoryScopeId(event);
+    if (activityScopeId) {
+      const activityVersion = Number(qqGroupActivityVersionByGroupId.get(activityScopeId) || 0) + 1;
+      qqGroupActivityVersionByGroupId.set(activityScopeId, activityVersion);
+      event.qqScopeActivityVersion = activityVersion;
       event.groupActivityVersion = activityVersion;
       event.proactiveObservedAtMs = Date.now();
       event.proactiveSource = source;
@@ -6694,7 +7121,7 @@ async function processQqReplyEvent(event, options = {}) {
       event.proactiveDecision = decision.proactive ? decision : undefined;
       commandAction = await buildQqCommandAction(event);
       if (shouldQueueQqEventDuringGeneration(event, decision, commandAction)) {
-        if (!event.qqColdProactive) {
+        if (!event.qqColdProactive && !event.qqPrivateProactive) {
           const pending = queueQqPendingReplyEvent(event, source, decision);
           queued = true;
           queuedCount = Array.isArray(pending?.events) ? pending.events.length : 0;
@@ -6748,8 +7175,9 @@ async function processQqReplyEvent(event, options = {}) {
     timings
   };
 
-  if (event.qqColdProactive
-    && Number(event.groupActivityVersion || 0) !== Number(qqGroupActivityVersionByGroupId.get(String(event.groupId)) || 0)) {
+  if ((event.qqColdProactive || event.qqPrivateProactive)
+    && Number(event.qqScopeActivityVersion ?? event.groupActivityVersion ?? 0)
+      !== Number(qqGroupActivityVersionByGroupId.get(getQqMemoryScopeId(event)) || 0)) {
     record.reply = null;
     record.decision = {
       ...record.decision,
@@ -6832,6 +7260,7 @@ async function processQqReplyEvent(event, options = {}) {
     commandAction
   });
   logQqColdGroupInterestOutcome(record);
+  logQqPrivateInterestOutcome(record);
 
   const scopeId = getQqMemoryScopeId(event);
   if (replyScope || record.reply) {
@@ -7014,7 +7443,7 @@ function compactMemoryText(text) {
 }
 
 function getQqPersonaGroup(groupId) {
-  const id = normalizeQqIdentifier(groupId);
+  const id = normalizeQqPersonaScopeId(groupId);
   if (!id) return null;
   if (!state.qq.personas.groups[id]) {
     state.qq.personas.groups[id] = {
@@ -7024,6 +7453,15 @@ function getQqPersonaGroup(groupId) {
   }
   state.qq.personas.groups[id].members = createSafeRecord(state.qq.personas.groups[id].members);
   return state.qq.personas.groups[id];
+}
+
+function normalizeQqPersonaScopeId(value) {
+  const raw = String(value || "").trim();
+  if (raw.startsWith("private:")) {
+    const userId = normalizeQqIdentifier(raw.slice("private:".length));
+    return userId ? `private:${userId}` : "";
+  }
+  return normalizeQqIdentifier(raw) || "";
 }
 
 function getQqPersonaMember(groupId, senderId, senderName = "") {
@@ -7149,8 +7587,9 @@ function formatPersonaSummary(member) {
 }
 
 function updateQqPersonaFromEvent(event) {
-  if (!event.groupId || !event.senderId) return false;
-  const member = getQqPersonaMember(event.groupId, event.senderId, event.senderName);
+  const scopeId = getQqMemoryScopeId(event);
+  if (!scopeId || !event.senderId) return false;
+  const member = getQqPersonaMember(scopeId, event.senderId, event.senderName);
   if (!member) return false;
   const now = new Date().toISOString();
   const text = compactMemoryText(normalizeQqDisplayText(stripMentionText(event.text) || event.text || ""));
@@ -7164,39 +7603,56 @@ function updateQqPersonaFromEvent(event) {
   for (const topic of detectQqPersonaTopics(text)) bumpCounter(member.topicScores, topic);
   for (const style of detectQqPersonaStyles(text)) bumpCounter(member.styleScores, style);
   if (text) member.recentTexts = [...(member.recentTexts || []), text].slice(-8);
-  const group = getQqPersonaGroup(event.groupId);
+  const group = getQqPersonaGroup(scopeId);
   recordQqAdaptiveHumanMessage(group, member, event);
   group.updatedAt = now;
   return true;
 }
 
 function getQqAdaptiveSignalsForEvent(event) {
-  if (!event?.groupId) return null;
-  const group = getQqPersonaGroup(event.groupId);
+  const scopeId = getQqMemoryScopeId(event);
+  if (!scopeId) return null;
+  const group = getQqPersonaGroup(scopeId);
   const member = event.senderId && !event.qqColdProactive
-    ? getQqPersonaMember(event.groupId, event.senderId, event.senderName)
+    ? getQqPersonaMember(scopeId, event.senderId, event.senderName)
     : null;
   return buildQqAdaptiveLearningSignals(group, member);
 }
 
 function getQqAdaptiveRuntimeForEvent(event) {
-  const entries = event?.groupId ? state.qq.memory.recentMessages[event.groupId] || [] : [];
-  const baseStyle = analyzeQqHumanChatStyle(entries);
+  const scopeId = getQqMemoryScopeId(event);
+  const entries = scopeId ? state.qq.memory.recentMessages[scopeId] || [] : [];
+  const baseStyle = analyzeQqHumanChatStyle(entries, { privateChat: isQqPrivateEvent(event) });
   const signals = getQqAdaptiveSignalsForEvent(event) || buildQqAdaptiveLearningSignals(null, null);
+  const baseIntervals = getQqAdaptiveProactiveIntervals(signals, {
+    judgeEveryMessages: state.qq.proactive.judgeEveryMessages,
+    judgeEveryMinutes: state.qq.proactive.judgeEveryMinutes
+  });
+  const relationshipInterest = getQqRelationshipInterestPlan(entries, {
+    senderId: event?.senderId,
+    baseMessages: baseIntervals.judgeEveryMessages,
+    baseMinutes: baseIntervals.judgeEveryMinutes,
+    unansweredBotStreak: signals.member?.unansweredBotStreak || 0
+  });
   return {
     signals,
     style: personalizeQqHumanStyle(baseStyle, signals),
-    proactiveIntervals: getQqAdaptiveProactiveIntervals(signals, {
-      judgeEveryMessages: state.qq.proactive.judgeEveryMessages,
-      judgeEveryMinutes: state.qq.proactive.judgeEveryMinutes
-    })
+    relationshipInterest,
+    proactiveIntervals: {
+      ...baseIntervals,
+      judgeEveryMessages: relationshipInterest.judgeEveryMessages,
+      judgeEveryMinutes: relationshipInterest.judgeEveryMinutes,
+      relationshipRecency: relationshipInterest.recency,
+      relationshipInterestBoost: relationshipInterest.interestBoost,
+      relationshipUnansweredBotStreak: relationshipInterest.unansweredBotStreak
+    }
   };
 }
 
 function backfillQqAdaptiveLearningFromRecentMessages() {
   let changed = false;
   for (const [groupId, entries] of Object.entries(state.qq.memory.recentMessages)) {
-    if (groupId.startsWith("private:") || !Array.isArray(entries)) continue;
+    if (!Array.isArray(entries)) continue;
     const group = getQqPersonaGroup(groupId);
     if (ensureQqAdaptiveLearning(group).bootstrapVersion >= 1) continue;
     for (const entry of entries) {
@@ -7207,7 +7663,7 @@ function backfillQqAdaptiveLearningFromRecentMessages() {
       const member = getQqPersonaMember(groupId, entry.senderId, entry.senderLabel);
       recordQqAdaptiveHumanMessage(group, member, {
         ...entry,
-        groupId,
+        ...(groupId.startsWith("private:") ? { type: "private_message", senderId: groupId.slice("private:".length) } : { groupId }),
         senderName: entry.senderLabel,
         isReplyToSelf: Boolean(entry.replyContext?.isSelf)
       }, { at: entry.at });
@@ -7221,17 +7677,20 @@ function backfillQqAdaptiveLearningFromRecentMessages() {
 }
 
 function formatQqPersonaContext(event) {
-  if (!event.groupId || event.qqColdProactive) return "";
+  const scopeId = getQqMemoryScopeId(event);
+  if (!scopeId || event.qqColdProactive) return "";
   const members = [];
-  if (event.senderId) members.push(getQqPersonaMember(event.groupId, event.senderId, event.senderName));
+  if (event.senderId) members.push(getQqPersonaMember(scopeId, event.senderId, event.senderName));
   if (event.replyContext?.senderId) {
-    members.push(getQqPersonaMember(event.groupId, event.replyContext.senderId, event.replyContext.senderName));
+    members.push(getQqPersonaMember(scopeId, event.replyContext.senderId, event.replyContext.senderName));
   }
   const unique = members.filter((member, index, all) => member && all.findIndex((other) => other?.userId === member.userId) === index);
   if (unique.length === 0) return "";
   return [
-    "长期群友画像：",
-    "以下是根据本群长期发言累计出的弱参考，只能辅助理解语气和常聊主题，不要把不确定细节说成事实。",
+    scopeId.startsWith("private:") ? "长期私聊互动画像：" : "长期群友画像：",
+    scopeId.startsWith("private:")
+      ? "以下是根据当前私聊长期互动累计出的弱参考，只能辅助理解语气和常聊主题，不要把不确定细节说成事实。"
+      : "以下是根据本群长期发言累计出的弱参考，只能辅助理解语气和常聊主题，不要把不确定细节说成事实。",
     ...unique.map((member) => `${formatPersonaDisplayName(member)}：${formatPersonaSummary(member)}`)
   ].join("\n");
 }
@@ -10027,9 +10486,30 @@ async function sendOneBotGroupReply(event, reply, options = {}) {
   if (!event.groupId) return { ok: false, reason: "Missing group id" };
   try {
     assertQqReplyScopeActive(options.replyScope);
+    const addressing = chooseQqReplyAddressing(
+      event,
+      state.qq.memory.recentMessages[String(event.groupId)] || [],
+      {
+        baseMessages: state.qq.proactive.judgeEveryMessages,
+        baseMinutes: state.qq.proactive.judgeEveryMinutes
+      }
+    );
+    event.qqAddressing = addressing;
+    if (addressing.relationship) {
+      logger.info("QQ explicit reply addressing selected", {
+        groupId: event.groupId,
+        senderId: addressing.senderId,
+        mode: addressing.mode,
+        probability: addressing.probability,
+        lastInteractionAt: addressing.relationship.lastInteractionAt,
+        messagesSinceInteraction: addressing.relationship.messagesSinceInteraction,
+        minutesSinceInteraction: addressing.relationship.minutesSinceInteraction
+      }, "interest", qqLogContext(event));
+    }
     if (options.singleBubble) {
       const result = await sendOneBotGroupMessage(event, reply, {
-        quoteSource: isExplicitQqAtEvent(event),
+        quoteSource: addressing.mode === "quote",
+        mentionTargetId: addressing.mode === "mention" ? addressing.senderId : null,
         replyScope: options.replyScope
       });
       return {
@@ -10039,18 +10519,24 @@ async function sendOneBotGroupReply(event, reply, options = {}) {
         results: [result]
       };
     }
+    let firstBubble = true;
     return await sendQqGroupBubbles({
       event,
       reply,
-      quoteFirstBubble: isExplicitQqAtEvent(event),
+      quoteFirstBubble: addressing.mode === "quote",
       delayMs: getQqAdaptiveBubbleDelayMs(
         getQqAdaptiveRuntimeForEvent(event).style,
         { configuredMs: qqBubbleSendDelayMs }
       ),
-      sendGroupMessage: (bubble, bubbleOptions) => sendOneBotGroupMessage(event, bubble, {
-        ...bubbleOptions,
-        replyScope: options.replyScope
-      })
+      sendGroupMessage: (bubble, bubbleOptions) => {
+        const isFirst = firstBubble;
+        firstBubble = false;
+        return sendOneBotGroupMessage(event, bubble, {
+          ...bubbleOptions,
+          mentionTargetId: isFirst && addressing.mode === "mention" ? addressing.senderId : null,
+          replyScope: options.replyScope
+        });
+      }
     });
   } finally {
     await cleanupQqEventTaskWorkspaceByBot(event);
@@ -10215,6 +10701,14 @@ async function buildOneBotReplyMessage(event, reply, options = {}, resolvedImage
       type: "reply",
       data: { id: String(sourceMessageId) }
     });
+  }
+  const mentionTargetId = normalizeQqIdentifier(options.mentionTargetId);
+  if (mentionTargetId) {
+    message.push({
+      type: "at",
+      data: { qq: mentionTargetId }
+    });
+    message.push({ type: "text", data: { text: " " } });
   }
   const imagePaths = resolvedImagePaths || await resolveQqReplyMedia(reply, { stickerDir: qqStickerDir, event });
   const text = stripQqImageAttachmentMarkers(reply);
@@ -11406,6 +11900,9 @@ await mkdir(qqStickerDir, { recursive: true });
 await loadQqMemory();
 await loadQqPublicMemory();
 await loadQqPersonas();
+await loadQqSelfPersona();
+state.qq.selfPersona = syncQqSelfPersonaActivity(state.qq.selfPersona, state.qq.memory.recentMessages);
+await saveQqSelfPersona();
 if (backfillQqAdaptiveLearningFromRecentMessages()) await saveQqPersonas();
 await loadQqConversationMemory();
 await qqRequestStore.load().catch((error) => logger.warn("Unable to load QQ request store", { error }, "qq"));
@@ -11413,6 +11910,7 @@ await loadIMessageMemory();
 await loadRemoteExecutionMemory();
 updateIMessagePoller();
 updateQqProactiveMinuteScheduler();
+maybeScheduleQqSelfPersonaRefresh();
 
 const server = createServer(async (req, res) => {
   try {
@@ -11551,6 +12049,7 @@ function shutdown(signal) {
     await Promise.all([
       qqMemoryWriter.close(),
       qqPersonasWriter.close(),
+      qqSelfPersonaWriter.close(),
       qqConversationMemoryWriter.close()
     ]);
     await logger.info("Codex QQ Bot hub stopped", { signal, closeMode }, "system");

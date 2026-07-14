@@ -232,6 +232,11 @@
                 </div>
                 <div id="qqStickerFrequency" class="behavior-frequency-list"></div>
                 <div class="subsection-head behavior-heading">
+                  <div><h3 data-i18n="selfPersona">Bot 全局人设</h3><p data-i18n="selfPersonaHint">从各群和私聊的匿名摘要生成；QQ 昵称固定作为名字和兴趣关键词。</p></div>
+                  <button class="text-button compact-button" type="button" data-open-feature-logs="learning" data-log-query="self persona" data-i18n="viewDetailedLogs">查看详细日志</button>
+                </div>
+                <div id="qqSelfPersona" class="behavior-frequency-list"></div>
+                <div class="subsection-head behavior-heading">
                   <div><h3 data-i18n="adaptiveLearning">自动适应</h3><p data-i18n="adaptiveLearningHint">按群学习活跃时段、成员节奏，并按 24 小时时钟复盘真人与 Bot 的风格差异。</p></div>
                   <button class="text-button compact-button" type="button" data-open-feature-logs="learning" data-i18n="viewDetailedLogs">查看详细日志</button>
                 </div>
@@ -241,6 +246,11 @@
                   <button class="text-button compact-button" type="button" data-open-feature-logs="interest" data-log-query="cold-group" data-i18n="viewDetailedLogs">查看详细日志</button>
                 </div>
                 <div id="qqColdInterest" class="behavior-frequency-list"></div>
+                <div class="subsection-head behavior-heading">
+                  <div><h3 data-i18n="privateInterest">私聊主动兴趣</h3><p data-i18n="privateInterestHint">按互动频率和时间采用短期高、中期低、长期回升的概率，并对连续未回复自动退避。</p></div>
+                  <button class="text-button compact-button" type="button" data-open-feature-logs="interest" data-log-query="private proactive" data-i18n="viewDetailedLogs">查看详细日志</button>
+                </div>
+                <div id="qqPrivateInterest" class="behavior-frequency-list"></div>
                 <div class="subsection-head">
                   <div><h3 data-i18n="qqAllowlist">QQ群白名单</h3><p data-i18n="qqAllowlistHint">只有列表内群聊会触发助手。</p></div>
                   <span id="groupCount" class="count-pill">0</span>

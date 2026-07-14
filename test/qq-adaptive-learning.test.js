@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildQqAdaptiveLearningSignals,
+  deriveQqLearnedSocialHours,
   ensureQqAdaptiveLearning,
   formatQqAdaptiveLearningContext,
   getQqAdaptiveColdProactivePlan,
+  getQqAdaptivePrivateProactivePlan,
   getQqAdaptiveProactiveIntervals,
   markQqAdaptiveColdProactiveCheck,
+  markQqAdaptivePrivateProactiveCheck,
   maybeReviewQqAdaptiveLanguageStyle,
   personalizeQqHumanStyle,
   recordQqAdaptiveBotReply,
@@ -158,7 +161,7 @@ test("style review ignores Bot messages older than the new-reply tracking start"
   assert.equal(signals.group.botReplyCount, 4);
 });
 
-test("cold-group interest uses elapsed time and blocks repeated Bot-only outreach", () => {
+test("cold-group interest uses learned hours and exponentially backs off unanswered Bot outreach", () => {
   const now = Date.UTC(2026, 6, 10, 4, 0);
   const signals = {
     currentHour: 12,
@@ -197,13 +200,70 @@ test("cold-group interest uses elapsed time and blocks repeated Bot-only outreac
   learning.lastMessageAt = signals.group.lastMessageAt;
   markQqAdaptiveColdProactiveCheck(group, { at: now, sent: true });
   const blockedSignals = buildQqAdaptiveLearningSignals(group, null, { now });
-  assert.equal(getQqAdaptiveColdProactivePlan(blockedSignals, { now }).reason, "awaiting_human_after_cold_proactive");
+  const backedOff = getQqAdaptiveColdProactivePlan(blockedSignals, { now });
+  assert.equal(backedOff.reason, "cold_check_cooldown");
+  assert.equal(backedOff.awaitingHuman, true);
+  assert.ok(backedOff.nextCheckAfterMs > 3 * 60 * 60 * 1000);
 
   recordQqAdaptiveHumanMessage(group, member, humanEvent(1, {
     at: new Date(now + 60 * 60 * 1000).toISOString(),
     text: "有人接话了"
   }));
   assert.equal(ensureQqAdaptiveLearning(group).coldProactiveAwaitingHuman, false);
+});
+
+test("derives wraparound social hours from learned activity instead of a fixed daytime window", () => {
+  const counts = Array(24).fill(0);
+  for (const hour of [22, 23, 0, 1]) counts[hour] = 25;
+  const hours = deriveQqLearnedSocialHours(counts, 100);
+  assert.equal(hours.source, "learned");
+  assert.equal(hours.wrapsMidnight, true);
+  assert.ok(hours.openHours.includes(23));
+  assert.ok(hours.openHours.includes(0));
+  assert.equal(hours.openHours.includes(12), false);
+});
+
+test("private proactive interest is U-shaped and unanswered messages lower probability and lengthen cooldown", () => {
+  const now = Date.UTC(2026, 6, 10, 12, 0);
+  const baseSignals = {
+    currentHour: 20,
+    group: {
+      sampleSize: 40,
+      confidence: 0.8,
+      messagesPerActiveDay: 12,
+      medianGapSeconds: 600,
+      lastMessageAt: new Date(now - 30 * 60 * 1000).toISOString(),
+      lastBotReplyAt: new Date(now - 30 * 60 * 1000).toISOString(),
+      lastPrivateProactiveCheckAt: null,
+      unansweredBotStreak: 0,
+      socialHours: { source: "learned", startHour: 18, endHour: 2, wrapsMidnight: true, openHours: [18, 19, 20, 21, 22, 23, 0, 1], label: "18:00–02:00" }
+    }
+  };
+  const short = getQqAdaptivePrivateProactivePlan(baseSignals, { now });
+  const middle = getQqAdaptivePrivateProactivePlan({
+    ...baseSignals,
+    group: { ...baseSignals.group, lastMessageAt: new Date(now - 5 * 60 * 60 * 1000).toISOString(), lastBotReplyAt: new Date(now - 5 * 60 * 60 * 1000).toISOString() }
+  }, { now });
+  const long = getQqAdaptivePrivateProactivePlan({
+    ...baseSignals,
+    group: { ...baseSignals.group, lastMessageAt: new Date(now - 36 * 60 * 60 * 1000).toISOString(), lastBotReplyAt: new Date(now - 36 * 60 * 60 * 1000).toISOString() }
+  }, { now });
+  assert.equal(short.phase, "short");
+  assert.equal(middle.phase, "middle");
+  assert.equal(long.phase, "long");
+  assert.ok(short.probability > middle.probability);
+  assert.ok(long.probability > middle.probability);
+
+  const contact = {};
+  ensureQqAdaptiveLearning(contact).sampleCount = 40;
+  markQqAdaptivePrivateProactiveCheck(contact, { at: now, sent: true });
+  assert.equal(ensureQqAdaptiveLearning(contact).lastPrivateProactiveAt, new Date(now).toISOString());
+  const suppressed = getQqAdaptivePrivateProactivePlan({
+    ...baseSignals,
+    group: { ...baseSignals.group, unansweredBotStreak: 3 }
+  }, { now });
+  assert.ok(suppressed.probability < short.probability);
+  assert.ok(suppressed.nextCheckAfterMs > short.nextCheckAfterMs);
 });
 
 test("exposes detailed safe group-level learning parameters for the dashboard", () => {
