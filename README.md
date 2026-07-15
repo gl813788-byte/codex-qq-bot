@@ -20,7 +20,7 @@
 
 ## Dashboard preview
 
-![Codex Remote Contact dashboard overview](docs/assets/dashboard-overview.png)
+![Codex Remote Contact dashboard overview](docs/assets/dashboard-overview-readme.png)
 
 The overview reads live Hub state for service topology, QQ / OneBot health, Codex quota, active work, recent activity, and the response-time pulse instead of rendering demo values.
 

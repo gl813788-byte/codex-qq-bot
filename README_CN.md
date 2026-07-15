@@ -20,7 +20,7 @@
 
 ## 仪表盘预览
 
-![Codex Remote Contact 仪表盘总览](docs/assets/dashboard-overview.png)
+![Codex Remote Contact 仪表盘总览](docs/assets/dashboard-overview-readme.png)
 
 总览会读取 Hub 的实时状态来展示服务拓扑、QQ / OneBot 健康度、Codex 额度、活动任务、最近事件和响应时间脉搏，不使用演示数据。
 
