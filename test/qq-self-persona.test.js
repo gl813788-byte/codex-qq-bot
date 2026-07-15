@@ -37,12 +37,12 @@ test("QQ nickname is a fixed interest keyword across generated persona updates",
 test("scope summaries are due by bounded message/reply thresholds and feed global generation", () => {
   const startedAt = Date.UTC(2026, 6, 15, 8, 0);
   let store = createEmptyQqSelfPersona();
-  store = recordQqSelfPersonaActivity(store, "10001", { humanMessages: 48, botReplies: 12, at: startedAt });
-  store = recordQqSelfPersonaActivity(store, "private:20001", { humanMessages: 32, botReplies: 0, at: startedAt });
+  store = recordQqSelfPersonaActivity(store, "10001", { humanMessages: 96, botReplies: 24, at: startedAt });
+  store = recordQqSelfPersonaActivity(store, "private:20001", { humanMessages: 64, botReplies: 0, at: startedAt });
   const due = getDueQqSelfPersonaScopes(store, {
-    minInitialMessages: 32,
-    messagesPerSummary: 48,
-    botRepliesPerSummary: 12,
+    minInitialMessages: 64,
+    messagesPerSummary: 96,
+    botRepliesPerSummary: 24,
     now: startedAt,
     limit: 4
   });
@@ -59,7 +59,7 @@ test("scope summaries are due by bounded message/reply thresholds and feed globa
   }, { at: startedAt });
   const generation = shouldRegenerateQqSelfPersona(store, {
     minScopeSummaries: 2,
-    minInitialMessages: 80,
+    minInitialMessages: 160,
     now: startedAt
   });
   assert.equal(generation.due, true);
@@ -69,36 +69,43 @@ test("scope summaries are due by bounded message/reply thresholds and feed globa
   assert.doesNotMatch(prompt, /private:20001|10001/);
 });
 
-test("scope and global persona refreshes respect longer wall-clock cooldowns", () => {
+test("higher activity thresholds combine with shorter wall-clock cooldowns", () => {
   const startedAt = Date.UTC(2026, 6, 15, 8, 0);
   let store = updateQqSelfPersonaAccount(createEmptyQqSelfPersona(), { nickname: "小星", at: startedAt }).store;
-  store = recordQqSelfPersonaActivity(store, "10001", { humanMessages: 48, botReplies: 12, at: startedAt });
+  store = recordQqSelfPersonaActivity(store, "10001", { humanMessages: 96, botReplies: 24, at: startedAt });
   store = applyQqSelfPersonaScopeSummary(store, "10001", { summary: "初次摘要" }, { at: startedAt });
   store = applyGeneratedQqSelfPersona(store, {
     name: "小星",
     interestKeywords: ["小星", "AI"],
     interestParagraph: "喜欢研究 AI。"
   }, { at: startedAt });
-  store = recordQqSelfPersonaActivity(store, "10001", { humanMessages: 160, botReplies: 40, at: startedAt + 60_000 });
+  store = recordQqSelfPersonaActivity(store, "10001", { humanMessages: 95, botReplies: 23, at: startedAt + 60_000 });
+  assert.equal(getDueQqSelfPersonaScopes(store, {
+    now: startedAt + 5 * 60 * 60 * 1000
+  }).length, 0);
+  assert.equal(shouldRegenerateQqSelfPersona(store, {
+    now: startedAt + 13 * 60 * 60 * 1000
+  }).due, false);
+  store = recordQqSelfPersonaActivity(store, "10001", { humanMessages: 225, botReplies: 57, at: startedAt + 120_000 });
 
   assert.equal(getDueQqSelfPersonaScopes(store, {
-    now: startedAt + 11 * 60 * 60 * 1000,
-    minHoursBetweenSummaries: 12
+    now: startedAt + 3 * 60 * 60 * 1000,
+    minHoursBetweenSummaries: 4
   }).length, 0);
   assert.equal(getDueQqSelfPersonaScopes(store, {
-    now: startedAt + 12 * 60 * 60 * 1000,
-    minHoursBetweenSummaries: 12
+    now: startedAt + 4 * 60 * 60 * 1000,
+    minHoursBetweenSummaries: 4
   }).length, 1);
 
   const earlyGeneration = shouldRegenerateQqSelfPersona(store, {
-    now: startedAt + 47 * 60 * 60 * 1000,
-    minHoursBetweenGenerations: 48
+    now: startedAt + 11 * 60 * 60 * 1000,
+    minHoursBetweenGenerations: 12
   });
   assert.equal(earlyGeneration.updateThresholdReached, true);
   assert.equal(earlyGeneration.due, false);
   const dueGeneration = shouldRegenerateQqSelfPersona(store, {
-    now: startedAt + 48 * 60 * 60 * 1000,
-    minHoursBetweenGenerations: 48
+    now: startedAt + 12 * 60 * 60 * 1000,
+    minHoursBetweenGenerations: 12
   });
   assert.equal(dueGeneration.due, true);
 });

@@ -113,10 +113,10 @@ export function syncQqSelfPersonaActivity(store, recentMessagesByScope = {}) {
 }
 
 export function getDueQqSelfPersonaScopes(store, {
-  minInitialMessages = 32,
-  messagesPerSummary = 48,
-  botRepliesPerSummary = 12,
-  minHoursBetweenSummaries = 12,
+  minInitialMessages = 64,
+  messagesPerSummary = 96,
+  botRepliesPerSummary = 24,
+  minHoursBetweenSummaries = 4,
   now = Date.now(),
   limit = 3
 } = {}) {
@@ -175,11 +175,11 @@ export function applyQqSelfPersonaScopeSummary(store, scopeId, summary, { at = D
 
 export function shouldRegenerateQqSelfPersona(store, {
   minScopeSummaries = 2,
-  minInitialMessages = 80,
-  messagesPerGeneration = 160,
-  botRepliesPerGeneration = 40,
-  scopeSummariesPerGeneration = 8,
-  minHoursBetweenGenerations = 48,
+  minInitialMessages = 160,
+  messagesPerGeneration = 320,
+  botRepliesPerGeneration = 80,
+  scopeSummariesPerGeneration = 12,
+  minHoursBetweenGenerations = 12,
   now = Date.now()
 } = {}) {
   const normalized = normalizeQqSelfPersona(store);
