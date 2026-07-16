@@ -16,6 +16,8 @@ SCRIPT_DIR="$(resolve_script_path "$0")"
 PROJECT_DIR="${GPT_QQ_BOT_HOME:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 SETTINGS_FILE="$PROJECT_DIR/data/settings.json"
 LOCAL_ENV_FILE="$PROJECT_DIR/config/local.env"
+DEPLOY_SCRIPT="$PROJECT_DIR/scripts/deploy.command"
+SETUP_COMPLETE_KEY="CODEX_REMOTE_CONTACT_NCC_SETUP_COMPLETED"
 HUB_URL="${GPT_QQ_BOT_HUB_URL:-http://127.0.0.1:3789}"
 LOG_FILE="${CODEX_REMOTE_CONTACT_LOG_FILE:-$PROJECT_DIR/runtime/logs/hub.jsonl}"
 ONEBOT_API_BASE_DEFAULT="http://127.0.0.1:3000"
@@ -38,17 +40,35 @@ pause() {
   read -r _ || true
 }
 
+ask_yes_no() {
+  local prompt="$1"
+  local default="${2:-Y}"
+  local answer
+  printf '%s [%s] ' "$prompt" "$default"
+  read -r answer || true
+  answer="${answer:-$default}"
+  [[ "$answer" != [nN]* ]]
+}
+
 need_node() {
-  command -v node >/dev/null 2>&1 || die "需要 Node.js。请先运行 scripts/deploy.command。"
+  command -v node >/dev/null 2>&1 || die "需要 Node.js。请直接运行 ncc 启动首次部署。"
 }
 
 ensure_settings() {
+  local created_local_state="0"
   mkdir -p "$PROJECT_DIR/data" "$PROJECT_DIR/config" "$PROJECT_DIR/runtime/logs" "$PROJECT_DIR/runtime/replies"
   if [ ! -f "$SETTINGS_FILE" ]; then
     cp "$PROJECT_DIR/config/settings.example.json" "$SETTINGS_FILE"
     log "已创建 $SETTINGS_FILE"
+    created_local_state="1"
   fi
-  touch "$LOCAL_ENV_FILE"
+  if [ ! -f "$LOCAL_ENV_FILE" ]; then
+    touch "$LOCAL_ENV_FILE"
+    created_local_state="1"
+  fi
+  if [ "$created_local_state" = "1" ] && [ -z "$(env_file_value "$LOCAL_ENV_FILE" "$SETUP_COMPLETE_KEY")" ]; then
+    mark_setup_state "0"
+  fi
 }
 
 json_update() {
@@ -92,6 +112,34 @@ env_file_value() {
   local key="$2"
   [ -f "$file" ] || return 0
   sed -n "s/^export ${key}=//p; s/^${key}=//p" "$file" | tail -n 1 | sed "s/^'//; s/'$//"
+}
+
+mark_setup_state() {
+  set_env_value "$SETUP_COMPLETE_KEY" "$1"
+}
+
+setup_is_complete() {
+  local state
+  state="$(env_file_value "$LOCAL_ENV_FILE" "$SETUP_COMPLETE_KEY")"
+  if [ "$state" = "1" ]; then
+    return 0
+  fi
+  if [ "$state" = "0" ]; then
+    return 1
+  fi
+
+  # Existing installations from before v1.1.7 already have both local files.
+  # Adopt them without forcing a new first-run wizard, then persist the decision.
+  if [ -f "$SETTINGS_FILE" ] && [ -f "$LOCAL_ENV_FILE" ] && command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    local major
+    major="$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf '0')"
+    if [ "$major" -ge 20 ]; then
+      mark_setup_state "1"
+      log "已识别并接管现有部署，后续直接进入 ncc 常规菜单。"
+      return 0
+    fi
+  fi
+  return 1
 }
 
 mask_secret() {
@@ -160,11 +208,12 @@ show_status() {
 }
 
 codex_menu() {
+  local should_pause="${1:-1}"
   printf '\nCodex 登录与检测\n'
   if ! command -v codex >/dev/null 2>&1; then
     log "没有找到 Codex CLI，或它不在 PATH 里。"
-    log "请先运行 scripts/deploy.command 尝试安装，或手动安装 Codex CLI。"
-    pause
+    log "请先运行根目录的 一键部署.command 尝试安装，或手动安装 Codex CLI。"
+    [ "$should_pause" = "1" ] && pause
     return
   fi
   codex --version || true
@@ -178,10 +227,11 @@ codex_menu() {
   if [[ "${test_answer:-Y}" != [nN]* ]]; then
     codex exec --ephemeral --skip-git-repo-check -C "$PROJECT_DIR" "Only output OK"
   fi
-  pause
+  [ "$should_pause" = "1" ] && pause
 }
 
 qq_menu() {
+  local should_pause="${1:-1}"
   ensure_settings
   printf '\nQQ / OneBot 配置\n'
   printf 'OneBot API 地址 [%s]: ' "$ONEBOT_API_BASE_DEFAULT"
@@ -210,7 +260,7 @@ qq_menu() {
     json_update "data.qq = data.qq || {}; data.qq.allowedGroups = ${groups_json};"
   fi
   log "QQ 设置已保存。"
-  pause
+  [ "$should_pause" = "1" ] && pause
 }
 
 owner_menu() {
@@ -238,6 +288,7 @@ groups_menu() {
 }
 
 branding_menu() {
+  local should_pause="${1:-1}"
   ensure_settings
   printf '\n助手显示名 [assistant]: '
   read -r assistant_name || true
@@ -262,7 +313,7 @@ data.updatedAt = new Date().toISOString();
 fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
 NODE
   log "助手名称设置已保存。"
-  pause
+  [ "$should_pause" = "1" ] && pause
 }
 
 start_hub() {
@@ -301,12 +352,67 @@ print_logs() {
   node "$PROJECT_DIR/scripts/ncc-log-viewer.mjs" "$LOG_FILE" "$@"
 }
 
+first_run_wizard() {
+  clear 2>/dev/null || true
+  cat <<'WELCOME'
+Codex QQ Bot 首次部署（ncc）
+
+这是当前安装第一次运行 ncc。接下来会：
+1) 检测系统、Git、curl、zsh、Node.js 20+、npm 和 Codex CLI
+2) 尝试安装缺失工具与 Codex CLI
+3) 安装 npm 依赖并运行 npm run verify
+4) 填写 OneBot、主人 QQ、群白名单、助手名称和联网配置
+
+已有的 data/settings.json、config/local.env 和全局 ncc 不会被整份覆盖。
+WELCOME
+  if ! ask_yes_no "现在开始首次部署吗？" "Y"; then
+    log "已取消。下次运行 ncc 会继续询问。"
+    return 1
+  fi
+
+  mark_setup_state "0"
+  if [ "${NCC_ENVIRONMENT_PREPARED:-0}" != "1" ]; then
+    [ -f "$DEPLOY_SCRIPT" ] || die "找不到首次部署脚本：$DEPLOY_SCRIPT"
+    zsh "$DEPLOY_SCRIPT" --prepare-only
+  fi
+
+  ensure_settings
+  if command -v codex >/dev/null 2>&1 && ask_yes_no "现在进行 Codex 登录和鉴权测试吗？" "Y"; then
+    codex_menu "0"
+  fi
+
+  qq_menu "0"
+  branding_menu "0"
+  search_config
+  mark_setup_state "1"
+
+  cat <<EOF
+
+首次部署已完成。
+
+配置文件：$SETTINGS_FILE
+本地环境：$LOCAL_ENV_FILE
+以后运行 ncc 会直接进入日常功能菜单。
+EOF
+  if ask_yes_no "现在启动 Hub 吗？" "Y"; then
+    start_hub
+  fi
+}
+
+run_default_menu() {
+  if setup_is_complete; then
+    setup_wizard
+  else
+    first_run_wizard
+  fi
+}
+
 setup_wizard() {
   ensure_settings
   while true; do
     clear 2>/dev/null || true
     cat <<'MENU'
-Codex QQ Bot 快捷配置（ncc）
+Codex QQ Bot 控制中心（ncc）
 
 1) Codex 登录 / 鉴权测试
 2) QQ / OneBot 配置
@@ -339,8 +445,9 @@ MENU
   done
 }
 
-case "${1:-setup}" in
-  setup|menu) setup_wizard ;;
+case "${1:-menu}" in
+  setup|menu) run_default_menu ;;
+  first-run|deploy) first_run_wizard ;;
   status|doctor) show_status ;;
   codex-login|codex) codex_menu ;;
   qq) qq_menu ;;
@@ -351,9 +458,17 @@ case "${1:-setup}" in
   start) start_hub ;;
   open) open_hub_api ;;
   logs) shift; print_logs "$@" ;;
+  help|-h|--help)
+    cat <<EOF
+用法：ncc [menu|first-run|status|codex-login|qq|owner|groups|branding|search-config|start|open|logs]
+首次直接运行 ncc：自动检测环境、安装依赖、验证并填写配置；完成后再运行为常规功能菜单。
+日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
+项目目录：$PROJECT_DIR
+EOF
+    ;;
   *)
     cat <<EOF
-用法：ncc [setup|status|codex-login|qq|owner|groups|branding|search-config|start|open|logs]
+用法：ncc [menu|first-run|status|codex-login|qq|owner|groups|branding|search-config|start|open|logs]
 日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
 项目目录：$PROJECT_DIR
 EOF

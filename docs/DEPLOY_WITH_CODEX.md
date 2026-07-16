@@ -4,7 +4,7 @@ English | [简体中文](DEPLOY_WITH_CODEX_CN.md)
 
 ## Why Codex should operate the deployment
 
-This project spans Node.js, Codex authentication, QQ/OneBot, local configuration, process lifecycle, and network checks. Host paths and existing installations differ enough that a static “one-click” script can overwrite local state or report a false success. Codex can inspect the machine first, then choose the smallest safe and verifiable actions.
+This project spans Node.js, Codex authentication, QQ/OneBot, local configuration, process lifecycle, and network checks. The repository includes a Chinese `一键部署.command` that preserves existing configuration, but host paths, OneBot implementations, and process supervisors may still differ. Codex can inspect the machine first, then choose the smallest safe and verifiable actions.
 
 A reliable deployment prompt includes a goal, host/repository context, constraints, and a definition of done, following the [official Codex prompting best practices](https://learn.chatgpt.com/guides/best-practices).
 
@@ -14,6 +14,17 @@ A reliable deployment prompt includes a goal, host/repository context, constrain
 2. CLI users should run `codex login` and complete the browser flow. See [Codex authentication](https://learn.chatgpt.com/docs/auth).
 3. Start Codex in a stable directory where it may write the installation. Do not run a long-lived deployment from Downloads.
 4. Keep the default permissions. Let Codex request approval for downloads, system packages, elevated commands, or writes outside the workspace.
+
+## Chinese one-click entry
+
+When the source has already been downloaded or extracted, run:
+
+```bash
+chmod +x 一键部署.command
+./一键部署.command
+```
+
+The launcher enters the repository `ncc`. On its first run, the Chinese wizard performs environment checks, missing-tool/dependency installation, full verification, and guided configuration. It records completion in `config/local.env`, so later `ncc` runs open the normal control menu. The first-run flow preserves existing `data/settings.json` and `config/local.env`, and skips shortcut replacement when it finds an unrelated global `ncc`. QQ/NapCat binaries are not bundled, so QR login and platform-specific OneBot installation remain host-specific.
 
 ## Full deployment prompt
 
@@ -60,7 +71,7 @@ npm install
 npm run verify
 ```
 
-`npm run deploy` is an interactive preparation script. It checks tools, creates missing local files, and attempts to install an `ncc` shortcut. Codex may use it only after inspecting any existing `ncc` command.
+`一键部署.command` is the Chinese launcher; the repository `ncc` owns the first-run state machine. On its first run, `ncc` delegates environment preparation to the underlying deployment helper, which checks tools, creates missing local files, installs npm dependencies, runs `npm run verify`, and explicitly avoids replacing an unrelated global `ncc`. After success, `ncc` becomes the normal daily control menu.
 
 ### 3. Configure the Hub
 
@@ -112,9 +123,8 @@ Use this only when Codex is unavailable:
 ```bash
 git clone https://github.com/gl813788-byte/codex-qq-bot.git
 cd codex-qq-bot
-npm install
-npm run verify
-npm run deploy
+chmod +x 一键部署.command
+./一键部署.command
 ```
 
-Then prepare OneBot and run `npm run ncc -- setup` and `npm run ncc -- start`. See [Operations](OPERATIONS.md) for runtime diagnostics.
+Use the launcher to install dependencies, verify, configure, and start the Hub. Then prepare OneBot and complete QQ login. See [Operations](OPERATIONS.md) for runtime diagnostics.

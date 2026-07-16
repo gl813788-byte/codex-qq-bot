@@ -45,6 +45,19 @@ Execute the deployment instead of only giving me a command list. Continue until 
 
 See [Deploy with Codex](docs/DEPLOY_WITH_CODEX.md) for the detailed workflow, upgrade prompt, and acceptance checklist.
 
+## Chinese one-click deployment file
+
+After downloading and extracting the project, you may run the root-level `一键部署.command` as the single setup entry. Double-click it on macOS, or use a terminal on Linux / WSL:
+
+```bash
+chmod +x 一键部署.command
+./一键部署.command
+```
+
+The launcher enters the repository `ncc`, whose menus and prompts are in Chinese. On the first run, `ncc` checks the host and Node.js 20+, can install missing tools and Codex CLI, installs npm dependencies, runs `npm run verify`, and guides owner QQ, allowlist, OneBot, branding, and web-lookup configuration. It then records completion in the local environment file; later `ncc` runs open the normal daily control menu. Existing `data/settings.json`, `config/local.env`, and unrelated global `ncc` commands are preserved.
+
+QQ/NapCat binaries are not embedded in the launcher. It guides the OneBot configuration, while the initial QQ QR login still requires the user.
+
 ## What you need
 
 | Requirement | Purpose |

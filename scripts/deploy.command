@@ -6,6 +6,9 @@ NCC_SOURCE="$PROJECT_DIR/scripts/ncc.command"
 LOCAL_BIN="$HOME/.local/bin"
 NCC_TARGET_USER="$LOCAL_BIN/ncc"
 NCC_TARGET_SYSTEM="/usr/local/bin/ncc"
+SETTINGS_FILE="$PROJECT_DIR/data/settings.json"
+LOCAL_ENV_FILE="$PROJECT_DIR/config/local.env"
+SETUP_COMPLETE_KEY="CODEX_REMOTE_CONTACT_NCC_SETUP_COMPLETED"
 
 log() {
   printf '[deploy] %s\n' "$*"
@@ -13,6 +16,11 @@ log() {
 
 warn() {
   printf '[deploy] 警告：%s\n' "$*" >&2
+}
+
+die() {
+  printf '[deploy] 错误：%s\n' "$*" >&2
+  exit 1
 }
 
 ask_yes_no() {
@@ -88,6 +96,13 @@ ensure_node() {
       warn "当前系统不支持自动安装 Node.js。"
       ;;
   esac
+
+  if ! command -v node >/dev/null 2>&1; then
+    die "Node.js 安装后仍不可用，请安装 Node.js 20+ 后重试。"
+  fi
+  local installed_major
+  installed_major="$(node -p 'Number(process.versions.node.split(".")[0])')"
+  [ "$installed_major" -ge 20 ] || die "当前 Node.js $(node --version) 仍低于 v20，请升级后重试。"
 }
 
 ensure_basic_tools() {
@@ -134,7 +149,7 @@ ensure_project_files() {
 }
 
 write_local_env_defaults() {
-  local env_file="$PROJECT_DIR/config/local.env"
+  local env_file="$LOCAL_ENV_FILE"
   touch "$env_file"
   if ! grep -q '^export PATH=' "$env_file" 2>/dev/null; then
     printf 'export PATH=%q\n' "$PATH" >> "$env_file"
@@ -148,16 +163,39 @@ write_local_env_defaults() {
   chmod 600 "$env_file"
 }
 
-ensure_npm_ready() {
-  if [ -f "$PROJECT_DIR/package-lock.json" ]; then
-    (cd "$PROJECT_DIR" && npm install)
-  else
-    log "没有 package-lock.json，跳过 npm install。当前项目只使用 Node 内置模块。"
+mark_fresh_setup_pending() {
+  if [ -f "$SETTINGS_FILE" ] && [ -f "$LOCAL_ENV_FILE" ]; then
+    return
   fi
+  mkdir -p "$(dirname "$LOCAL_ENV_FILE")"
+  touch "$LOCAL_ENV_FILE"
+  if ! grep -q "^export ${SETUP_COMPLETE_KEY}=" "$LOCAL_ENV_FILE" 2>/dev/null; then
+    printf 'export %s=0\n' "$SETUP_COMPLETE_KEY" >> "$LOCAL_ENV_FILE"
+  fi
+  chmod 600 "$LOCAL_ENV_FILE"
+}
+
+ensure_npm_ready() {
+  command -v npm >/dev/null 2>&1 || die "未找到 npm，无法安装项目依赖。"
+  log "安装 npm 项目依赖。"
+  if [ -f "$PROJECT_DIR/package-lock.json" ]; then
+    (cd "$PROJECT_DIR" && npm ci --no-audit --no-fund)
+  else
+    (cd "$PROJECT_DIR" && npm install --no-audit --no-fund --no-package-lock)
+  fi
+  log "运行完整项目验证。"
+  (cd "$PROJECT_DIR" && npm run verify)
 }
 
 install_ncc_shortcut() {
   chmod +x "$NCC_SOURCE"
+  local existing_ncc
+  existing_ncc="$(command -v ncc 2>/dev/null || true)"
+  if [ -n "$existing_ncc" ] && [ "$(readlink -f "$existing_ncc" 2>/dev/null || printf '%s' "$existing_ncc")" != "$(readlink -f "$NCC_SOURCE" 2>/dev/null || printf '%s' "$NCC_SOURCE")" ]; then
+    warn "检测到已有 ncc：$existing_ncc，为避免覆盖现有 NapCat 控制器，已跳过快捷命令安装。"
+    warn "仓库配置助手始终可用：npm run ncc -- setup"
+    return
+  fi
   if [ -w "$(dirname "$NCC_TARGET_SYSTEM")" ]; then
     ln -sf "$NCC_SOURCE" "$NCC_TARGET_SYSTEM"
     log "已安装 ncc 快捷命令：$NCC_TARGET_SYSTEM"
@@ -183,13 +221,16 @@ print_summary() {
 本地环境：$PROJECT_DIR/config/local.env
 Hub API: http://127.0.0.1:3789/api/state
 
-ncc 快捷命令会打开快速配置菜单。
+中文统一入口：$PROJECT_DIR/一键部署.command
+仓库配置菜单：npm run ncc -- setup
 EOF
 }
 
 main() {
+  local mode="${1:-}"
   log "开始部署 Codex QQ Bot。"
   log "项目目录：$PROJECT_DIR"
+  mark_fresh_setup_pending
   ensure_basic_tools
   ensure_node
   ensure_codex
@@ -198,8 +239,11 @@ main() {
   ensure_npm_ready
   install_ncc_shortcut
   print_summary
+  if [ "$mode" = "--prepare-only" ]; then
+    return
+  fi
   if ask_yes_no "现在打开 ncc 快捷配置吗？" "Y"; then
-    "$NCC_SOURCE" setup
+    NCC_ENVIRONMENT_PREPARED=1 "$NCC_SOURCE" first-run
   fi
 }
 
