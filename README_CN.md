@@ -45,6 +45,19 @@ https://github.com/gl813788-byte/codex-qq-bot.git
 
 更完整的部署说明、升级提示词和验收表见 [Codex 部署指南](docs/DEPLOY_WITH_CODEX_CN.md)。
 
+## 中文一键部署文件
+
+如果已下载并解压本项目，可以只运行根目录的 `一键部署.command`。macOS 可直接双击，Linux / WSL 可在终端执行：
+
+```bash
+chmod +x 一键部署.command
+./一键部署.command
+```
+
+该文件会进入仓库版 `ncc`，菜单和提示均为中文。第一次运行 `ncc` 时，它会自动执行系统与 Node.js 20+ 检测、缺失工具/Codex CLI 安装、npm 依赖安装、`npm run verify`，然后引导填写主人 QQ、群白名单、OneBot 地址、助手名称与联网配置。成功后会在本地环境文件记录完成状态，以后再运行 `ncc` 就直接进入日常功能菜单。已有 `data/settings.json` 和 `config/local.env` 会被保留，已存在的全局 `ncc` 也不会被覆盖。
+
+一键文件不内置 QQ/NapCat 二进制；它会引导填写 OneBot 配置，但首次 QQ 扫码仍需由你完成。
+
 ## 你只需要准备什么
 
 | 项目 | 用途 |

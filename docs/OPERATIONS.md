@@ -4,6 +4,12 @@
 
 Prefer letting Codex execute and validate the [deployment guide](DEPLOY_WITH_CODEX.md). This page covers routine operation after deployment.
 
+For an extracted source archive, the root-level `一键部署.command` enters the repository `ncc`. Its first run performs environment checks, dependency installation, verification, and guided configuration. After completion, later `ncc` runs open the normal status, startup, configuration, and logging menu.
+
+```bash
+./一键部署.command
+```
+
 ## Distinguish the two `ncc` commands
 
 | Entry | Purpose | Common commands |
