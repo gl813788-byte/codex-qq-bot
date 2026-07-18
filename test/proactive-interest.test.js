@@ -103,7 +103,12 @@ test("proactive judge resets its idle timeout while reasoning and content tokens
     openRouterApiKey: "configured-for-test",
     fetch,
     recentMessages: [
-      { senderId: "100", text: "前面在讨论 Node 部署" },
+      {
+        senderId: "10000",
+        senderName: "测试群友",
+        text: "前面在讨论 Node 部署",
+        atMentions: [{ userId: "20000", name: "被艾特者" }]
+      },
       { senderId: "assistant", isAssistant: true, text: "可以看日志定位" }
     ],
     humanStyle: {
@@ -132,7 +137,12 @@ test("proactive judge resets its idle timeout while reasoning and content tokens
   assert.equal(result.semanticIntent, "群友希望 Bot 补充编程工具的看法");
   assert.equal(result.modelJudge.finishReason, "stop");
   assert.deepEqual(result.replyContext, [
-    { sender: "member1", text: "前面在讨论 Node 部署", replyToBot: false },
+    {
+      sender: "测试群友(QQ 10000)",
+      text: "前面在讨论 Node 部署",
+      replyToBot: false,
+      mentions: ["被艾特者(QQ 20000)"]
+    },
     { sender: "bot", text: "可以看日志定位", replyToBot: false }
   ]);
   assert.ok(result.modelJudge.durationMs >= 2500);
@@ -153,6 +163,8 @@ test("proactive judge resets its idle timeout while reasoning and content tokens
   assert.match(requestBody.messages[0].content, /只输出一个符合响应 JSON Schema 的 JSON 对象/);
   assert.match(requestBody.messages[0].content, /先做语义判断/);
   const judgeInput = JSON.parse(requestBody.messages[1].content);
+  assert.equal(judgeInput.recentMessages[0].sender, "测试群友(QQ 10000)");
+  assert.deepEqual(judgeInput.recentMessages[0].mentions, ["被艾特者(QQ 20000)"]);
   assert.equal(judgeInput.groupHumanRhythm.multiMessageRunRatio, 0.38);
   assert.equal(judgeInput.groupHumanRhythm.learnedInterruptionSampleSize, 48);
   assert.equal(judgeInput.groupHumanRhythm.learnedInterruptionRate, 0.625);
@@ -237,6 +249,40 @@ test("minute trigger does nothing when no new ordinary group message exists", as
   assert.equal(result.reason, "no new proactive messages to inspect");
   assert.equal(fetchCount, 0);
   assert.equal(state.proactive.messageCountByGroupId[event.groupId] || 0, 0);
+});
+
+test("ordinary time checks keep stale-topic protection unless restored for wall-clock catch-up", async () => {
+  const nowMs = 60 * 60 * 1000;
+  const staleEvent = { ...event, proactiveObservedAtMs: 1_000 };
+  const regularState = proactiveState(1500, { judgeEveryMessages: 20, judgeEveryMinutes: 2 });
+  regularState.proactive.messageCountByGroupId[event.groupId] = 1;
+  regularState.proactive.lastJudgeAtByGroupId = { [event.groupId]: 1_000 };
+  let fetchCount = 0;
+  const helpers = {
+    triggerMode: "time",
+    countMessage: false,
+    now: () => nowMs,
+    openRouterApiKey: "configured-for-test",
+    fetch: async () => {
+      fetchCount += 1;
+      return jsonJudgeResponse();
+    }
+  };
+
+  const regular = await shouldProactivelyReplyToQq(staleEvent, regularState, helpers);
+  assert.equal(regular.reason, "latest proactive topic is stale");
+  assert.equal(fetchCount, 0);
+
+  const restoredState = proactiveState(1500, { judgeEveryMessages: 20, judgeEveryMinutes: 2 });
+  restoredState.proactive.messageCountByGroupId[event.groupId] = 1;
+  restoredState.proactive.lastJudgeAtByGroupId = { [event.groupId]: 1_000 };
+  const restored = await shouldProactivelyReplyToQq({
+    ...staleEvent,
+    proactiveRestoredCatchUp: true
+  }, restoredState, helpers);
+  assert.equal(restored.ok, true);
+  assert.equal(fetchCount, 1);
+  assert.equal(restoredState.proactive.lastJudgeAtByGroupId[event.groupId], nowMs);
 });
 
 test("explicit mentions and replies to the bot never enter a proactive cycle", async () => {

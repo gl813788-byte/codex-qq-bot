@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -39,8 +39,8 @@ test("remote and npm installers expose a Chinese no-GitHub-web entry", async () 
   ]) {
     const help = spawnSync(command, args, { cwd: projectDir, encoding: "utf8" });
     assert.equal(help.status, 0, help.stderr);
-    assert.match(help.stdout, /npx -y codex-qq-bot/);
-    assert.match(help.stdout, /pnpm dlx codex-qq-bot/);
+    assert.match(help.stdout, /npx -y --prefer-online codex-qq-bot@latest/);
+    assert.match(help.stdout, /pnpm dlx codex-qq-bot@latest/);
     assert.match(help.stdout, /不需要打开 GitHub 网页/);
     assert.match(help.stdout, /中文首次部署/);
     assert.match(help.stdout, /默认分支的最新提交/);
@@ -49,7 +49,7 @@ test("remote and npm installers expose a Chinese no-GitHub-web entry", async () 
 
   const packageMetadata = JSON.parse(await readFile(packagePath, "utf8"));
   assert.equal(packageMetadata.name, "codex-qq-bot");
-  assert.equal(packageMetadata.version, "1.1.7-2");
+  assert.equal(packageMetadata.version, "1.1.8");
   const installerSource = await readFile(remoteInstallerPath, "utf8");
   assert.match(installerSource, /\/root\/Codex-QQ-Bot/);
   assert.match(installerSource, /Codex-Remote-Contact/);
@@ -109,8 +109,14 @@ test("remote installer validates and extracts a local source archive without lau
     });
     assert.equal(stoppedAfterDownload.status, 75, stoppedAfterDownload.stderr);
     assert.match(stoppedAfterDownload.stdout, /download.*重新运行会继续下一阶段/);
-    await access(join(stateDir, "fixture.zip", "fixture.zip"));
+    const cachedArchive = join(stateDir, "fixture.zip", "fixture.zip");
+    const staleExtractDir = join(stateDir, "fixture.zip", "extracted");
+    await access(cachedArchive);
     await assert.rejects(access(target));
+    await writeFile(cachedArchive, "broken cached zip\n");
+    await mkdir(staleExtractDir, { recursive: true });
+    await writeFile(join(staleExtractDir, "stale.txt"), "partial extraction\n");
+    await writeFile(join(stateDir, "fixture.zip", "extracted.sha256"), "stale\n");
 
     const stoppedAfterExtract = spawnSync("bash", installerArgs, {
       cwd: projectDir,
@@ -118,8 +124,11 @@ test("remote installer validates and extracts a local source archive without lau
       env: { ...installerEnv, CODEX_QQ_BOT_INSTALL_STOP_AFTER: "extract" }
     });
     assert.equal(stoppedAfterExtract.status, 75, stoppedAfterExtract.stderr);
-    assert.match(stoppedAfterExtract.stdout, /发现已下载的安装包/);
+    assert.match(stoppedAfterExtract.stderr, /损坏或不完整的已下载 ZIP/);
+    assert.match(stoppedAfterExtract.stdout, /正在保存本地安装包/);
     assert.match(stoppedAfterExtract.stdout, /extract.*重新运行会继续下一阶段/);
+    assert.equal((await readdir(join(stateDir, "fixture.zip"))).some((name) => name.startsWith("fixture.zip.invalid-")), true);
+    await assert.rejects(access(join(staleExtractDir, "stale.txt")));
     await assert.rejects(access(target));
 
     const installed = spawnSync("bash", installerArgs, {
@@ -224,6 +233,108 @@ test("remote installer resolves and extracts the default branch head instead of 
     assert.doesNotMatch(installed.stdout, /Release/);
     assert.equal(JSON.parse(await readFile(join(target, "package.json"), "utf8")).name, "latest-head-fixture");
     await access(nccBin, constants.X_OK);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("remote installer refreshes cached head metadata and upgrades an archive install without losing local state", async (t) => {
+  const zip = spawnSync("zip", ["-v"], { encoding: "utf8" });
+  if (zip.error?.code === "ENOENT") {
+    t.skip("zip command is unavailable");
+    return;
+  }
+
+  const home = await mkdtemp(join(tmpdir(), "codex-qq-bot-upgrade-install-"));
+  try {
+    const firstRevision = "1111111111111111111111111111111111111111";
+    const secondRevision = "2222222222222222222222222222222222222222";
+    const metadataDir = join(home, "metadata");
+    const archiveDir = join(home, "archives");
+    const fixtureDir = join(home, "fixture");
+    const stateDir = join(home, "state");
+    const target = join(home, "installed");
+    const nccBin = join(home, "bin", "ncc");
+    await mkdir(metadataDir);
+    await mkdir(archiveDir);
+    await mkdir(join(home, "bin"));
+    await writeFile(join(metadataDir, "repository.json"), '{"default_branch":"main"}\n');
+
+    const createArchive = async (revision, featureValue) => {
+      const rootName = `codex-qq-bot-${revision}`;
+      const fixtureRoot = join(fixtureDir, rootName);
+      await mkdir(join(fixtureRoot, "scripts"), { recursive: true });
+      await mkdir(join(fixtureRoot, "config"), { recursive: true });
+      await mkdir(join(fixtureRoot, "data"), { recursive: true });
+      await writeFile(join(fixtureRoot, "package.json"), JSON.stringify({ name: "upgrade-fixture", version: featureValue }));
+      await writeFile(join(fixtureRoot, "feature.txt"), `${featureValue}\n`);
+      await writeFile(join(fixtureRoot, "config", "settings.example.json"), JSON.stringify({ featureValue }));
+      await writeFile(join(fixtureRoot, "data", "unified-memory.json"), '[]\n');
+      await writeFile(join(fixtureRoot, "一键部署.command"), "#!/usr/bin/env bash\nexit 0\n");
+      await writeFile(join(fixtureRoot, "scripts", "ncc.command"), "#!/usr/bin/env zsh\nexit 0\n");
+      await writeFile(join(fixtureRoot, "scripts", "deploy.command"), "#!/usr/bin/env zsh\nexit 0\n");
+      const packed = spawnSync("zip", ["-qr", join(archiveDir, `${revision}.zip`), rootName], {
+        cwd: fixtureDir,
+        encoding: "utf8"
+      });
+      assert.equal(packed.status, 0, packed.stderr);
+    };
+
+    await createArchive(firstRevision, "old-feature");
+    await createArchive(secondRevision, "new-feature");
+
+    const installerEnv = {
+      ...process.env,
+      CODEX_QQ_BOT_REPOSITORY_API_URL: `file://${join(metadataDir, "repository.json")}`,
+      CODEX_QQ_BOT_COMMIT_API_URL: `file://${join(metadataDir, "commit.json")}`,
+      CODEX_QQ_BOT_ARCHIVE_BASE_URL: `file://${archiveDir}`,
+      CODEX_QQ_BOT_INSTALL_STATE_DIR: stateDir,
+      CODEX_QQ_BOT_NCC_BIN: nccBin,
+      CODEX_QQ_BOT_INSTALLER_VERSION: "test"
+    };
+
+    await writeFile(join(metadataDir, "commit.json"), JSON.stringify({ sha: firstRevision }));
+    const firstInstall = spawnSync("bash", [remoteInstallerPath, "--install-dir", target], {
+      cwd: projectDir,
+      encoding: "utf8",
+      env: installerEnv
+    });
+    assert.equal(firstInstall.status, 0, firstInstall.stderr);
+    assert.equal(await readFile(join(target, "feature.txt"), "utf8"), "old-feature\n");
+
+    await writeFile(join(target, "data", "settings.json"), '{"owner":"keep"}\n');
+    await writeFile(join(target, "data", "unified-memory.json"), '["keep-old-data"]\n');
+    await writeFile(join(target, "config", "local.env"), "SECRET_VALUE=keep\n");
+    await writeFile(join(target, "custom.db"), "keep custom file\n");
+
+    await writeFile(join(metadataDir, "commit.json"), JSON.stringify({ sha: secondRevision }));
+    const upgraded = spawnSync("bash", [remoteInstallerPath, "--install-dir", target], {
+      cwd: projectDir,
+      encoding: "utf8",
+      env: installerEnv
+    });
+    assert.equal(upgraded.status, 0, upgraded.stderr);
+    assert.match(upgraded.stdout, /发现上次解析的源码信息/);
+    assert.match(upgraded.stdout, /仍会联网检查默认分支是否已有更新/);
+    assert.match(upgraded.stdout, /目标源码：main@222222222222/);
+    assert.match(upgraded.stdout, /项目已升级到最新源码/);
+    assert.match(upgraded.stdout, /升级前的完整备份保留在/);
+    assert.equal(await readFile(join(target, "feature.txt"), "utf8"), "new-feature\n");
+    assert.equal(await readFile(join(target, "data", "settings.json"), "utf8"), '{"owner":"keep"}\n');
+    assert.equal(await readFile(join(target, "data", "unified-memory.json"), "utf8"), '["keep-old-data"]\n');
+    assert.equal(await readFile(join(target, "config", "local.env"), "utf8"), "SECRET_VALUE=keep\n");
+    assert.equal(await readFile(join(target, "custom.db"), "utf8"), "keep custom file\n");
+    assert.match(await readFile(join(target, ".codex-qq-bot-install-source"), "utf8"), /source_revision=222222222222/);
+    assert.equal((await readdir(join(stateDir, "backups"))).length, 1);
+
+    const unchanged = spawnSync("bash", [remoteInstallerPath, "--install-dir", target], {
+      cwd: projectDir,
+      encoding: "utf8",
+      env: installerEnv
+    });
+    assert.equal(unchanged.status, 0, unchanged.stderr);
+    assert.match(unchanged.stdout, /安装源码与最新版本一致/);
+    assert.equal((await readdir(join(stateDir, "backups"))).length, 1);
   } finally {
     await rm(home, { recursive: true, force: true });
   }

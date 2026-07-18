@@ -3,24 +3,32 @@ import { extractQqUrls } from "./qq-message-content.js";
 const markerPattern = /\[\[qq_memory:(\{[^\n]*?\})\]\]/g;
 const anyMarkerPattern = /\[\[qq_memory:[\s\S]*?\]\]/g;
 const maxPeoplePerGroup = 500;
+const maxGlobalPeople = 2_000;
+export const qqConversationMemoryVersion = 2;
 
 export function createEmptyQqConversationMemory() {
   return {
-    version: 1,
+    version: qqConversationMemoryVersion,
     updatedAt: null,
     groups: Object.create(null),
+    people: Object.create(null),
     privateChats: Object.create(null)
   };
 }
 
 export function normalizeQqConversationMemory(value) {
   const input = value && typeof value === "object" ? value : {};
-  return {
-    version: 1,
+  const groups = normalizeRecord(input.groups);
+  const state = {
+    version: qqConversationMemoryVersion,
     updatedAt: input.updatedAt || null,
-    groups: normalizeRecord(input.groups),
+    groups,
+    people: normalizeRecord(input.people),
     privateChats: normalizeRecord(input.privateChats)
   };
+  normalizeGlobalPeople(state.people);
+  if (Number(input.version || 1) < qqConversationMemoryVersion) migrateLegacyGroupPeople(state);
+  return state;
 }
 
 export function updateQqConversationMemoryFromEvent(memory, event, { now = () => new Date() } = {}) {
@@ -44,7 +52,7 @@ export function updateQqConversationMemoryFromEvent(memory, event, { now = () =>
         type: "forward",
         at,
         senderId: String(event.senderId || ""),
-        senderName: String(event.senderLabel || event.senderName || "群友"),
+        senderName: String(event.senderName || event.senderLabel || "群友"),
         summary: memoryText(event.contentContext.forward.text, 260)
       }, 8);
     } else if (event?.contentContext?.cards?.length) {
@@ -52,15 +60,21 @@ export function updateQqConversationMemoryFromEvent(memory, event, { now = () =>
         type: "card",
         at,
         senderId: String(event.senderId || ""),
-        senderName: String(event.senderLabel || event.senderName || "群友"),
+        senderName: String(event.senderName || event.senderLabel || "群友"),
         summary: memoryText(event.contentContext.displayText, 260)
       }, 8);
     }
-    const person = getGroupPerson(group, event.senderId, event.senderLabel || event.senderName);
+    const senderName = event.senderName || event.senderLabel;
+    const person = getGroupPerson(group, event.senderId, senderName);
+    const globalPerson = getGlobalPerson(state, event.senderId, event.groupId, senderName);
     if (person) {
       person.updatedAt = at;
       person.messageCount = Number(person.messageCount || 0) + 1;
       if (topic) person.recentTopics = pushTopic(person.recentTopics, topic, event, at, 8);
+    }
+    if (globalPerson) {
+      globalPerson.updatedAt = at;
+      globalPerson.messageCount = Number(globalPerson.messageCount || 0) + 1;
     }
   } else if (event?.senderId) {
     const chat = getPrivateChat(state, event.senderId, event.senderLabel || event.senderName);
@@ -93,15 +107,17 @@ export function updateQqConversationMemoryFromExchange(memory, event, reply, pat
     group.recentInteractions = pushLimited(group.recentInteractions, {
       at,
       senderId: String(event.senderId || ""),
-      senderName: String(event.senderLabel || event.senderName || "群友"),
+      senderName: String(event.senderName || event.senderLabel || "群友"),
       userText,
       assistantText
     }, 10);
-    const person = getGroupPerson(group, event.senderId, event.senderLabel || event.senderName);
+    const senderName = event.senderName || event.senderLabel;
+    const person = getGroupPerson(group, event.senderId, senderName);
+    const globalPerson = getGlobalPerson(state, event.senderId, event.groupId, senderName);
     if (person) {
       person.recentInteractions = pushLimited(person.recentInteractions, { at, userText, assistantText }, 6);
     }
-    for (const patch of patches) applyPatchToGroup(group, person, patch, at);
+    for (const patch of patches) applyPatchToGroup(group, person, globalPerson, patch, at);
   } else if (event?.senderId) {
     const chat = getPrivateChat(state, event.senderId, event.senderLabel || event.senderName);
     if (!chat) return state;
@@ -137,16 +153,17 @@ export function formatQqConversationMemoryContext(memory, event) {
   if (event?.groupId) {
     const group = state.groups[String(event.groupId)];
     if (!group) return "";
-    const person = group.people?.[String(event.senderId || "")];
+    const groupPerson = group.people?.[String(event.senderId || "")];
+    const person = state.people?.[String(event.senderId || "")] || groupPerson;
     const recentTopics = formatTopics(group.recentTopics, 5);
     const lines = [
       "群聊印象记忆（弱参考）：",
-      "这些是长期积累的印象、近期主题和 Bot 自己的主观感受；只用于更自然地理解语境，不要当成绝对事实，也不要主动宣称在给群友建档。",
+      "群印象只属于当前群；人物印象按 QQ 号跨群共享。它们都只是长期积累的弱参考，不要当成绝对事实，也不要主动宣称在给群友建档。",
       group.impression ? `- 对这个群的印象：${group.impression}` : null,
       recentTopics ? `- 这个群最近聊过：${recentTopics}` : null,
       group.botThought ? `- Bot 最近对群聊的感想：${group.botThought}` : null,
-      person?.impression ? `- 对当前发送者的印象：${person.impression}` : null,
-      person?.botThought ? `- 与当前发送者互动后的感想：${person.botThought}` : null
+      person?.impression ? `- 对当前发送者的跨群人物印象：${person.impression}` : null,
+      groupPerson?.botThought ? `- 与当前发送者在本群互动后的感想：${groupPerson.botThought}` : null
     ].filter(Boolean);
     return lines.length > 2 ? lines.join("\n") : "";
   }
@@ -167,6 +184,7 @@ export function summarizeQqConversationMemory(memory) {
   const state = ensureMemory(memory);
   return {
     groups: Object.keys(state.groups).length,
+    people: Object.keys(state.people).length,
     privateChats: Object.keys(state.privateChats).length,
     groupPeople: Object.values(state.groups).reduce((sum, group) => sum + Object.keys(group?.people || {}).length, 0)
   };
@@ -174,7 +192,11 @@ export function summarizeQqConversationMemory(memory) {
 
 function ensureMemory(memory) {
   if (!memory || typeof memory !== "object") return createEmptyQqConversationMemory();
+  if (Number(memory.version || 1) < qqConversationMemoryVersion) return normalizeQqConversationMemory(memory);
+  memory.version = qqConversationMemoryVersion;
   memory.groups = normalizeRecord(memory.groups);
+  memory.people = normalizeRecord(memory.people);
+  normalizeGlobalPeople(memory.people);
   memory.privateChats = normalizeRecord(memory.privateChats);
   return memory;
 }
@@ -224,6 +246,28 @@ function getGroupPerson(group, senderId, senderName = "") {
   return group.people[id];
 }
 
+function getGlobalPerson(state, senderId, groupId, senderName = "") {
+  if (!senderId) return null;
+  const id = String(senderId);
+  const scopedGroupId = String(groupId || "");
+  if (!isSafeRecordKey(id) || !isSafeRecordKey(scopedGroupId)) return null;
+  if (!state.people[id] && Object.keys(state.people).length >= maxGlobalPeople) {
+    const oldestId = Object.keys(state.people).sort((left, right) => {
+      const leftAt = Date.parse(state.people[left]?.updatedAt || "") || 0;
+      const rightAt = Date.parse(state.people[right]?.updatedAt || "") || 0;
+      return leftAt - rightAt;
+    })[0];
+    if (oldestId) delete state.people[oldestId];
+  }
+  state.people[id] ||= createGlobalPerson(id);
+  const person = state.people[id];
+  addAlias(person, senderName);
+  person.groupIds = [...new Set([...(person.groupIds || []), scopedGroupId])].slice(-32);
+  person.groupAliases = normalizeRecord(person.groupAliases);
+  person.groupAliases[scopedGroupId] = addAliasToList(person.groupAliases[scopedGroupId], senderName);
+  return person;
+}
+
 function getPrivateChat(state, senderId, senderName = "") {
   const id = String(senderId);
   if (!isSafeRecordKey(id)) return null;
@@ -244,12 +288,16 @@ function getPrivateChat(state, senderId, senderName = "") {
 }
 
 function addAlias(record, alias) {
+  record.aliases = addAliasToList(record.aliases, alias);
+}
+
+function addAliasToList(aliases, alias) {
   const value = memoryText(alias, 48);
-  if (!value) return;
+  const list = Array.isArray(aliases) ? aliases : [];
+  if (!value) return list;
   const key = value.toLowerCase().replace(/\s+/g, "");
-  if (!(record.aliases || []).some((item) => item.toLowerCase().replace(/\s+/g, "") === key)) {
-    record.aliases = [...(record.aliases || []), value].slice(-8);
-  }
+  if (list.some((item) => String(item).toLowerCase().replace(/\s+/g, "") === key)) return list;
+  return [...list, value].slice(-8);
 }
 
 function inferConversationTopic(text, event) {
@@ -304,9 +352,12 @@ function pushLinks(items, links, event, at) {
   return list;
 }
 
-function applyPatchToGroup(group, person, patch, at) {
+function applyPatchToGroup(group, person, globalPerson, patch, at) {
   if (patch.scopeImpression) group.impression = patch.scopeImpression;
-  if (patch.personImpression && person) person.impression = patch.personImpression;
+  if (patch.personImpression) {
+    if (person) person.impression = patch.personImpression;
+    if (globalPerson) globalPerson.impression = patch.personImpression;
+  }
   if (patch.botThought) {
     group.botThought = patch.botThought;
     if (person) person.botThought = patch.botThought;
@@ -320,6 +371,60 @@ function applyPatchToGroup(group, person, patch, at) {
       senderName: person?.aliases?.at(-1) || "",
       count: 1
     }, 12);
+  }
+}
+
+function createGlobalPerson(userId) {
+  return {
+    userId,
+    aliases: [],
+    groupIds: [],
+    groupAliases: Object.create(null),
+    messageCount: 0,
+    updatedAt: null,
+    impression: ""
+  };
+}
+
+function normalizeGlobalPeople(people) {
+  for (const [userId, value] of Object.entries(people)) {
+    const person = value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : createGlobalPerson(userId);
+    person.userId = String(person.userId || userId);
+    person.aliases = Array.isArray(person.aliases) ? person.aliases.map((item) => memoryText(item, 48)).filter(Boolean).slice(-8) : [];
+    person.groupIds = Array.isArray(person.groupIds) ? [...new Set(person.groupIds.map(String).filter(isSafeRecordKey))].slice(-32) : [];
+    person.groupAliases = normalizeRecord(person.groupAliases);
+    for (const [groupId, aliases] of Object.entries(person.groupAliases)) {
+      person.groupAliases[groupId] = Array.isArray(aliases)
+        ? aliases.map((item) => memoryText(item, 48)).filter(Boolean).slice(-8)
+        : [];
+    }
+    person.messageCount = Math.max(0, Number(person.messageCount) || 0);
+    person.updatedAt = person.updatedAt || null;
+    person.impression = safeMemoryField(person.impression);
+    people[userId] = person;
+  }
+}
+
+function migrateLegacyGroupPeople(state) {
+  const newestByUserId = new Map();
+  for (const [groupId, group] of Object.entries(state.groups)) {
+    for (const [userId, legacy] of Object.entries(normalizeRecord(group?.people))) {
+      if (!isSafeRecordKey(userId)) continue;
+      state.people[userId] ||= createGlobalPerson(userId);
+      const person = state.people[userId];
+      for (const alias of legacy?.aliases || []) addAlias(person, alias);
+      person.groupIds = [...new Set([...(person.groupIds || []), groupId])].slice(-32);
+      person.groupAliases[groupId] = (legacy?.aliases || []).reduce(addAliasToList, []);
+      person.messageCount = Number(person.messageCount || 0) + Math.max(0, Number(legacy?.messageCount) || 0);
+      const updatedAt = Date.parse(legacy?.updatedAt || "") || 0;
+      if (updatedAt >= (newestByUserId.get(userId) || 0)) {
+        if (legacy?.impression) person.impression = safeMemoryField(legacy.impression);
+        person.updatedAt = legacy?.updatedAt || person.updatedAt;
+        newestByUserId.set(userId, updatedAt);
+      }
+    }
   }
 }
 

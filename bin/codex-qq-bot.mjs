@@ -1,16 +1,21 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 if (process.platform === "win32") {
-  console.error("[Codex QQ Bot 安装器] Windows 请先打开 WSL，再运行 npx -y codex-qq-bot。");
+  console.error("[Codex QQ Bot 安装器] Windows 请先打开 WSL，再运行 npx -y --prefer-online codex-qq-bot@latest。");
   process.exit(1);
 }
 
 const installer = fileURLToPath(new URL("../install.sh", import.meta.url));
+const packageMetadata = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const result = spawnSync("bash", [installer, ...process.argv.slice(2)], {
-  env: process.env,
+  env: {
+    ...process.env,
+    CODEX_QQ_BOT_INSTALLER_VERSION: String(packageMetadata.version || "unknown")
+  },
   stdio: "inherit"
 });
 

@@ -19,7 +19,7 @@ test("NapCat social bridge submits loopback friend requests and blocks remote ca
       context: {
         session: {
           getBuddyService() {
-            return { reqToAddFriends(request) { submitted.push(request); } };
+            return { reqToAddFriends(targetId, message) { submitted.push([targetId, message]); } };
           }
         }
       }
@@ -37,23 +37,8 @@ test("NapCat social bridge submits loopback friend requests and blocks remote ca
   }, local);
   assert.equal(local.statusCode, 200);
   assert.equal(local.body.status, "submitted");
-  assert.deepEqual(submitted, [{
-    buddyUin: 3596291931,
-    buddyUid: "uid:3596291931",
-    phoneNumber: "",
-    addFriendSetting: 0,
-    answer: "",
-    remark: "",
-    defaultCatgory: 0,
-    verifyInfo: "群里认识的",
-    sourceID: 0,
-    sourceSubID: 0,
-    qzoneNotWatch: false,
-    qzoneNotWatched: false,
-    onlyChat: false,
-    randStr: "",
-    friendPermissionList: []
-  }]);
+  assert.equal(local.body.native_api_shape, "uin-message");
+  assert.deepEqual(submitted, [[3596291931, "群里认识的"]]);
 
   const remote = responseRecorder();
   await handler({
@@ -72,7 +57,7 @@ test("NapCat social bridge requests and submits a friend verification answer", a
       getTargetBuddySetting() {
         return { addFriendSetting: 2, question: ["2+2 等于几？"] };
       },
-      reqToAddFriends(request) { submitted.push(request); }
+      reqToAddFriends(targetId, message) { submitted.push([targetId, message]); }
     }
   }));
   const handler = routes.get("POST /add-friend");
@@ -93,8 +78,31 @@ test("NapCat social bridge requests and submits a friend verification answer", a
   }), answered);
   assert.equal(answered.statusCode, 200);
   assert.equal(answered.body.status, "submitted");
-  assert.equal(submitted[0].addFriendSetting, 2);
-  assert.equal(submitted[0].answer, "4");
+  assert.equal(answered.body.native_api_shape, "uin-message");
+  assert.deepEqual(submitted[0], [3596291931, "4"]);
+});
+
+test("NapCat social bridge keeps compatibility with one-object friend APIs", async () => {
+  const routes = new Map();
+  const submitted = [];
+  await plugin_init(createContext(routes, {
+    buddyService: {
+      reqToAddFriends(request) { submitted.push(request); }
+    }
+  }));
+
+  const response = responseRecorder();
+  await routes.get("POST /add-friend")(localRequest({
+    target_id: "3596291931",
+    message: "群里认识的",
+    remark: "测试好友",
+    category_id: 3
+  }), response);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.native_api_shape, "request-object");
+  assert.equal(submitted[0].buddyUin, 3596291931);
+  assert.equal(submitted[0].verifyInfo, "群里认识的");
   assert.equal(submitted[0].remark, "测试好友");
   assert.equal(submitted[0].defaultCatgory, 3);
 });

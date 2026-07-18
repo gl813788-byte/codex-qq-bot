@@ -72,6 +72,7 @@ process environment / config/local.env
 - **OneBot:** webhook payloads are authenticated or restricted to loopback, size-limited, normalized and deduplicated before QQ policy runs.
 - **Codex:** child processes receive a controlled environment, concurrency limits and QQ model settings.
 - **Storage:** settings, memory and social state are local files. Load/save behavior should move behind repositories as it is extracted.
+- **Recurring work:** `src/wall-clock-scheduler.js` only wakes domain checks. Due times stay in the domain stores; the ordinary-interest cycle is persisted in `data/qq-memory.json`, while adaptive/persona clocks remain in their persona files. Startup and channel restoration run one immediate catch-up pass, and completed work establishes the next clock anchor.
 
 ## Adding a feature
 

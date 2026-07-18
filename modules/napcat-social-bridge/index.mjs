@@ -5,8 +5,8 @@ export async function plugin_init(ctx) {
       ok: true,
       status: "ok",
       plugin: ctx.pluginName,
-      version: 2,
-      capabilities: ["friend-verification", "group-join-verification"],
+      version: 3,
+      capabilities: ["friend-verification", "friend-api-signature-adapter", "group-join-verification"],
       native: {
         reqToAddFriendsArity: methodArity(ctx.core.context.session.getBuddyService(), "reqToAddFriends"),
         reqToJoinGroupArity: methodArity(ctx.core.context.session.getGroupService(), "reqToJoinGroup"),
@@ -59,9 +59,6 @@ export async function plugin_init(ctx) {
           verification_mode: friendVerificationMode(addFriendSetting)
         });
       }
-      // QQNT's current native wrapper accepts a single ReqToFriend object. Older
-      // NapCat declarations still describe this as (uin, message), so keep the
-      // object construction here instead of trusting the stale TypeScript type.
       const request = {
         buddyUin: Number(targetId),
         buddyUid: String(uid || ""),
@@ -79,17 +76,24 @@ export async function plugin_init(ctx) {
         randStr: "",
         friendPermissionList: []
       };
-      const result = await Promise.resolve(buddyService.reqToAddFriends(request));
-      const failure = nativeFailure(result);
+      const submission = await submitFriendRequest(buddyService, request);
+      const failure = nativeFailure(submission.result);
       if (failure) return sendNativeFailure(res, failure);
       const pendingApproval = addFriendSetting === 1 || addFriendSetting === 3;
-      ctx.logger.info("Submitted QQ friend request", { targetId, addFriendSetting, pendingApproval });
+      ctx.logger.info("Submitted QQ friend request", {
+        targetId,
+        addFriendSetting,
+        pendingApproval,
+        nativeApiShape: submission.apiShape,
+        nativeApiArity: submission.apiArity
+      });
       return res.json({
         ok: true,
         status: pendingApproval ? "pending_approval" : "submitted",
         target_id: targetId,
         verification_mode: friendVerificationMode(addFriendSetting),
-        questions: requirements.questions
+        questions: requirements.questions,
+        native_api_shape: submission.apiShape
       });
     } catch (error) {
       ctx.logger.error("Unable to submit QQ friend request", error);
@@ -314,4 +318,27 @@ function firstFiniteNumber(...values) {
 
 function methodArity(target, method) {
   return typeof target?.[method] === "function" ? target[method].length : null;
+}
+
+async function submitFriendRequest(buddyService, request) {
+  const apiArity = methodArity(buddyService, "reqToAddFriends");
+  if (apiArity === 1) {
+    return {
+      result: await Promise.resolve(buddyService.reqToAddFriends(request)),
+      apiShape: "request-object",
+      apiArity
+    };
+  }
+
+  // NapCat v4.18.9 exposes reqToAddFriends(uin, message). Native bindings may
+  // report an arity of 0, so only an explicit one-argument method selects the
+  // newer request-object shape.
+  const verificationText = request.addFriendSetting === 2 || request.addFriendSetting === 3
+    ? request.answer
+    : request.verifyInfo;
+  return {
+    result: await Promise.resolve(buddyService.reqToAddFriends(request.buddyUin, verificationText)),
+    apiShape: "uin-message",
+    apiArity
+  };
 }
