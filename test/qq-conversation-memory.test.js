@@ -4,6 +4,8 @@ import {
   createEmptyQqConversationMemory,
   extractQqConversationMemoryMarkers,
   formatQqConversationMemoryContext,
+  normalizeQqConversationMemory,
+  qqConversationMemoryVersion,
   updateQqConversationMemoryFromEvent,
   updateQqConversationMemoryFromExchange
 } from "../src/qq-conversation-memory.js";
@@ -36,6 +38,63 @@ test("tracks group topics, people, links, impressions and bot thoughts", () => {
   assert.equal(group.people["20002"].impression, "喜欢从体验角度改进 Agent");
   assert.equal(group.recentLinks[0].host, "example.test");
   assert.match(formatQqConversationMemoryContext(memory, event), /Bot 最近对群聊的感想/);
+});
+
+test("shares one QQ person's impression across groups while keeping group cards and group impressions scoped", () => {
+  const firstGroupEvent = {
+    groupId: "10001",
+    senderId: "20002",
+    senderName: "A群名片",
+    text: "我喜欢从体验角度调整机器人"
+  };
+  const secondGroupEvent = {
+    groupId: "10002",
+    senderId: "20002",
+    senderName: "B群名片",
+    text: "这个群主要聊游戏"
+  };
+  let memory = updateQqConversationMemoryFromEvent(createEmptyQqConversationMemory(), firstGroupEvent);
+  memory = updateQqConversationMemoryFromExchange(memory, firstGroupEvent, "记住了。", [{
+    scopeImpression: "A 群主要讨论机器人",
+    personImpression: "重视产品体验和连续上下文"
+  }]);
+  memory = updateQqConversationMemoryFromEvent(memory, secondGroupEvent);
+  memory = updateQqConversationMemoryFromExchange(memory, secondGroupEvent, "这里确实更偏游戏。", [{
+    scopeImpression: "B 群主要讨论游戏"
+  }]);
+
+  assert.equal(memory.people["20002"].impression, "重视产品体验和连续上下文");
+  assert.deepEqual(memory.people["20002"].groupAliases["10001"], ["A群名片"]);
+  assert.deepEqual(memory.people["20002"].groupAliases["10002"], ["B群名片"]);
+  const secondGroupContext = formatQqConversationMemoryContext(memory, secondGroupEvent);
+  assert.match(secondGroupContext, /B 群主要讨论游戏/);
+  assert.match(secondGroupContext, /重视产品体验和连续上下文/);
+  assert.doesNotMatch(secondGroupContext, /A 群主要讨论机器人/);
+});
+
+test("migrates legacy per-group people into the cross-group QQ identity layer", () => {
+  const memory = normalizeQqConversationMemory({
+    version: 1,
+    groups: {
+      "10001": {
+        people: {
+          "20002": {
+            userId: "20002",
+            aliases: ["旧群名片"],
+            messageCount: 4,
+            updatedAt: "2026-07-18T08:00:00.000Z",
+            impression: "旧版已有的人物印象",
+            botThought: "以前聊得挺顺"
+          }
+        }
+      }
+    }
+  });
+
+  assert.equal(qqConversationMemoryVersion, 2);
+  assert.equal(memory.version, qqConversationMemoryVersion);
+  assert.equal(memory.people["20002"].impression, "旧版已有的人物印象");
+  assert.deepEqual(memory.people["20002"].groupAliases["10001"], ["旧群名片"]);
 });
 
 test("tracks private-chat impressions and strips invisible model memory metadata", () => {

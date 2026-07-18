@@ -185,6 +185,10 @@ test("dashboard preserves local interaction state across polling and page reload
   assert.match(javascript, /window\.addEventListener\("pagehide", persistDashboardUiState\)/);
   assert.match(javascript, /restoreDashboardUiState\(\);/);
   assert.match(javascript, /dirtyForms: new Set\(restoredUiState\.botSettingsDraft/);
+  assert.match(javascript, /openAdaptiveLearningGroups: new Set\(restoredUiState\.openAdaptiveLearningGroups \|\| \[\]\)/);
+  assert.match(javascript, /data-adaptive-learning-key="\$\{escapeHtml\(groupId\)\}" \$\{app\.openAdaptiveLearningGroups\.has\(groupId\) \? "open" : ""\}/);
+  assert.match(javascript, /openAdaptiveLearningGroups: \[\.\.\.app\.openAdaptiveLearningGroups\]/);
+  assert.match(javascript, /\$\("#qqAdaptiveLearning"\)\.addEventListener\("toggle",[\s\S]+rememberOpenAdaptiveLearningGroups\(\)/);
   assert.match(javascript, /if \(!busy && !dirty && !form\.contains\(document\.activeElement\)\)/);
   assert.match(javascript, /if \(app\.busyKeys\.has\("groups"\)\) return/);
   assert.match(javascript, /if \(app\.busyKeys\.has\("memory"\)/);

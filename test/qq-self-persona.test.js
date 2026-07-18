@@ -110,6 +110,31 @@ test("higher activity thresholds combine with shorter wall-clock cooldowns", () 
   assert.equal(dueGeneration.due, true);
 });
 
+test("an overdue persona refresh restarts its cooldown from catch-up completion", () => {
+  const originalAt = Date.UTC(2026, 6, 15, 8, 0);
+  const catchUpCompletedAt = originalAt + 10 * 60 * 60 * 1000;
+  let store = createEmptyQqSelfPersona();
+  store = recordQqSelfPersonaActivity(store, "10001", {
+    humanMessages: 64,
+    at: originalAt
+  });
+  store = applyQqSelfPersonaScopeSummary(store, "10001", {
+    summary: "停机后补做的摘要"
+  }, { at: catchUpCompletedAt });
+  store = recordQqSelfPersonaActivity(store, "10001", {
+    humanMessages: 96,
+    at: catchUpCompletedAt + 1
+  });
+  assert.equal(getDueQqSelfPersonaScopes(store, {
+    now: catchUpCompletedAt + 4 * 60 * 60 * 1000 - 1,
+    minHoursBetweenSummaries: 4
+  }).length, 0);
+  assert.equal(getDueQqSelfPersonaScopes(store, {
+    now: catchUpCompletedAt + 4 * 60 * 60 * 1000,
+    minHoursBetweenSummaries: 4
+  }).length, 1);
+});
+
 test("parses the final persona JSON instead of earlier analysis", () => {
   const parsed = parseQqSelfPersonaJson([
     "ANALYSIS: 前面可能出现 {无效内容}",

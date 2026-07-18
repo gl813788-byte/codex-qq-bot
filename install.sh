@@ -12,10 +12,13 @@ ARCHIVE_FILE="${CODEX_QQ_BOT_ARCHIVE_FILE:-}"
 STATE_ROOT="${CODEX_QQ_BOT_INSTALL_STATE_DIR:-}"
 NCC_BIN_OVERRIDE="${CODEX_QQ_BOT_NCC_BIN:-}"
 STOP_AFTER="${CODEX_QQ_BOT_INSTALL_STOP_AFTER:-}"
+INSTALLER_VERSION="${CODEX_QQ_BOT_INSTALLER_VERSION:-remote}"
 CHECK_ONLY=0
 LAUNCH_AFTER=0
 CHECK_WORK_DIR=""
 NCC_READY=0
+EXISTING_INSTALL=0
+INSTALL_ACTION="安装"
 
 log() {
   printf '\n[Codex QQ Bot 安装器] %s\n' "$*"
@@ -35,16 +38,16 @@ usage() {
 Codex QQ Bot 中文安装器
 
 推荐命令：
-  npx -y codex-qq-bot
-  pnpm dlx codex-qq-bot
+  npx -y --prefer-online codex-qq-bot@latest
+  pnpm dlx codex-qq-bot@latest
 
 未安装 Node.js 时可使用：
   curl -fsSL https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
 
-安装器会读取 GitHub 默认分支的最新提交并下载对应源码 ZIP，不必等待 Release。
-它按“解析提交、下载、校验、解压、安装 ncc 入口”分阶段保存进度；中断后重新运行
-同一命令会复用已经完成的阶段。下载准备完成后，请运行 ncc 继续中文首次部署；
-整个过程不需要打开 GitHub 网页。
+安装器每次都会刷新 GitHub 默认分支的最新提交并下载对应源码 ZIP，不必等待 Release。
+同一提交会复用已完成的下载和校验；损坏缓存会隔离后完整重下，解压始终在干净临时目录完成。
+由本安装器下载的旧项目会保留 data、runtime、本地配置和额外文件后升级，并留下完整回滚备份；
+Git 工作区不会被覆盖。下载准备完成后，请运行 ncc 继续中文首次部署；整个过程不需要打开 GitHub 网页。
 
 选项：
   --check                 只检查最新版本和下载地址，不安装
@@ -232,22 +235,36 @@ resolve_latest_source() {
   local repository_file="$metadata_dir/repository.json"
   local commit_file="$metadata_dir/commit.json"
   local configured_branch="$SOURCE_BRANCH"
+  local cached_source_available=0
   mkdir -p "$metadata_dir"
   ensure_command curl curl
+
   if [ -f "$repository_file" ] && [ -f "$commit_file" ] && parse_source_metadata "$repository_file" "$commit_file" "$configured_branch"; then
-    log "发现未完成安装的源码信息，将从上次进度继续：$SOURCE_LABEL"
-    return 0
+    cached_source_available=1
+    log "发现上次解析的源码信息：$SOURCE_LABEL；仍会联网检查默认分支是否已有更新。"
   fi
 
   local repository_tmp="${repository_file}.part"
   local commit_tmp="${commit_file}.part"
   if [ -z "$configured_branch" ]; then
     log "正在查询仓库默认分支……"
-    curl -fsSL \
+    if ! curl -fsSL \
       -H "Accept: application/vnd.github+json" \
       -H "X-GitHub-Api-Version: 2022-11-28" \
-      "$REPOSITORY_API_URL" -o "$repository_tmp" || die "无法读取仓库信息，请检查网络后重试。"
-    SOURCE_BRANCH="$(read_default_branch "$repository_tmp")" || die "仓库信息中没有有效的默认分支。"
+      "$REPOSITORY_API_URL" -o "$repository_tmp"; then
+      if [ "$cached_source_available" = "1" ] && parse_source_metadata "$repository_file" "$commit_file" "$configured_branch"; then
+        warn "无法刷新仓库信息，将使用已缓存且已验证的源码进度：$SOURCE_LABEL"
+        return 0
+      fi
+      die "无法读取仓库信息，请检查网络后重试。"
+    fi
+    if ! SOURCE_BRANCH="$(read_default_branch "$repository_tmp")"; then
+      if [ "$cached_source_available" = "1" ] && parse_source_metadata "$repository_file" "$commit_file" "$configured_branch"; then
+        warn "新仓库信息无效，将使用已缓存且已验证的源码进度：$SOURCE_LABEL"
+        return 0
+      fi
+      die "仓库信息中没有有效的默认分支。"
+    fi
   else
     SOURCE_BRANCH="$configured_branch"
     printf '{"default_branch":"%s"}\n' "$SOURCE_BRANCH" > "$repository_tmp"
@@ -259,11 +276,23 @@ resolve_latest_source() {
   local effective_commit_api="$COMMIT_API_URL"
   [ -n "$effective_commit_api" ] || effective_commit_api="${REPOSITORY_API_URL%/}/commits/${SOURCE_BRANCH}"
   log "正在解析 ${SOURCE_BRANCH} 分支的最新提交……"
-  curl -fsSL \
+  if ! curl -fsSL \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$effective_commit_api" -o "$commit_tmp" || die "无法读取最新提交信息，请检查网络后重试。"
-  parse_source_metadata "$repository_tmp" "$commit_tmp" "$configured_branch" || die "最新提交信息无效。"
+    "$effective_commit_api" -o "$commit_tmp"; then
+    if [ "$cached_source_available" = "1" ] && parse_source_metadata "$repository_file" "$commit_file" "$configured_branch"; then
+      warn "无法刷新最新提交，将使用已缓存且已验证的源码进度：$SOURCE_LABEL"
+      return 0
+    fi
+    die "无法读取最新提交信息，请检查网络后重试。"
+  fi
+  if ! parse_source_metadata "$repository_tmp" "$commit_tmp" "$configured_branch"; then
+    if [ "$cached_source_available" = "1" ] && parse_source_metadata "$repository_file" "$commit_file" "$configured_branch"; then
+      warn "最新提交信息无效，将使用已缓存且已验证的源码进度：$SOURCE_LABEL"
+      return 0
+    fi
+    die "最新提交信息无效。"
+  fi
   mv "$repository_tmp" "$repository_file"
   mv "$commit_tmp" "$commit_file"
 }
@@ -287,6 +316,20 @@ archive_is_verified() {
   actual="$(calculate_sha256 "$archive")" || return 1
   recorded="$(sed -n '1p' "$marker")"
   [ "$actual" = "$recorded" ]
+}
+
+archive_is_structurally_valid() {
+  local archive="$1"
+  [ -f "$archive" ] && unzip -tq "$archive" >/dev/null 2>&1
+}
+
+quarantine_cached_file() {
+  local file="$1"
+  local reason="$2"
+  local quarantined="${file}.invalid-$(date +%Y%m%d%H%M%S)-$$"
+  [ -e "$file" ] || return 0
+  mv "$file" "$quarantined" || die "无法隔离损坏的缓存文件：$file"
+  warn "${reason}；已保留为：$quarantined"
 }
 
 verify_archive() {
@@ -332,6 +375,114 @@ existing_project_is_valid() {
     [ -f "$INSTALL_DIR/package.json" ] &&
     [ -f "$INSTALL_DIR/scripts/ncc.command" ] &&
     [ -f "$INSTALL_DIR/一键部署.command" ]
+}
+
+installed_source_marker_path() {
+  printf '%s/.codex-qq-bot-install-source\n' "$INSTALL_DIR"
+}
+
+installed_source_matches() {
+  local archive_sha256="$1"
+  local marker=""
+  marker="$(installed_source_marker_path)"
+  [ -f "$marker" ] && grep -Fxq "archive_sha256=$archive_sha256" "$marker"
+}
+
+write_installed_source_marker() {
+  local destination="$1"
+  local archive_sha256="$2"
+  local marker_tmp="$STATE_ROOT/installed-source.part"
+  {
+    printf 'schema=1\n'
+    printf 'archive_sha256=%s\n' "$archive_sha256"
+    printf 'source_revision=%s\n' "$SOURCE_REVISION"
+    printf 'source_label=%s\n' "$SOURCE_LABEL"
+    printf 'installer_version=%s\n' "$INSTALLER_VERSION"
+    printf 'installed_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$marker_tmp"
+  install -m 644 "$marker_tmp" "$destination/.codex-qq-bot-install-source"
+}
+
+copy_preserved_children() {
+  local old_dir="$1"
+  local new_dir="$2"
+  [ -d "$old_dir" ] || return 0
+  mkdir -p "$new_dir"
+  cp -a "$old_dir/." "$new_dir/"
+}
+
+prepare_existing_install_upgrade() {
+  local source_dir="$1"
+  local archive_sha256="$2"
+  local prepared_dir="$3"
+  local item=""
+  local item_name=""
+
+  rm -rf "$prepared_dir"
+  mkdir -p "$prepared_dir"
+  cp -a "$source_dir/." "$prepared_dir/"
+
+  copy_preserved_children "$INSTALL_DIR/data" "$prepared_dir/data"
+  copy_preserved_children "$INSTALL_DIR/runtime" "$prepared_dir/runtime"
+
+  if [ -d "$INSTALL_DIR/config" ]; then
+    mkdir -p "$prepared_dir/config"
+    while IFS= read -r -d '' item; do
+      item_name="$(basename "$item")"
+      case "$item_name" in
+        local.env|local.*)
+          case "$item_name" in
+            *.example) continue ;;
+          esac
+          cp -a "$item" "$prepared_dir/config/$item_name"
+          ;;
+        *)
+          if [ ! -e "$prepared_dir/config/$item_name" ]; then
+            cp -a "$item" "$prepared_dir/config/$item_name"
+          fi
+          ;;
+      esac
+    done < <(find "$INSTALL_DIR/config" -mindepth 1 -maxdepth 1 -print0)
+  fi
+
+  while IFS= read -r -d '' item; do
+    item_name="$(basename "$item")"
+    case "$item_name" in
+      data|runtime|config|.git|.codex-qq-bot-install-source) continue ;;
+    esac
+    if [ ! -e "$prepared_dir/$item_name" ]; then
+      cp -a "$item" "$prepared_dir/$item_name"
+    fi
+  done < <(find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 -print0)
+
+  write_installed_source_marker "$prepared_dir" "$archive_sha256"
+}
+
+upgrade_existing_install() {
+  local source_dir="$1"
+  local archive_sha256="$2"
+  local stage_dir="$3"
+  local prepared_dir="$stage_dir/prepared-${archive_sha256:0:12}"
+  local backup_root="$STATE_ROOT/backups"
+  local backup_dir="$backup_root/$(date +%Y%m%d%H%M%S)-${archive_sha256:0:12}"
+  local failed_dir="${prepared_dir}.failed-$$"
+
+  log "正在准备可回滚升级；data、runtime、本地配置和额外文件都会保留。"
+  prepare_existing_install_upgrade "$source_dir" "$archive_sha256" "$prepared_dir"
+  mkdir -p "$backup_root"
+  mv "$INSTALL_DIR" "$backup_dir" || die "无法创建升级备份：$backup_dir"
+  if ! mv "$prepared_dir" "$INSTALL_DIR"; then
+    mv "$backup_dir" "$INSTALL_DIR" || true
+    die "新版本无法切换到目标目录，已尝试恢复旧安装。"
+  fi
+  if ! existing_project_is_valid; then
+    mv "$INSTALL_DIR" "$failed_dir" || true
+    mv "$backup_dir" "$INSTALL_DIR" || true
+    die "升级后的项目结构无效，旧安装已恢复；失败文件保留在：$failed_dir"
+  fi
+  INSTALL_ACTION="升级"
+  log "项目已升级到最新源码：$INSTALL_DIR"
+  log "升级前的完整备份保留在：$backup_dir"
 }
 
 wrapper_matches_project() {
@@ -424,7 +575,7 @@ install_ncc_entry() {
 }
 
 print_next_step() {
-  log "项目下载、校验和解压已经完成。"
+  log "项目${INSTALL_ACTION}、校验和准备已经完成。"
   if [ "$NCC_READY" = "1" ]; then
     printf '\n下一步请运行：\n\n  ncc\n\n'
     printf '首次运行会检测环境、安装依赖并引导填写配置；中断后再次运行 ncc 即可继续。\n'
@@ -443,7 +594,7 @@ launch_ncc_if_requested() {
   fi
 }
 
-log "无需打开 GitHub 网页；安装器支持中断后从已完成阶段继续。"
+log "安装器版本：${INSTALLER_VERSION}。无需打开 GitHub 网页；安装器支持中断后从已完成阶段继续。"
 
 if [ "$CHECK_ONLY" = "1" ]; then
   if [ -n "$ARCHIVE_FILE" ]; then
@@ -464,14 +615,17 @@ if [ "$CHECK_ONLY" = "1" ]; then
 fi
 
 if existing_project_is_valid; then
-  log "发现已有项目，不会覆盖其中的配置、数据或代码：$INSTALL_DIR"
-  install_ncc_entry
-  print_next_step
-  launch_ncc_if_requested
-  exit 0
-fi
-
-if [ -e "$INSTALL_DIR" ]; then
+  EXISTING_INSTALL=1
+  log "发现已有项目，将检查默认分支最新源码：$INSTALL_DIR"
+  if [ -e "$INSTALL_DIR/.git" ]; then
+    warn "目标目录是 Git 工作区，安装器不会覆盖分支或本地改动；请在该仓库中使用安全的 Git 升级流程。"
+    INSTALL_ACTION="检查"
+    install_ncc_entry
+    print_next_step
+    launch_ncc_if_requested
+    exit 0
+  fi
+elif [ -e "$INSTALL_DIR" ]; then
   if [ -d "$INSTALL_DIR" ] && [ -z "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then
     rmdir "$INSTALL_DIR" || die "无法使用空目录：$INSTALL_DIR"
   else
@@ -502,6 +656,11 @@ verified_marker="$stage_dir/verified.sha256"
 extract_dir="$stage_dir/extracted"
 extracted_marker="$stage_dir/extracted.sha256"
 
+if [ -f "$downloaded_archive" ] && ! archive_is_verified "$downloaded_archive" "$verified_marker" && ! archive_is_structurally_valid "$downloaded_archive"; then
+  quarantine_cached_file "$downloaded_archive" "检测到损坏或不完整的已下载 ZIP，将重新取得安装包"
+  rm -f "$verified_marker" "$extracted_marker"
+fi
+
 if [ -f "$downloaded_archive" ]; then
   log "发现已下载的安装包，跳过下载并继续下一阶段：$downloaded_archive"
 elif [ -n "$ARCHIVE_FILE" ]; then
@@ -530,7 +689,13 @@ else
     :
   elif [ -f "$partial_archive" ]; then
     log "发现未完成的下载，正在从现有文件续传：$partial_archive"
-    curl -fL --retry 3 --retry-delay 1 --continue-at - "$ASSET_URL" -o "$partial_archive" || die "下载中断，已保留进度；重新运行同一命令即可续传。"
+    if ! curl -fL --retry 3 --retry-delay 1 --continue-at - "$ASSET_URL" -o "$partial_archive"; then
+      quarantine_cached_file "$partial_archive" "服务端未能继续上次下载，将自动改为完整重下"
+      curl -fL --retry 3 --retry-delay 1 "$ASSET_URL" -o "$partial_archive" || die "完整重下仍然失败；已保留失败文件供排查。"
+    elif ! archive_is_structurally_valid "$partial_archive"; then
+      quarantine_cached_file "$partial_archive" "续传后的 ZIP 仍不完整，将自动改为完整重下"
+      curl -fL --retry 3 --retry-delay 1 "$ASSET_URL" -o "$partial_archive" || die "完整重下仍然失败；已保留失败文件供排查。"
+    fi
     mv "$partial_archive" "$downloaded_archive"
   else
     log "正在下载 ${ASSET_NAME}……"
@@ -539,10 +704,25 @@ else
   fi
 fi
 
+if [ -z "$ARCHIVE_FILE" ] && ! archive_is_structurally_valid "$downloaded_archive"; then
+  quarantine_cached_file "$downloaded_archive" "下载完成的 ZIP 无法通过完整性检查，将自动完整重下"
+  curl -fL --retry 3 --retry-delay 1 "$ASSET_URL" -o "$partial_archive" || die "完整重下仍然失败；已保留失败文件供排查。"
+  mv "$partial_archive" "$downloaded_archive"
+fi
+
 maybe_stop_after download
 verify_archive "$downloaded_archive" "$verified_marker"
 maybe_stop_after verify
 archive_sha256="$(sed -n '1p' "$verified_marker")"
+
+if [ "$EXISTING_INSTALL" = "1" ] && installed_source_matches "$archive_sha256"; then
+  log "发现已有项目，且安装源码与最新版本一致；无需重复解压或覆盖。"
+  INSTALL_ACTION="检查"
+  install_ncc_entry
+  print_next_step
+  launch_ncc_if_requested
+  exit 0
+fi
 
 archive_root="$(unzip -Z1 "$downloaded_archive" | awk -F/ 'NF && $1 != "" { print $1; exit }')"
 [ -n "$archive_root" ] || die "ZIP 没有可安装内容。"
@@ -551,9 +731,15 @@ if [ -f "$extracted_marker" ] && [ "$(sed -n '1p' "$extracted_marker")" = "$arch
   log "ZIP 已在上次运行中完成解压，跳过重复解压。"
 else
   log "正在解压项目……"
-  mkdir -p "$extract_dir"
-  unzip -oq "$downloaded_archive" -d "$extract_dir"
-  [ -d "$source_dir" ] || die "ZIP 顶层目录无效。"
+  extract_tmp="${extract_dir}.part-$$"
+  rm -rf "$extract_tmp"
+  mkdir -p "$extract_tmp"
+  if ! unzip -oq "$downloaded_archive" -d "$extract_tmp"; then
+    die "ZIP 解压失败；临时目录已隔离，重新运行会从干净目录重试。"
+  fi
+  [ -d "$extract_tmp/$archive_root" ] || die "ZIP 顶层目录无效。"
+  rm -rf "$extract_dir"
+  mv "$extract_tmp" "$extract_dir"
   printf '%s\n' "$archive_sha256" > "$extracted_marker"
 fi
 
@@ -562,8 +748,13 @@ fi
 [ -f "$source_dir/一键部署.command" ] || die "ZIP 缺少中文一键部署入口。"
 maybe_stop_after extract
 
-mv "$source_dir" "$INSTALL_DIR" || die "无法写入目标目录：$INSTALL_DIR"
-log "项目已安装到：$INSTALL_DIR"
+if [ "$EXISTING_INSTALL" = "1" ]; then
+  upgrade_existing_install "$source_dir" "$archive_sha256" "$stage_dir"
+else
+  mv "$source_dir" "$INSTALL_DIR" || die "无法写入目标目录：$INSTALL_DIR"
+  write_installed_source_marker "$INSTALL_DIR" "$archive_sha256"
+  log "项目已安装到：$INSTALL_DIR"
+fi
 maybe_stop_after install
 install_ncc_entry
 print_next_step

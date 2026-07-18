@@ -1,4 +1,5 @@
 import { createEmptyQqConversationMemory } from "../qq-conversation-memory.js";
+import { createEmptyQqPeriodicRuntime } from "../qq-periodic-runtime.js";
 import { createEmptyQqSelfPersona } from "../qq-self-persona.js";
 
 export function createInitialState({
@@ -77,6 +78,7 @@ export function createInitialState({
         groups: createRecord()
       },
       selfPersona: createEmptyQqSelfPersona(),
+      periodicRuntime: createEmptyQqPeriodicRuntime(),
       conversationMemory: createEmptyQqConversationMemory()
     },
     unifiedMemory: {

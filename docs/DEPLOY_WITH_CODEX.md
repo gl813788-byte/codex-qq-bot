@@ -20,8 +20,8 @@ A reliable deployment prompt includes a goal, host/repository context, constrain
 With Node.js installed, run:
 
 ```bash
-npx -y codex-qq-bot
-# or pnpm dlx codex-qq-bot
+npx -y --prefer-online codex-qq-bot@latest
+# or pnpm dlx codex-qq-bot@latest
 ```
 
 Without Node.js, run:
@@ -30,7 +30,7 @@ Without Node.js, run:
 curl -fsSL https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
 ```
 
-This Chinese bootstrap uses the GitHub API to resolve the repository default branch and its exact latest commit, resumes that commit-pinned source ZIP download, validates the ZIP integrity and structure, and places the project in `/root/Codex-QQ-Bot` or `~/Codex-QQ-Bot`; it does not wait for a formal Release, and an existing legacy `Codex-Remote-Contact` directory is reused. Source resolution, download, verification, extraction, and `ncc` entry setup persist independently, so rerunning the same command resumes at the next stage. It never overwrites an existing project, unrelated non-empty directory, or different global `ncc`. After preparation it explicitly asks the user to run `ncc`, whose state machine performs environment checks, dependency installation, `npm run verify`, and guided configuration. `--check` resolves source metadata without downloading or writing project files.
+This Chinese bootstrap refreshes the repository default branch and exact latest commit through the GitHub API on every run, resumes that commit-pinned source ZIP download, validates the ZIP integrity and structure, and places the project in `/root/Codex-QQ-Bot` or `~/Codex-QQ-Bot`; it does not wait for a formal Release, and an existing legacy `Codex-Remote-Contact` directory is reused. Completed stages for the same commit are reused, damaged downloads are quarantined and fetched again, and extraction uses a clean temporary directory. A prior archive install without Git is upgraded while preserving `data`, `runtime`, local configuration, and extra files, with the complete old directory retained under the install cache's `backups/`; Git worktrees, unrelated non-empty directories, and different global `ncc` commands are not overwritten. After preparation it explicitly asks the user to run `ncc`, whose state machine performs environment checks, dependency installation, `npm run verify`, and guided configuration. `--check` resolves source metadata without downloading or writing project files.
 
 ## Chinese entry for existing source
 

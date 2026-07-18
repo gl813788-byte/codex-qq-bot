@@ -75,6 +75,7 @@ const app = (() => {
     activeMemoryTab: restoredUiState.activeMemoryTab === "qq" ? "qq" : "unified",
     memoryQuery: restoredUiState.memoryQuery || "",
     openMemoryGroups: new Set(restoredUiState.openMemoryGroups || []),
+    openAdaptiveLearningGroups: new Set(restoredUiState.openAdaptiveLearningGroups || []),
     controllers: new Map(),
     busyKeys: new Set(),
     dirtyForms: new Set(restoredUiState.botSettingsDraft ? ["botSettingsForm"] : []),
@@ -118,6 +119,9 @@ function loadDashboardUiState() {
       memoryQuery: boundedUiText(parsed.memoryQuery, 200),
       openMemoryGroups: Array.isArray(parsed.openMemoryGroups)
         ? parsed.openMemoryGroups.map((value) => boundedUiText(value, 160)).filter(Boolean).slice(0, 200)
+        : [],
+      openAdaptiveLearningGroups: Array.isArray(parsed.openAdaptiveLearningGroups)
+        ? parsed.openAdaptiveLearningGroups.map((value) => boundedUiText(value, 160)).filter(Boolean).slice(0, 200)
         : [],
       groupDraft: /^\d{0,20}$/.test(String(parsed.groupDraft || "")) ? String(parsed.groupDraft || "") : "",
       botSettingsDraft,
@@ -194,6 +198,7 @@ function readLogFilters() {
 function persistDashboardUiState() {
   try {
     rememberOpenMemoryGroups();
+    rememberOpenAdaptiveLearningGroups();
     app.groupDraft = $("#groupInput")?.value || "";
     app.logFilters = readLogFilters();
     app.logScrollTop = $("#logStream")?.scrollTop || 0;
@@ -205,6 +210,7 @@ function persistDashboardUiState() {
       activeMemoryTab: app.activeMemoryTab,
       memoryQuery: app.memoryQuery,
       openMemoryGroups: [...app.openMemoryGroups],
+      openAdaptiveLearningGroups: [...app.openAdaptiveLearningGroups],
       groupDraft: app.groupDraft,
       botSettingsDirty: app.dirtyForms.has("botSettingsForm"),
       botSettingsDraft: app.dirtyForms.has("botSettingsForm") ? app.botSettingsDraft : null,
@@ -917,6 +923,7 @@ function renderQqSelfPersona(summary) {
 }
 
 function renderQqAdaptiveLearning(groups) {
+  rememberOpenAdaptiveLearningGroups();
   const entries = Object.entries(groups || {}).filter(([, item]) => Number(item.sampleSize || 0) > 0).sort(([left], [right]) => left.localeCompare(right));
   $("#qqAdaptiveLearning").innerHTML = entries.length ? entries.map(([groupId, item]) => {
     const hours = (item.activeHours || []).map((hour) => `${hour}:00`).join(" · ") || "—";
@@ -977,8 +984,15 @@ function renderQqAdaptiveLearning(groups) {
         t("detailColdSent", { value: formatTime(cold.lastProactiveAt || item.lastColdProactiveAt) })
       ])
     ].join("");
-    return `<details class="behavior-frequency-item adaptive-learning-item"><summary><span><strong>${escapeHtml(t("groupLabel", { value: groupId }))}</strong><small>${escapeHtml(formatActivityLevel(item.activityLevel))}</small></span><span class="adaptive-summary-meta">${escapeHtml(t("adaptiveSamples", { count: item.sampleSize || 0, members: item.learnedMembers || 0 }))}</span></summary><div class="adaptive-summary-chips"><span>${escapeHtml(t("adaptiveHours", { hours }))}</span>${item.coldProactiveAwaitingHuman ? `<span class="status-warn">${escapeHtml(t("adaptiveColdWaiting"))}</span>` : ""}</div><div class="adaptive-detail-grid">${sections}</div></details>`;
+    return `<details class="behavior-frequency-item adaptive-learning-item" data-adaptive-learning-key="${escapeHtml(groupId)}" ${app.openAdaptiveLearningGroups.has(groupId) ? "open" : ""}><summary><span><strong>${escapeHtml(t("groupLabel", { value: groupId }))}</strong><small>${escapeHtml(formatActivityLevel(item.activityLevel))}</small></span><span class="adaptive-summary-meta">${escapeHtml(t("adaptiveSamples", { count: item.sampleSize || 0, members: item.learnedMembers || 0 }))}</span></summary><div class="adaptive-summary-chips"><span>${escapeHtml(t("adaptiveHours", { hours }))}</span>${item.coldProactiveAwaitingHuman ? `<span class="status-warn">${escapeHtml(t("adaptiveColdWaiting"))}</span>` : ""}</div><div class="adaptive-detail-grid">${sections}</div></details>`;
   }).join("") : `<p class="token-empty">${escapeHtml(t("noAdaptiveLearning"))}</p>`;
+}
+
+function rememberOpenAdaptiveLearningGroups() {
+  $$('.adaptive-learning-item[data-adaptive-learning-key]', $("#qqAdaptiveLearning")).forEach((group) => {
+    if (group.open) app.openAdaptiveLearningGroups.add(group.dataset.adaptiveLearningKey);
+    else app.openAdaptiveLearningGroups.delete(group.dataset.adaptiveLearningKey);
+  });
 }
 
 function adaptiveDetailSection(title, values) {
@@ -1777,6 +1791,10 @@ $("#memoryView").addEventListener("change", async (event) => {
 });
 $("#memoryView").addEventListener("toggle", () => {
   rememberOpenMemoryGroups();
+  persistDashboardUiState();
+}, true);
+$("#qqAdaptiveLearning").addEventListener("toggle", () => {
+  rememberOpenAdaptiveLearningGroups();
   persistDashboardUiState();
 }, true);
 

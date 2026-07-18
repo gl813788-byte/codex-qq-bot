@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { extractQqRichMessageContent } from "../../qq-message-content.js";
+import { normalizeMentionIdentity } from "./mention-identities.js";
 
 export function normalizeOneBotEvent(payload, { extractImageInputs = () => [] } = {}) {
   const segments = Array.isArray(payload?.message) ? payload.message : [];
@@ -13,11 +14,15 @@ export function normalizeOneBotEvent(payload, { extractImageInputs = () => [] } 
     .trim();
   const hasAtSegment = segments.some((segment) => segment?.type === "at");
   const hasSelfAtSegment = segments.some((segment) => isSelfAtSegment(segment, payload.self_id));
-  const atTargets = segments
+  const atMentions = segments
     .filter((segment) => segment?.type === "at")
-    .map((segment) => segment.data?.qq ?? segment.data?.id ?? segment.data?.uin)
-    .filter((target) => target != null)
-    .map(String);
+    .map((segment) => normalizeMentionIdentity({
+      userId: segment.data?.qq ?? segment.data?.id ?? segment.data?.uin,
+      name: segment.data?.name ?? segment.data?.card ?? segment.data?.nickname
+    }))
+    .filter(Boolean)
+    .slice(0, 16);
+  const atTargets = [...new Set(atMentions.map((mention) => mention.userId))];
   const replySegment = segments.find((segment) => segment?.type === "reply");
   const replyMessageId = replySegment?.data?.id || replySegment?.data?.message_id;
   const messageType = payload.message_type === "private" ? "private_message" : "group_message";
@@ -47,6 +52,7 @@ export function normalizeOneBotEvent(payload, { extractImageInputs = () => [] } 
     hasAtSegment,
     hasSelfAtSegment,
     atTargets,
+    atMentions,
     hasReplySegment: Boolean(replySegment),
     replyMessageId: replyMessageId == null ? undefined : String(replyMessageId),
     isReplyToSelf: false,

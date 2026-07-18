@@ -22,6 +22,7 @@ test("normalizes OneBot message structure at the QQ channel boundary", () => {
     raw_message: "hello",
     message: [
       { type: "at", data: { qq: "123456" } },
+      { type: "at", data: { qq: "456789", name: "被艾特群友" } },
       { type: "text", data: { text: "hello" } },
       { type: "reply", data: { id: 42 } },
       { type: "forward", data: { id: "forward-1" } }
@@ -37,7 +38,11 @@ test("normalizes OneBot message structure at the QQ channel boundary", () => {
   assert.equal(event.senderId, "345678");
   assert.equal(event.senderName, "测试群友");
   assert.equal(event.replyMessageId, "42");
-  assert.deepEqual(event.atTargets, ["123456"]);
+  assert.deepEqual(event.atTargets, ["123456", "456789"]);
+  assert.deepEqual(event.atMentions, [
+    { userId: "123456", name: "" },
+    { userId: "456789", name: "被艾特群友" }
+  ]);
   assert.deepEqual(event.contentContext.forwardIds, ["forward-1"]);
   assert.equal(event.images.length, 1);
 });

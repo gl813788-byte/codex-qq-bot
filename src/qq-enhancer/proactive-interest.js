@@ -1,4 +1,5 @@
 import { snapshotQqContextImages } from "./context-images.js";
+import { formatQqIdentity, mergeQqMentionIdentities } from "../channels/qq/mention-identities.js";
 
 const botNamePattern = /\b(?:bot|gpt|assistant|codex|chatgpt)\b|机器人|助手|小助手|这个ai|这ai|这个 AI|这 AI/i;
 const directInvitePattern = /(?:你怎么看|你觉得|你会|你能|你来|出来说|出来看看|评价一下|锐评一下|帮忙看|帮我看|查一下|搜一下|联网查|总结一下|看记录|查记录|解释一下|分析一下)/i;
@@ -165,7 +166,9 @@ export async function shouldProactivelyReplyToQq(event = {}, state = {}, helpers
       consumedMessageCount
     };
 
-    if (triggerMode === "time" && isProactiveEventStale(event, now(), judgeEveryMinutes)) {
+    if (triggerMode === "time"
+      && !event.proactiveRestoredCatchUp
+      && isProactiveEventStale(event, now(), judgeEveryMinutes)) {
       result = {
         ok: false,
         reason: "latest proactive topic is stale",
@@ -839,22 +842,22 @@ function buildDecision(reason, assessment, judge = null, meta = {}) {
 }
 
 function formatRecentMessages(recentMessages = [], maxRecentMessages = 8, { includeImages = false } = {}) {
-  const memberAliases = new Map();
-  let nextMember = 1;
   return (Array.isArray(recentMessages) ? recentMessages : [])
     .slice(-Math.max(1, Math.min(12, maxRecentMessages)))
     .map((item) => {
-      const senderId = String(item.senderId || "unknown");
-      if (!item.isAssistant && item.senderId !== "assistant" && !item.isOwner && !memberAliases.has(senderId)) {
-        memberAliases.set(senderId, `member${nextMember++}`);
-      }
       const images = snapshotQqContextImages(item.images, { limit: 4 });
+      const mentions = mergeQqMentionIdentities(
+        Array.isArray(item.atMentions) && item.atMentions.length > 0
+          ? item.atMentions
+          : (item.atTargets || []).map((userId) => ({ userId }))
+      ).map((mention) => formatQqIdentity(mention));
       return {
         sender: item.isAssistant || item.senderId === "assistant"
           ? "bot"
-          : (item.isOwner ? "owner" : memberAliases.get(senderId) || "member"),
+          : formatQqIdentity(item),
         text: String(item.text || "").slice(0, 220),
         replyToBot: Boolean(item.replyContext?.isSelf),
+        ...(mentions.length > 0 ? { mentions } : {}),
         ...(images.length > 0 ? { imageCount: images.length } : {}),
         ...(includeImages && images.length > 0 ? { images } : {})
       };

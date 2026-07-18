@@ -2,9 +2,9 @@
 
 [简体中文](OPERATIONS_CN.md) | English
 
-For a fresh install, prefer `npx -y codex-qq-bot` (or `pnpm dlx codex-qq-bot`) without opening GitHub, or let Codex execute and validate the [deployment guide](DEPLOY_WITH_CODEX.md). This page covers routine operation after deployment.
+For a fresh install or installer update, prefer `npx -y --prefer-online codex-qq-bot@latest` (or `pnpm dlx codex-qq-bot@latest`) so npm checks the online `latest` tag instead of reusing an old npx package, or let Codex execute and validate the [deployment guide](DEPLOY_WITH_CODEX.md). This page covers routine operation after deployment.
 
-The public installer resolves the latest commit on the repository's default branch, resumably downloads and extracts that commit-pinned source ZIP, installs an `ncc` entry when there is no same-name command conflict, and then tells the user to run `ncc`; it does not enter the wizard by default. An extracted source archive can run the root-level `一键部署.command` directly. The first repository-`ncc` run performs environment checks, dependency installation, verification, and guided configuration. After completion, later runs open the normal status, startup, configuration, and logging menu.
+The public installer refreshes the latest commit on the repository's default branch every time and reuses only valid stages for the same commit. A damaged ZIP is quarantined and fetched again, and extraction starts in a clean temporary directory. A prior archive install without Git is replaced with prepared new source while carrying forward `data`, `runtime`, local configuration, and extra files; the full old directory remains under the install cache's `backups/`, while Git worktrees are not overwritten. The installer creates an `ncc` entry when there is no same-name command conflict and then tells the user to run `ncc`; it does not enter the wizard by default. An extracted source archive can run the root-level `一键部署.command` directly. The first repository-`ncc` run performs environment checks, dependency installation, verification, and guided configuration. After completion, later runs open the normal status, startup, configuration, and logging menu.
 
 ```bash
 ./一键部署.command
@@ -65,6 +65,12 @@ ncc connect
 
 `ncc all` starts NapCat and Hub. After the user scans QQ, Codex runs `ncc connect`. Do not mix arguments between the global and repository controllers.
 
+## Restart catch-up for recurring behavior
+
+Recurring QQ domain work is based on timestamps saved in local state, not on how long the Node.js process has stayed alive. Hub startup immediately checks adaptive style reviews and self-persona summary/generation. Enabling the QQ channel immediately checks restored ordinary-interest cycles plus cold-group and private-interest due times. The normal poll then continues as a wake-up mechanism.
+
+If the machine was off past a deadline, only one overdue run is performed. A restored ordinary-interest cycle is allowed to reach its catch-up judge even when the saved candidate is older than the normal online stale-topic limit; this one-time exception prevents a long shutdown from silently consuming the overdue check, while activity arriving during the judge still supersedes the result. A successful, silent, declined or failed completed check writes its completion timestamp according to that feature's retry policy, and the next interval starts there. Missed intervals are not replayed one by one, so recovery cannot produce a message burst. `/api/state` exposes the safe scheduler snapshot at `qq.periodic`; ordinary pending-cycle state is persisted inside `data/qq-memory.json`. Unified-memory reads/writes and manual chat summaries are event-driven and have no periodic deadline to catch up.
+
 ## Acceptance checks
 
 ```bash
@@ -123,7 +129,7 @@ Useful categories include `system`, `web`, `onebot`, `qq`, `codex`, `search`, `i
 
 The dashboard separates Overview, Channels, Intelligence, Memory, Live Logs and Settings instead of stacking every feature on one page. Channels only manages connections, allowlists and contacts. Intelligence displays and persistently controls the Bot enhancer, web lookup, proactive interest and judge tuning, with safe diagnostics for OpenRouter, search provider, safe-download mode, active generations and pending replies. Behavior state uses independent desktop columns so a tall persona card does not leave a large hole in the other column, then returns to a natural single-column order on narrow screens.
 
-The polling renderer separates server state from local interaction state. It does not replace active switches, an in-flight group/memory/network operation, or a dirty Bot-settings form with a stale poll response. Reload recovery is session-scoped to the same browser tab and covers Bot-setting and group-input drafts, memory browsing context, and log controls/position; it does not synchronize drafts between tabs. Failed Bot-setting saves retain the draft for retry, while successful saves clear it.
+The polling renderer separates server state from local interaction state. It does not replace active switches, an in-flight group/memory/network operation, a dirty Bot-settings form, or the open/closed state of memory and adaptive-learning details with a stale poll response. Reload recovery is session-scoped to the same browser tab and covers Bot-setting and group-input drafts, memory browsing context, adaptive-learning expansion state, and log controls/position; it does not synchronize drafts between tabs. Failed Bot-setting saves retain the draft for retry, while successful saves clear it.
 
 The browser Live Logs view fetches complete structured entries every second, keeps chronological order and follows the latest row by default. Level, category, trace, error, outcome and latency have distinct colors, and every `details` field is visible inline. Operators can pause live refresh, turn off follow mode, change the row limit, filter entries and click a row for raw JSON. Requests pause while the page is hidden.
 
