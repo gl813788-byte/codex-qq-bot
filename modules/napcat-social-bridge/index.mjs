@@ -5,14 +5,42 @@ export async function plugin_init(ctx) {
       ok: true,
       status: "ok",
       plugin: ctx.pluginName,
-      version: 3,
-      capabilities: ["friend-verification", "friend-api-signature-adapter", "group-join-verification"],
+      version: 4,
+      capabilities: ["friend-verification", "friend-preflight", "friend-api-signature-adapter", "group-join-verification"],
       native: {
         reqToAddFriendsArity: methodArity(ctx.core.context.session.getBuddyService(), "reqToAddFriends"),
         reqToJoinGroupArity: methodArity(ctx.core.context.session.getGroupService(), "reqToJoinGroup"),
         joinGroupArity: methodArity(ctx.core.context.session.getGroupService(), "joinGroup")
       }
     });
+  });
+
+  ctx.router.postNoAuth("/inspect-friend", async (req, res) => {
+    if (!isLoopbackRequest(req)) return res.status(403).json({ ok: false, error: "loopback_only" });
+    const targetId = normalizeQqId(req.body?.target_id);
+    if (!targetId) return res.status(400).json({ ok: false, error: "invalid_target_id" });
+
+    try {
+      const buddyService = ctx.core.context.session.getBuddyService();
+      if (!buddyService || typeof buddyService.reqToAddFriends !== "function") {
+        return res.status(501).json({ ok: false, error: "reqToAddFriends_unavailable" });
+      }
+      const inspection = await inspectFriendTarget(ctx, buddyService, targetId);
+      return res.json({
+        ok: true,
+        status: inspection.alreadyFriend ? "already_friend" : "ready",
+        target_id: targetId,
+        uid_available: Boolean(inspection.uid),
+        verification_setting: inspection.requirements.setting ?? null,
+        verification_mode: inspection.requirements.setting == null
+          ? "未知（提交时由 QQ 决定）"
+          : friendVerificationMode(inspection.requirements.setting),
+        questions: inspection.requirements.questions
+      });
+    } catch (error) {
+      ctx.logger.error("Unable to inspect QQ friend target", error);
+      return sendCaughtFailure(res, error);
+    }
   });
 
   ctx.router.postNoAuth("/add-friend", async (req, res) => {
@@ -26,15 +54,15 @@ export async function plugin_init(ctx) {
     if (!targetId) return res.status(400).json({ ok: false, error: "invalid_target_id" });
 
     try {
-      const uid = await ctx.core.apis.UserApi.getUidByUinV2(targetId);
-      if (uid && await ctx.core.apis.FriendApi.isBuddy(uid)) {
-        return res.json({ ok: true, status: "already_friend", target_id: targetId });
-      }
       const buddyService = ctx.core.context.session.getBuddyService();
       if (!buddyService || typeof buddyService.reqToAddFriends !== "function") {
         return res.status(501).json({ ok: false, error: "reqToAddFriends_unavailable" });
       }
-      const requirements = await readFriendRequirements(buddyService, targetId, ctx);
+      const inspection = await inspectFriendTarget(ctx, buddyService, targetId);
+      if (inspection.alreadyFriend) {
+        return res.json({ ok: true, status: "already_friend", target_id: targetId });
+      }
+      const { uid, requirements } = inspection;
       const addFriendSetting = requirements.setting ?? requestedSetting ?? (answer ? 2 : 0);
       if (addFriendSetting === 99) {
         return res.status(409).json({
@@ -213,6 +241,38 @@ async function readFriendRequirements(buddyService, targetId, ctx) {
     }
   }
   return { setting: undefined, questions: [] };
+}
+
+async function inspectFriendTarget(ctx, buddyService, targetId) {
+  let uid = "";
+  try {
+    uid = String(await ctx.core.apis.UserApi.getUidByUinV2(targetId) || "");
+  } catch (error) {
+    // QQ can accept a UIN directly. UID lookup often fails for strangers, so it
+    // must never prevent a valid friend request from reaching the native API.
+    ctx.logger.info("Unable to resolve QQ UID; continuing with UIN", {
+      targetId,
+      error: String(error?.message || error)
+    });
+  }
+
+  let alreadyFriend = false;
+  if (uid && typeof ctx.core.apis.FriendApi?.isBuddy === "function") {
+    try {
+      alreadyFriend = Boolean(await ctx.core.apis.FriendApi.isBuddy(uid));
+    } catch (error) {
+      ctx.logger.info("Unable to inspect existing QQ friendship", {
+        targetId,
+        error: String(error?.message || error)
+      });
+    }
+  }
+
+  return {
+    uid,
+    alreadyFriend,
+    requirements: await readFriendRequirements(buddyService, targetId, ctx)
+  };
 }
 
 function unwrapGroupInfo(value, targetId) {

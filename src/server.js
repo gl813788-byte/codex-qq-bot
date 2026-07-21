@@ -35,11 +35,17 @@ import {
 } from "./qq-file-image-task-intent.js";
 import { resolveAllowedQqMarkerPath, resolveQqMarkerPath } from "./qq-output-policy.js";
 import { createQqZoneClient } from "./qq-qzone.js";
+import {
+  getDefaultInterestModel,
+  normalizeInterestModelProvider,
+  resolveInterestModelRuntimeConfig
+} from "./interest-model-provider.js";
 import { createQqRequestStore, formatQqRequestEntry } from "./qq-request-store.js";
 import {
   buildQqActiveAddPayload,
   formatQqActiveAddFailure,
-  parseQqActiveAddCommand
+  parseQqActiveAddCommand,
+  parseQqZonePublishCommand
 } from "./qq-social-command.js";
 import { createQqStickerLabelStore, normalizeQqStickerTags } from "./qq-sticker-label-store.js";
 import { createQqStickerInventory } from "./qq-sticker-inventory.js";
@@ -283,7 +289,7 @@ const {
   qqAccountStickersEnabled,
   qqAccountStickerCount,
   qqAccountStickerCacheMs,
-  defaultQqProactiveJudgeModel,
+  qqProactiveJudgeProvider,
   qqProactiveJudgeModel,
   qqProactiveJudgeTimeoutMs,
   qqProactiveJudgeMinInterest,
@@ -309,8 +315,6 @@ const {
   qqBubbleSeparator,
   qqBubbleSendDelayMs,
   qqBubbleMaxCount,
-  openRouterApiKey,
-  openRouterBaseUrl,
   tavilyApiKey,
   sqliteTimeoutMs,
   sqliteMaxOutputBytes,
@@ -584,6 +588,25 @@ const state = createInitialState({
   codexWorkspaceDir,
   qqProactiveInterestPreset: defaultQqProactiveInterestPreset()
 });
+
+function getActiveQqInterestModelConfig() {
+  const runtime = resolveInterestModelRuntimeConfig(state.qq.proactive.judge.provider, environmentConfig);
+  return {
+    ...runtime,
+    model: String(state.qq.proactive.judge.model || runtime.defaultModel).trim() || runtime.defaultModel,
+    baseUrl: String(state.qq.proactive.judge.baseUrl || runtime.baseUrl).trim().replace(/\/+$/, "")
+  };
+}
+
+function syncActiveQqInterestModelConfig({ resetBaseUrl = false, resetModel = false } = {}) {
+  const judge = state.qq.proactive.judge;
+  const runtime = resolveInterestModelRuntimeConfig(judge.provider, environmentConfig);
+  judge.provider = runtime.provider;
+  if (resetBaseUrl || !String(judge.baseUrl || "").trim()) judge.baseUrl = runtime.baseUrl;
+  if (resetModel || !String(judge.model || "").trim()) judge.model = runtime.defaultModel;
+  judge.apiKeyConfigured = runtime.apiKeyConfigured;
+  return getActiveQqInterestModelConfig();
+}
 const publicTunnelManager = createPublicTunnelManager({
   targetUrl: `http://127.0.0.1:${hubPort}`
 });
@@ -874,6 +897,7 @@ async function loadSettings() {
       if (body.qq.proactive.judge && typeof body.qq.proactive.judge === "object") {
         const judge = body.qq.proactive.judge;
         state.qq.proactive.judge.enabled = judge.enabled !== false;
+        state.qq.proactive.judge.provider = normalizeInterestModelProvider(judge.provider || qqProactiveJudgeProvider);
         if (typeof judge.model === "string" && judge.model.trim()) {
           state.qq.proactive.judge.model = judge.model.trim();
         }
@@ -890,8 +914,12 @@ async function loadSettings() {
         if (judge.preset && typeof judge.preset === "object") {
           state.qq.proactive.judge.preset = normalizeQqProactiveInterestPreset(judge.preset);
         }
+        if (state.qq.proactive.judge.provider === "openrouter"
+          && new Set(["nousresearch/hermes-3-llama-3.1-405b:free", "tencent/hy3:free"]).has(state.qq.proactive.judge.model)) {
+          state.qq.proactive.judge.model = getDefaultInterestModel("openrouter");
+        }
       }
-      state.qq.proactive.judge.apiKeyConfigured = Boolean(openRouterApiKey);
+      syncActiveQqInterestModelConfig();
     }
     if (body.qq?.commandPermissions && typeof body.qq.commandPermissions === "object") {
       state.qq.commandPermissions.publicCommands = normalizeQqPublicCommandPermissions(body.qq.commandPermissions.publicCommands);
@@ -967,7 +995,7 @@ async function saveSettings() {
             timeoutMs: state.qq.proactive.judge.timeoutMs,
             minInterest: state.qq.proactive.judge.minInterest,
             maxRecentMessages: state.qq.proactive.judge.maxRecentMessages,
-            apiKeyConfigured: Boolean(openRouterApiKey),
+            apiKeyConfigured: getActiveQqInterestModelConfig().apiKeyConfigured,
             preset: state.qq.proactive.judge.preset
           }
         },
@@ -1099,7 +1127,7 @@ function normalizeQqProactiveJudgeEveryMinutes(value) {
   return Math.max(0, Math.min(1440, Math.floor(number)));
 }
 
-function isValidOpenRouterModelId(value) {
+function isValidInterestModelId(value) {
   const model = String(value || "").trim();
   return Boolean(model && model.length <= 160 && /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(model));
 }
@@ -3108,6 +3136,7 @@ async function shouldRespondToQq(event) {
 }
 
 async function judgeQqProactiveEvent(event, { triggerMode = "message", countMessage = true } = {}) {
+  const activeInterestModel = getActiveQqInterestModelConfig();
   const activityVersion = Number(event.groupActivityVersion || 0);
   const adaptive = getQqAdaptiveRuntimeForEvent(event);
   const recentMessages = state.qq.memory.recentMessages[event.groupId] || [];
@@ -3141,7 +3170,7 @@ async function judgeQqProactiveEvent(event, { triggerMode = "message", countMess
     humanStyle: adaptive.style,
     judgeEveryMessages: adaptive.proactiveIntervals.judgeEveryMessages,
     judgeEveryMinutes: adaptive.proactiveIntervals.judgeEveryMinutes,
-    openRouterApiKey,
+    interestModelApiKey: activeInterestModel.apiKey,
     assistantName,
     ownerLabel,
     relationshipInterest: adaptive.relationshipInterest,
@@ -3364,10 +3393,12 @@ async function runQqKnowledgeDeletionReview(candidate) {
     judgeModel: state.qq.proactive.judge.model,
     mainModel: state.ai.model
   }, "memory");
+  const activeInterestModel = getActiveQqInterestModelConfig();
   const triageResult = await runQqInterestModelStructuredTask({
-    apiKey: openRouterApiKey,
-    baseUrl: state.qq.proactive.judge.baseUrl || openRouterBaseUrl,
-    model: state.qq.proactive.judge.model,
+    provider: activeInterestModel.provider,
+    apiKey: activeInterestModel.apiKey,
+    baseUrl: activeInterestModel.baseUrl,
+    model: activeInterestModel.model,
     timeoutMs: state.qq.proactive.judge.timeoutMs,
     taskName: "qq_knowledge_deletion_triage",
     temperature: 0.15,
@@ -3639,11 +3670,13 @@ async function runQqColdGroupInterestCheck() {
     logQqColdGroupInterestStatus(event, plan, signals.group);
     if (!plan.eligible) continue;
     ensureQqTraceId(event);
+    const activeInterestModel = getActiveQqInterestModelConfig();
     const topicStartJudge = state.qq.proactive.judge.enabled
       ? await judgeQqColdGroupTopicStart({
-        apiKey: openRouterApiKey,
-        baseUrl: state.qq.proactive.judge.baseUrl || openRouterBaseUrl,
-        model: state.qq.proactive.judge.model,
+        provider: activeInterestModel.provider,
+        apiKey: activeInterestModel.apiKey,
+        baseUrl: activeInterestModel.baseUrl,
+        model: activeInterestModel.model,
         timeoutMs: state.qq.proactive.judge.timeoutMs,
         maxRecentMessages: state.qq.proactive.judge.maxRecentMessages,
         selfPersona: summarizeQqSelfPersona(state.qq.selfPersona).persona,
@@ -3761,11 +3794,13 @@ async function runQqPrivateInterestCheck() {
       }
     };
     ensureQqTraceId(event);
+    const activeInterestModel = getActiveQqInterestModelConfig();
     const privateStartJudge = state.qq.proactive.judge.enabled
       ? await judgeQqPrivateProactiveStart({
-        apiKey: openRouterApiKey,
-        baseUrl: state.qq.proactive.judge.baseUrl || openRouterBaseUrl,
-        model: state.qq.proactive.judge.model,
+        provider: activeInterestModel.provider,
+        apiKey: activeInterestModel.apiKey,
+        baseUrl: activeInterestModel.baseUrl,
+        model: activeInterestModel.model,
         timeoutMs: state.qq.proactive.judge.timeoutMs,
         maxRecentMessages: state.qq.proactive.judge.maxRecentMessages,
         selfPersona: summarizeQqSelfPersona(state.qq.selfPersona).persona,
@@ -4117,7 +4152,7 @@ function logQqProactiveInterestDecision(event, decision = {}) {
     judgeEnabled: Boolean(state.qq.proactive.judge.enabled),
     judgeProvider: state.qq.proactive.judge.provider,
     judgeModel: state.qq.proactive.judge.model,
-    judgeApiKeyConfigured: Boolean(openRouterApiKey),
+    judgeApiKeyConfigured: getActiveQqInterestModelConfig().apiKeyConfigured,
     modelShouldReply: judge.shouldReply,
     modelInterest: judge.interest,
     modelEffectiveInterest: judge.effectiveInterest,
@@ -4458,7 +4493,7 @@ function isPublicQqSummarizeContextCommand(normalized, compact) {
 }
 
 function isQqInterestConfigCommand(normalized, compact) {
-  return /^(兴趣|主动|兴趣配置|主动配置|主动响应配置|兴趣状态|主动状态|兴趣开关|主动开关|兴趣间隔|主动间隔|兴趣分钟|主动分钟|兴趣时间|主动时间|兴趣模型|主动模型|兴趣超时|主动超时|兴趣最近|主动最近|兴趣重置|主动重置|interest|proactive)(?:\s+.*)?$/i.test(normalized)
+  return /^(兴趣|主动|兴趣配置|主动配置|主动响应配置|兴趣状态|主动状态|兴趣开关|主动开关|兴趣间隔|主动间隔|兴趣分钟|主动分钟|兴趣时间|主动时间|兴趣厂商|主动厂商|兴趣服务|主动服务|兴趣提供商|兴趣模型|主动模型|兴趣超时|主动超时|兴趣最近|主动最近|兴趣重置|主动重置|interest|proactive)(?:\s+.*)?$/i.test(normalized)
     || /^(兴趣|主动|兴趣配置|主动配置|兴趣状态|主动状态|interest|proactive)$/i.test(compact);
 }
 
@@ -4602,12 +4637,40 @@ function buildQqInterestConfigAction(normalized, event) {
     };
   }
 
+  const providerMatch = body.match(/^(?:兴趣厂商|主动厂商|兴趣服务|主动服务|兴趣提供商|interest\s+provider)(?:\s+(.+))?$/i);
+  if (providerMatch) {
+    const requested = String(providerMatch[1] || "").trim().toLowerCase();
+    if (!requested) {
+      return { reply: "可选兴趣模型厂商：OpenRouter、DeepSeek、自定义（custom）。" };
+    }
+    const aliases = {
+      openrouter: "openrouter",
+      "open router": "openrouter",
+      deepseek: "deepseek",
+      "deep seek": "deepseek",
+      深度求索: "deepseek",
+      custom: "custom",
+      自定义: "custom",
+      兼容: "custom"
+    };
+    const provider = aliases[requested];
+    if (!provider) {
+      return { reply: `${pickActionBeat(event)}不支持这个兴趣模型厂商；可选：OpenRouter、DeepSeek、自定义（custom）。` };
+    }
+    state.qq.proactive.judge.provider = provider;
+    const active = syncActiveQqInterestModelConfig({ resetBaseUrl: true, resetModel: true });
+    return {
+      reply: `兴趣模型厂商已切换为 ${active.label}，默认模型：${active.model}，Key：${active.apiKeyConfigured ? "已配置" : "未配置"}。`,
+      beforeSend: saveSettings
+    };
+  }
+
   const modelMatch = body.match(/^(?:(?:兴趣|主动|兴趣配置|主动配置|interest|proactive)\s*)?(?:模型|model)\s+(\S+)$/i)
     || body.match(/^(?:兴趣模型|主动模型)\s+(\S+)$/i);
   if (modelMatch) {
     const model = modelMatch[1].trim();
-    if (!isValidOpenRouterModelId(model)) {
-      return { reply: `${pickActionBeat(event)}这个兴趣判定模型名看起来不太对；示例：nousresearch/hermes-3-llama-3.1-405b:free。` };
+    if (!isValidInterestModelId(model)) {
+      return { reply: `${pickActionBeat(event)}这个兴趣判定模型名看起来不太对；当前厂商示例：${getDefaultInterestModel(state.qq.proactive.judge.provider)}。` };
     }
     state.qq.proactive.judge.model = model;
     return {
@@ -4821,6 +4884,7 @@ function getQqCommandMenuLines(command) {
       "/兴趣配置",
       `/兴趣间隔 ${state.qq.proactive.judgeEveryMessages}`,
       `/兴趣分钟 ${state.qq.proactive.judgeEveryMinutes || "关闭"}`,
+      `/兴趣厂商 ${state.qq.proactive.judge.provider}`,
       `/兴趣模型 ${state.qq.proactive.judge.model}`,
       `/兴趣超时 ${state.qq.proactive.judge.timeoutMs}`,
       `/兴趣最近 ${state.qq.proactive.judge.maxRecentMessages}`
@@ -4861,7 +4925,7 @@ function buildQqOwnerConfigDetail() {
     `ban 用户：${state.qq.bannedUserIds.length ? state.qq.bannedUserIds.map((id) => formatQqBanListEntry(id)).join(", ") : "无"}`,
     `QQ enhancer：${state.qq.enhancer.enabled ? "开启" : "关闭"}`,
     `主动响应：${state.qq.proactive.enabled ? "开启" : "关闭"}，每 ${state.qq.proactive.judgeEveryMessages} 条${state.qq.proactive.judgeEveryMinutes > 0 ? `或有新消息满 ${state.qq.proactive.judgeEveryMinutes} 分钟` : "（分钟检查关闭）"}时交给模型判断，任一检查完成后两种周期一起重置，最终阈值 ${state.qq.proactive.judge.minInterest}`,
-    `主动判定模型：${state.qq.proactive.judge.model}，Key：${state.qq.proactive.judge.apiKeyConfigured ? "已配置" : "未配置"}，Token 静默超时 ${state.qq.proactive.judge.timeoutMs}ms`,
+    `主动判定模型：${state.qq.proactive.judge.provider}/${state.qq.proactive.judge.model}，Key：${state.qq.proactive.judge.apiKeyConfigured ? "已配置" : "未配置"}，Token 静默超时 ${state.qq.proactive.judge.timeoutMs}ms`,
     `联网查询：${state.qq.webLookup.enabled ? "开启" : "关闭"}`,
     `主人文件/图片任务：${qqOwnerFileImageTasksEnabled ? "开启" : "关闭"}`,
     `任务时限：普通回复 ${formatCodexTaskTimeout(codexTaskTimeouts[CODEX_TASK_TYPES.QQ_REPLY])}，看图回复 ${formatCodexTaskTimeout(codexTaskTimeouts[CODEX_TASK_TYPES.QQ_VISION_REPLY])}，总结 ${formatCodexTaskTimeout(codexTaskTimeouts[CODEX_TASK_TYPES.QQ_CONTEXT_SUMMARY])}，人格刷新 ${formatCodexTaskTimeout(codexTaskTimeouts[CODEX_TASK_TYPES.QQ_SELF_PERSONA])}，文件任务 ${formatCodexTaskTimeout(codexTaskTimeouts[CODEX_TASK_TYPES.QQ_FILE_TASK])}，画图 ${formatCodexTaskTimeout(codexTaskTimeouts[CODEX_TASK_TYPES.QQ_IMAGE_GENERATION])}`,
@@ -4885,8 +4949,9 @@ function buildQqInterestConfigDetail() {
     `判断间隔：每 ${state.qq.proactive.judgeEveryMessages} 条普通群消息`,
     `分钟检查：${state.qq.proactive.judgeEveryMinutes > 0 ? `有新增消息时每 ${state.qq.proactive.judgeEveryMinutes} 分钟` : "关闭"}`,
     "重置规则：任一种检查完成后，消息计数与分钟周期一起重新开始",
+    `模型厂商：${state.qq.proactive.judge.provider}`,
     `判定模型：${state.qq.proactive.judge.model}`,
-    `OpenRouter Key：${state.qq.proactive.judge.apiKeyConfigured ? "已配置" : "未配置"}`,
+    `当前厂商 Key：${state.qq.proactive.judge.apiKeyConfigured ? "已配置" : "未配置"}`,
     `Token 静默超时：${state.qq.proactive.judge.timeoutMs}ms`,
     `上下文：最近 ${state.qq.proactive.judge.maxRecentMessages} 条`,
     `最终阈值：${state.qq.proactive.judge.minInterest}`,
@@ -4903,6 +4968,7 @@ function buildQqInterestConfigHelp() {
     "/兴趣 开启 或 /兴趣 关闭",
     `/兴趣间隔 ${state.qq.proactive.judgeEveryMessages}`,
     `/兴趣分钟 ${state.qq.proactive.judgeEveryMinutes || "关闭"}`,
+    `/兴趣厂商 ${state.qq.proactive.judge.provider}（openrouter / deepseek / custom）`,
     `/兴趣模型 ${state.qq.proactive.judge.model}`,
     `/兴趣超时 ${state.qq.proactive.judge.timeoutMs}`,
     `/兴趣最近 ${state.qq.proactive.judge.maxRecentMessages}`,
@@ -5430,22 +5496,40 @@ function normalizeQqRequestTime(value) {
 
 async function executeQqZoneCommand(command, event) {
   const body = String(command).trim();
-  const publishMatch = body.match(/^发动态\s+([\s\S]+)$/i);
+  const publishCommand = parseQqZonePublishCommand(body);
   const commentMatch = body.match(/^评论动态\s+([1-9][0-9]{4,12})\s+(\S+)\s+([\s\S]+)$/i);
-  if ((publishMatch || commentMatch) && !event.isOwner) {
+  if ((publishCommand || commentMatch) && !event.isOwner) {
     return { ok: false, command, reply: "发表或评论 QQ 空间动态只允许主人触发。" };
   }
   try {
-    if (publishMatch) {
-      const result = await qqZone.publish(publishMatch[1]);
-      return { ok: true, command, reply: `QQ 空间动态已发表${result.tid ? `，tid：${result.tid}` : ""}。` };
+    if (publishCommand) {
+      if (publishCommand.invalidImageSelector) {
+        return { ok: false, command, reply: "图片只能取自当前消息或引用消息，请使用：/发动态 图片=当前，或 /发动态 文字 | 图片=当前。" };
+      }
+      const imagePaths = publishCommand.useCurrentImages
+        ? await prepareQqZonePublishImages(event)
+        : [];
+      if (publishCommand.useCurrentImages && imagePaths.length === 0) {
+        return { ok: false, command, reply: "当前消息和引用消息中没有可用于动态的图片。" };
+      }
+      if (!publishCommand.content && imagePaths.length === 0) {
+        return { ok: false, command, reply: "用法：/发动态 文字、/发动态 图片=当前，或 /发动态 文字 | 图片=当前。" };
+      }
+      const result = await qqZone.publish({ content: publishCommand.content, imagePaths });
+      const imageNote = result.imageCount ? `（${result.imageCount} 张图片）` : "";
+      logger.success("QQ Zone mood published", {
+        tid: result.tid || null,
+        imageCount: result.imageCount || 0,
+        hasText: Boolean(publishCommand.content)
+      }, "qq", qqLogContext(event));
+      return { ok: true, command, reply: `QQ 空间动态已发表${imageNote}${result.tid ? `，tid：${result.tid}` : ""}。` };
     }
     if (commentMatch) {
       await qqZone.comment({ uin: commentMatch[1], tid: commentMatch[2], content: commentMatch[3] });
       return { ok: true, command, reply: `已评论 ${commentMatch[1]} 的动态 ${commentMatch[2]}。` };
     }
     const listMatch = body.match(/^(?:动态|识别动态)(?:\s+最近)?(?:\s+([1-9][0-9]{4,12}))?(?:\s+([0-9]{1,2}))?$/i);
-    if (!listMatch) return { ok: false, command, reply: "用法：/动态 最近 [QQ号] [数量]、/发动态 内容、/评论动态 QQ号 tid 内容。" };
+    if (!listMatch) return { ok: false, command, reply: "用法：/动态 最近 [QQ号] [数量]、/发动态 文字 [| 图片=当前]、/评论动态 QQ号 tid 内容。" };
     const items = await qqZone.list({ uin: listMatch[1], count: Number(listMatch[2]) || 10 });
     if (!items.length) return { ok: true, command, reply: "没有读取到可见的 QQ 空间动态。" };
     const lines = items.map((item, index) => {
@@ -5457,6 +5541,26 @@ async function executeQqZoneCommand(command, event) {
   } catch (error) {
     return { ok: false, command, reply: `QQ 空间操作失败：${error.message}` };
   }
+}
+
+async function prepareQqZonePublishImages(event) {
+  const images = dedupeQqImages([
+    ...(Array.isArray(event.images) ? event.images : []),
+    ...(Array.isArray(event.replyContext?.images) ? event.replyContext.images : [])
+  ]).slice(0, 9);
+  if (images.length === 0) return [];
+  if (!event.qqTaskWorkspace) {
+    event.qqTaskWorkspace = await createQqTaskWorkspace("qzone-publish", crypto.randomUUID());
+  }
+  const paths = [];
+  for (const image of images) {
+    const path = await prepareSingleQqModelImage(image, {
+      outputDir: event.qqTaskWorkspace.inputDir,
+      fetchOneBotImage
+    });
+    if (path) paths.push(path);
+  }
+  return [...new Set(paths)].slice(0, 9);
 }
 
 async function notifyQqOwners(message) {
@@ -10405,8 +10509,12 @@ async function handleApi(req, res) {
   if (req.method === "POST" && req.url === "/api/qq/bot-settings") {
     const body = await readBody(req, { requireJson: true });
     let change;
+    const previousProvider = state.qq.proactive.judge.provider;
     try {
       change = applyDashboardBotSettings(state, body);
+      syncActiveQqInterestModelConfig({
+        resetBaseUrl: previousProvider !== state.qq.proactive.judge.provider
+      });
     } catch (error) {
       if (error instanceof TypeError || error instanceof RangeError) {
         return sendJson(res, 400, { error: error.message });
@@ -10426,6 +10534,8 @@ async function handleApi(req, res) {
       judgeEnabled: change.settings.judgeEnabled,
       judgeEveryMessages: change.settings.judgeEveryMessages,
       judgeEveryMinutes: change.settings.judgeEveryMinutes,
+      judgeProvider: state.qq.proactive.judge.provider,
+      judgeModel: state.qq.proactive.judge.model,
       judgeTimeoutMs: change.settings.judgeTimeoutMs,
       judgeMaxRecentMessages: change.settings.judgeMaxRecentMessages
     }, "web");

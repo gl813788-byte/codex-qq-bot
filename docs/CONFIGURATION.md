@@ -170,7 +170,10 @@ Use the same token on both sides. Without one, the webhook trusts only requests 
 | `CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE` | `1` | Semantic judge switch |
 | `..._JUDGE_EVERY_MESSAGES` | `20` | Ordinary unmentioned message threshold, 1–1000 |
 | `..._JUDGE_EVERY_MINUTES` | `5` | Minute threshold for a non-empty cycle; `0` disables this branch |
-| `..._JUDGE_MODEL` | Hermes 3 405B free | OpenRouter judge model |
+| `..._JUDGE_PROVIDER` | `openrouter` | Interest provider: `openrouter`, `deepseek`, or `custom` |
+| `..._JUDGE_MODEL` | provider-specific | `openrouter/free` for OpenRouter; `deepseek-v4-flash` for DeepSeek |
+| `..._JUDGE_API_KEY` | empty | Credential for the `custom` provider |
+| `..._JUDGE_BASE_URL` | empty | OpenAI-compatible API root for the `custom` provider |
 | `..._JUDGE_TIMEOUT_MS` | `6500` | Streaming idle timeout |
 | `CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES` | `20971520` | QQ image limit, 20 MiB by default |
 | `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | Safe-download mode; `proxy-compatible` additionally permits DNS names mapped into proxy Fake-IP range `198.18.0.0/15`, while literal private IPs and other reserved ranges stay blocked |
@@ -191,10 +194,12 @@ Self-persona thresholds use `CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_*`; account st
 | `CODEX_REMOTE_CONTACT_QQ_WEB_TIMEOUT_MS` | `12000` | Overall lookup timeout |
 | `CODEX_REMOTE_CONTACT_QQ_WEB_ATTEMPT_TIMEOUT_MS` | derived | Per-provider timeout |
 | `TAVILY_API_KEY` | empty | Tavily credential |
-| `OPENROUTER_API_KEY` | empty | Proactive judge credential |
-| `OPENROUTER_BASE_URL` | official endpoint | Optional compatible endpoint |
+| `OPENROUTER_API_KEY` | empty | OpenRouter interest-model credential |
+| `OPENROUTER_BASE_URL` | official endpoint | OpenRouter endpoint |
+| `DEEPSEEK_API_KEY` | empty | DeepSeek interest-model credential |
+| `DEEPSEEK_BASE_URL` | official endpoint | DeepSeek endpoint |
 
-Run `npm run ncc -- search-config` to initialize the repository environment. Diagnose `/api/maintenance` and the `search` / `interest` logs before editing prompts.
+Switch providers from Intelligence in the dashboard or with the owner command `/兴趣厂商 openrouter|deepseek|custom`; `/兴趣模型 model-id` overrides the provider default. Credentials remain environment-only and are never persisted to `data/settings.json`. OpenRouter uses strict JSON Schema, while DeepSeek and custom compatible services use JSON Object mode. Run `npm run ncc -- search-config` to initialize the repository environment. Diagnose `/api/maintenance` and the `search` / `interest` logs before editing prompts.
 
 ### Logs
 

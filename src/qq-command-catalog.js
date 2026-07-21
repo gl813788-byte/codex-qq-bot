@@ -34,7 +34,7 @@ export const qqCommandCatalog = [
     defaultPublic: false,
     configurable: true,
     menuLine: "/兴趣配置",
-    menuLines: ["/兴趣配置", "/兴趣间隔 20", "/兴趣模型 nousresearch/hermes-3-llama-3.1-405b:free"],
+    menuLines: ["/兴趣配置", "/兴趣间隔 20", "/兴趣厂商 openrouter", "/兴趣模型 openrouter/free"],
     aliases: ["兴趣", "兴趣配置", "主动配置", "兴趣间隔", "兴趣模型", "interest", "proactive"]
   },
   { key: "model", defaultPublic: false, configurable: true, menuLine: "/模型（动态读取可用模型）", aliases: ["模型", "qq模型", "切模型", "切换模型"] },

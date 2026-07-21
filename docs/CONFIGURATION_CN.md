@@ -172,7 +172,10 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 | `CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE` | `1` | 语义 judge 开关 |
 | `..._JUDGE_EVERY_MESSAGES` | `20` | 普通未 @ 消息阈值，范围 1–1000 |
 | `..._JUDGE_EVERY_MINUTES` | `5` | 非空周期的分钟阈值；`0` 关闭分钟分支 |
-| `..._JUDGE_MODEL` | Hermes 3 405B free | OpenRouter judge 模型 |
+| `..._JUDGE_PROVIDER` | `openrouter` | 兴趣模型厂商：`openrouter`、`deepseek` 或 `custom` |
+| `..._JUDGE_MODEL` | 随厂商变化 | OpenRouter 默认 `openrouter/free`；DeepSeek 默认 `deepseek-v4-flash` |
+| `..._JUDGE_API_KEY` | 空 | `custom` 厂商的 key |
+| `..._JUDGE_BASE_URL` | 空 | `custom` 厂商的 OpenAI 兼容 API 根地址 |
 | `..._JUDGE_TIMEOUT_MS` | `6500` | judge 流式空闲超时 |
 | `CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES` | `20971520` | QQ 图片上限，默认 20 MiB |
 | `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | 安全下载模式；`proxy-compatible` 仅额外允许域名解析到 `198.18.0.0/15` 代理 Fake-IP，仍拦截字面私网 IP 和其他保留地址 |
@@ -193,10 +196,12 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 | `CODEX_REMOTE_CONTACT_QQ_WEB_TIMEOUT_MS` | `12000` | 整体搜索超时 |
 | `CODEX_REMOTE_CONTACT_QQ_WEB_ATTEMPT_TIMEOUT_MS` | 自动 | 单 provider 超时 |
 | `TAVILY_API_KEY` | 空 | Tavily key |
-| `OPENROUTER_API_KEY` | 空 | 主动兴趣 judge key |
-| `OPENROUTER_BASE_URL` | OpenRouter 官方 API | 可选兼容端点 |
+| `OPENROUTER_API_KEY` | 空 | OpenRouter 兴趣模型 key |
+| `OPENROUTER_BASE_URL` | OpenRouter 官方 API | OpenRouter 端点 |
+| `DEEPSEEK_API_KEY` | 空 | DeepSeek 兴趣模型 key |
+| `DEEPSEEK_BASE_URL` | DeepSeek 官方 API | DeepSeek 端点 |
 
-可运行 `npm run ncc -- search-config` 初始化仓库环境文件。排障先看 `/api/maintenance` 和 `search` / `interest` 日志。
+仪表盘“智能行为”页或 QQ 主人命令 `/兴趣厂商 openrouter|deepseek|custom` 可切换厂商，`/兴趣模型 模型ID` 可覆盖默认模型。密钥始终只从环境读取，不写入 `data/settings.json`。OpenRouter 使用严格 JSON Schema；DeepSeek 和自定义兼容服务使用 JSON Object 模式。可运行 `npm run ncc -- search-config` 初始化仓库环境文件。排障先看 `/api/maintenance` 和 `search` / `interest` 日志。
 
 ### 日志
 

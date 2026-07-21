@@ -69,6 +69,33 @@ export function buildQqActiveAddPayload(parsed) {
   });
 }
 
+export function parseQqZonePublishCommand(command) {
+  const match = String(command || "").trim().match(/^\/?发动态(?:\s+([\s\S]*))?$/i);
+  if (!match) return null;
+  const segments = String(match[1] || "")
+    .split(/\s*[|｜;；]\s*/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const content = [];
+  let useCurrentImages = false;
+  let invalidImageSelector = "";
+  for (const segment of segments) {
+    const image = segment.match(/^图片\s*[:=：]\s*(.+)$/i);
+    if (!image) {
+      content.push(segment);
+      continue;
+    }
+    const selector = String(image[1] || "").trim();
+    if (/^(?:当前|本条|当前消息|引用|引用消息)$/i.test(selector)) useCurrentImages = true;
+    else invalidImageSelector = selector;
+  }
+  return {
+    content: content.join(" | ").trim().slice(0, 2000),
+    useCurrentImages,
+    invalidImageSelector
+  };
+}
+
 export function formatQqActiveAddFailure(kind, targetId, result, httpStatus) {
   const error = String(result?.error || "").trim();
   const question = String(result?.question || result?.questions?.filter(Boolean)?.join(" / ") || "").trim();

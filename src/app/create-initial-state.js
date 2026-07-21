@@ -2,6 +2,7 @@ import { createEmptyQqConversationMemory } from "../qq-conversation-memory.js";
 import { createEmptyQqKnowledgeBase } from "../qq-knowledge-base.js";
 import { createEmptyQqPeriodicRuntime } from "../qq-periodic-runtime.js";
 import { createEmptyQqSelfPersona } from "../qq-self-persona.js";
+import { resolveInterestModelRuntimeConfig } from "../interest-model-provider.js";
 
 export function createInitialState({
   config,
@@ -9,6 +10,7 @@ export function createInitialState({
   qqProactiveInterestPreset,
   startedAt = new Date().toISOString()
 }) {
+  const interestModel = resolveInterestModelRuntimeConfig(config.qqProactiveJudgeProvider, config);
   return {
     network: {
       allowLanAccess: false,
@@ -45,13 +47,13 @@ export function createInitialState({
         pendingImageRequests: createRecord(),
         judge: {
           enabled: config.qqProactiveJudgeEnabled,
-          provider: "openrouter",
+          provider: interestModel.provider,
           model: config.qqProactiveJudgeModel,
-          baseUrl: config.openRouterBaseUrl,
+          baseUrl: interestModel.baseUrl,
           timeoutMs: config.qqProactiveJudgeTimeoutMs,
           minInterest: config.qqProactiveJudgeMinInterest,
           maxRecentMessages: 8,
-          apiKeyConfigured: Boolean(config.openRouterApiKey),
+          apiKeyConfigured: interestModel.apiKeyConfigured,
           preset: qqProactiveInterestPreset
         }
       },

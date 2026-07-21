@@ -1,3 +1,11 @@
+import {
+  getDefaultInterestModel,
+  getDefaultInterestModelBaseUrl,
+  INTEREST_MODEL_PROVIDER_IDS,
+  listInterestModelProviders,
+  normalizeInterestModelProvider
+} from "./interest-model-provider.js";
+
 const BOT_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 
 export function readDashboardBotSettings(state) {
@@ -14,8 +22,9 @@ export function readDashboardBotSettings(state) {
     judgeModel: String(judge.model || ""),
     judgeTimeoutMs: boundedInteger(judge.timeoutMs, 1500, 20000, 6500),
     judgeMaxRecentMessages: boundedInteger(judge.maxRecentMessages, 1, 12, 8),
-    judgeProvider: String(judge.provider || "openrouter"),
-    judgeApiKeyConfigured: Boolean(judge.apiKeyConfigured)
+    judgeProvider: normalizeInterestModelProvider(judge.provider),
+    judgeApiKeyConfigured: Boolean(judge.apiKeyConfigured),
+    judgeProviders: listInterestModelProviders().map(({ id, label, defaultModel }) => ({ id, label, defaultModel }))
   };
 }
 
@@ -24,7 +33,8 @@ export function applyDashboardBotSettings(state, input) {
     throw new TypeError("Bot settings must be a JSON object");
   }
   const previous = readDashboardBotSettings(state);
-  const next = normalizePatch(input, previous);
+  const previousJudgeBaseUrl = String(state.qq.proactive.judge.baseUrl || "");
+  const next = normalizePatch(input, { ...previous, judgeBaseUrl: previousJudgeBaseUrl });
 
   state.qq.enhancer.enabled = next.enhancerEnabled;
   state.qq.webLookup.enabled = next.webLookupEnabled;
@@ -32,7 +42,10 @@ export function applyDashboardBotSettings(state, input) {
   state.qq.proactive.judge.enabled = next.judgeEnabled;
   state.qq.proactive.judgeEveryMessages = next.judgeEveryMessages;
   state.qq.proactive.judgeEveryMinutes = next.judgeEveryMinutes;
+  state.qq.proactive.judge.provider = next.judgeProvider;
   state.qq.proactive.judge.model = next.judgeModel;
+  state.qq.proactive.judge.baseUrl = next.judgeBaseUrl;
+  state.qq.proactive.judge.apiKeyConfigured = next.judgeApiKeyConfigured;
   state.qq.proactive.judge.timeoutMs = next.judgeTimeoutMs;
   state.qq.proactive.judge.maxRecentMessages = next.judgeMaxRecentMessages;
 
@@ -45,7 +58,10 @@ export function applyDashboardBotSettings(state, input) {
       state.qq.proactive.judge.enabled = previous.judgeEnabled;
       state.qq.proactive.judgeEveryMessages = previous.judgeEveryMessages;
       state.qq.proactive.judgeEveryMinutes = previous.judgeEveryMinutes;
+      state.qq.proactive.judge.provider = previous.judgeProvider;
       state.qq.proactive.judge.model = previous.judgeModel;
+      state.qq.proactive.judge.baseUrl = previousJudgeBaseUrl;
+      state.qq.proactive.judge.apiKeyConfigured = previous.judgeApiKeyConfigured;
       state.qq.proactive.judge.timeoutMs = previous.judgeTimeoutMs;
       state.qq.proactive.judge.maxRecentMessages = previous.judgeMaxRecentMessages;
     }
@@ -53,7 +69,11 @@ export function applyDashboardBotSettings(state, input) {
 }
 
 function normalizePatch(input, current) {
-  const next = { ...current };
+  const next = {
+    ...current,
+    judgeBaseUrl: String(current.judgeBaseUrl || ""),
+    judgeApiKeyConfigured: Boolean(current.judgeApiKeyConfigured)
+  };
   assignBoolean(input, "enhancerEnabled", next);
   assignBoolean(input, "webLookupEnabled", next);
   assignBoolean(input, "proactiveEnabled", next);
@@ -63,6 +83,19 @@ function normalizePatch(input, current) {
   next.judgeEveryMinutes = optionalInteger(input, "judgeEveryMinutes", 0, 1440, next.judgeEveryMinutes);
   next.judgeTimeoutMs = optionalInteger(input, "judgeTimeoutMs", 1500, 20000, next.judgeTimeoutMs);
   next.judgeMaxRecentMessages = optionalInteger(input, "judgeMaxRecentMessages", 1, 12, next.judgeMaxRecentMessages);
+
+  if (Object.hasOwn(input, "judgeProvider")) {
+    const requested = String(input.judgeProvider || "").trim().toLowerCase();
+    if (!INTEREST_MODEL_PROVIDER_IDS.includes(requested)) {
+      throw new RangeError(`judgeProvider must be one of: ${INTEREST_MODEL_PROVIDER_IDS.join(", ")}`);
+    }
+    if (requested !== next.judgeProvider) {
+      next.judgeProvider = requested;
+      next.judgeModel = getDefaultInterestModel(requested);
+      next.judgeBaseUrl = getDefaultInterestModelBaseUrl(requested);
+      next.judgeApiKeyConfigured = false;
+    }
+  }
 
   if (Object.hasOwn(input, "judgeModel")) {
     const model = String(input.judgeModel || "").trim();
