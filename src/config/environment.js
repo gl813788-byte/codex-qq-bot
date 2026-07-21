@@ -1,8 +1,11 @@
 import { parseAllowedOrigins } from "../http-utils.js";
 import { normalizeSafeFetchMode } from "../safe-fetch.js";
 import { CODEX_TASK_TIMEOUT_DEFAULTS, CODEX_TASK_TYPES } from "../codex-task-timeout.js";
-
-const DEFAULT_QQ_PROACTIVE_JUDGE_MODEL = "nousresearch/hermes-3-llama-3.1-405b:free";
+import {
+  getDefaultInterestModel,
+  getDefaultInterestModelBaseUrl,
+  normalizeInterestModelProvider
+} from "../interest-model-provider.js";
 
 export function createEnvironmentConfig(env = process.env) {
   const oneBotMaxConcurrency = boundedInteger(
@@ -60,6 +63,10 @@ export function createEnvironmentConfig(env = process.env) {
       || env.CODEX_REMOTE_CONTACT_QQ_WEB_LOOKUP_TIMEOUT_MS,
     12_000
   );
+  const qqProactiveJudgeProvider = normalizeInterestModelProvider(
+    env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_PROVIDER
+  );
+  const defaultQqProactiveJudgeModel = getDefaultInterestModel(qqProactiveJudgeProvider);
   return {
     logMaxBytes: numberOrDefault(env.CODEX_REMOTE_CONTACT_LOG_MAX_BYTES, 5 * 1024 * 1024),
     logMaxFiles: numberOrDefault(env.CODEX_REMOTE_CONTACT_LOG_MAX_FILES, 5),
@@ -118,8 +125,9 @@ export function createEnvironmentConfig(env = process.env) {
       30_000,
       numberOrDefault(env.CODEX_REMOTE_CONTACT_QQ_ACCOUNT_STICKER_CACHE_MS, 5 * 60_000)
     ),
-    defaultQqProactiveJudgeModel: DEFAULT_QQ_PROACTIVE_JUDGE_MODEL,
-    qqProactiveJudgeModel: env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_MODEL || DEFAULT_QQ_PROACTIVE_JUDGE_MODEL,
+    qqProactiveJudgeProvider,
+    defaultQqProactiveJudgeModel,
+    qqProactiveJudgeModel: env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_MODEL || defaultQqProactiveJudgeModel,
     qqProactiveJudgeTimeoutMs: numberOrDefault(env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_TIMEOUT_MS, 6_500),
     qqProactiveJudgeMinInterest: 20,
     qqSelfPersonaScopeInitialMessages: boundedInteger(env.CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_SCOPE_INITIAL_MESSAGES, {
@@ -189,7 +197,11 @@ export function createEnvironmentConfig(env = process.env) {
     qqBubbleMaxCount: Math.max(1, numberOrDefault(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_MAX_COUNT, 6)),
 
     openRouterApiKey: env.OPENROUTER_API_KEY || env.CODEX_REMOTE_CONTACT_OPENROUTER_API_KEY || "",
-    openRouterBaseUrl: env.OPENROUTER_BASE_URL || env.CODEX_REMOTE_CONTACT_OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
+    openRouterBaseUrl: env.OPENROUTER_BASE_URL || env.CODEX_REMOTE_CONTACT_OPENROUTER_BASE_URL || getDefaultInterestModelBaseUrl("openrouter"),
+    deepSeekApiKey: env.DEEPSEEK_API_KEY || env.CODEX_REMOTE_CONTACT_DEEPSEEK_API_KEY || "",
+    deepSeekBaseUrl: env.DEEPSEEK_BASE_URL || env.CODEX_REMOTE_CONTACT_DEEPSEEK_BASE_URL || getDefaultInterestModelBaseUrl("deepseek"),
+    customInterestModelApiKey: env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_API_KEY || "",
+    customInterestModelBaseUrl: env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_BASE_URL || "",
     tavilyApiKey: env.TAVILY_API_KEY || env.CODEX_REMOTE_CONTACT_TAVILY_API_KEY || "",
 
     sqliteTimeoutMs,

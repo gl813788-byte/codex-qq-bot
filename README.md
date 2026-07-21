@@ -113,7 +113,8 @@ Core capabilities:
 - Agent-style Codex replies that can use bounded chat-history, search, memory, and management tools over multiple rounds.
 - Adaptive social behavior for message length, group rhythm, stickers, and voluntary replies; a higher-temperature interest model owns ordinary, cold-group and private proactive gates, while the approved main model focuses on chat, topic selection and multi-round research. The interest model is limited to bounded lightweight decisions, classification and triage. Conversation, impression and persona summaries, knowledge extraction, and other long-context or complex work remain main-model tasks; complex background review uses interest triage followed by main-model final review.
 - Layered memory: `/记忆` is current-scope short-term memory cleared by `/新对话`; the titled long-term knowledge base updates older facts and supports scoped slang, frequency tracking and model-approved deletion, alongside social impressions and unified cross-channel memory.
-- QQ administration for model/reasoning choice, allowlists, permissions, bans, moderation, requests, and selected QQ Space actions.
+- QQ administration for model/reasoning choice, allowlists, permissions, bans, moderation, resilient friend/group requests, and text, image-only, or mixed QQ Space moods.
+- Selectable interest-model providers: OpenRouter, DeepSeek, or a custom OpenAI-compatible service, with credentials kept environment-only.
 - Seven-view local dashboard for runtime, channels, behavior, short-term memory, an editable long-term Knowledge workspace, structured logs, themes, and optional LAN access.
 - macOS client and browser dashboard use the same QQ/OneBot Hub and require no Messages database or iMessage automation permissions.
 
@@ -157,7 +158,7 @@ During the first deployment, Codex creates `data/settings.json` from `config/set
 }
 ```
 
-Local secrets, OneBot tokens, OpenRouter/Tavily keys, and network bindings belong in untracked environment files or the process environment. Do not commit them. See [Configuration](docs/CONFIGURATION.md) for fields and precedence.
+Local secrets, OneBot tokens, OpenRouter/DeepSeek/Tavily keys, and network bindings belong in untracked environment files or the process environment. Do not commit them. See [Configuration](docs/CONFIGURATION.md) for fields and precedence.
 
 ## Repository layout
 

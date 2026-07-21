@@ -171,6 +171,10 @@ test("dashboard knowledge workspace renders real scoped data and uses the protec
   assert.match(javascript, /entryId,\s*variantId/);
   assert.doesNotMatch(knowledgeView, /示例黑话|Example slang/);
   assert.match(css, /\.knowledge-workspace\s*\{[^}]*grid-template-columns:/);
+  assert.match(css, /\.knowledge-context-row\s*\{[^}]*grid-template-columns:\s*42px minmax\(0,\s*1fr\)/);
+  assert.match(css, /\.knowledge-context-row > div\s*\{[^}]*min-width:\s*0/);
+  assert.match(css, /\.knowledge-context-row p\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(css, /\.knowledge-entry-list\s*\{[^}]*max-height:\s*none;[^}]*overflow:\s*visible;[^}]*overscroll-behavior:\s*auto/);
 });
 
 test("dashboard live log view requests verbose entries and renders every detail inline", () => {

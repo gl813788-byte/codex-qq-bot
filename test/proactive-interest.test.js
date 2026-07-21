@@ -232,6 +232,39 @@ test("runs bounded miscellaneous triage through the configured interest model", 
   });
 });
 
+test("runs structured interest tasks through DeepSeek-compatible JSON mode", async () => {
+  let request;
+  const result = await runQqInterestModelStructuredTask({
+    provider: "deepseek",
+    apiKey: "deep-key",
+    baseUrl: "https://api.deepseek.test",
+    model: "deepseek-v4-flash",
+    taskName: "deepseek_interest_test",
+    payload: { topic: "AI" },
+    responseSchema: {
+      type: "object",
+      properties: { interested: { type: "boolean" } },
+      required: ["interested"],
+      additionalProperties: false
+    },
+    validate: (value) => typeof value?.interested === "boolean",
+    fetch: async (url, options) => {
+      request = { url, options, body: JSON.parse(options.body) };
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: '{"interested":true}' }, finish_reason: "stop" }]
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.provider, "deepseek");
+  assert.equal(request.url, "https://api.deepseek.test/chat/completions");
+  assert.deepEqual(request.body.response_format, { type: "json_object" });
+  assert.equal("reasoning" in request.body, false);
+  assert.equal("provider" in request.body, false);
+  assert.equal("http-referer" in request.options.headers, false);
+});
+
 test("proactive judge resets its idle timeout while reasoning and content tokens continue", async () => {
   let requestBody;
   const fetch = async (_url, options) => {

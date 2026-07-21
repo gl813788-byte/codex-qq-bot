@@ -39,6 +39,8 @@ test("uses stable defaults and rejects invalid listener ports", () => {
   assert.equal(defaults.codexMaxConcurrency, 2);
   assert.equal(defaults.qqBubbleSeparator, "|||");
   assert.equal(defaults.qqProactiveJudgeMinInterest, 20);
+  assert.equal(defaults.qqProactiveJudgeProvider, "openrouter");
+  assert.equal(defaults.qqProactiveJudgeModel, "openrouter/free");
   assert.equal(defaults.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_REPLY], 120_000);
   assert.equal(defaults.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_VISION_REPLY], 180_000);
   assert.equal(defaults.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_CONTEXT_SUMMARY], 90_000);
@@ -47,4 +49,22 @@ test("uses stable defaults and rejects invalid listener ports", () => {
   assert.equal(defaults.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_IMAGE_GENERATION], 600_000);
   assert.equal(defaults.safeFetchMode, "strict");
   assert.equal(invalidPort.hubPort, 3789);
+});
+
+test("normalizes DeepSeek and custom interest model credentials", () => {
+  const deepseek = createEnvironmentConfig({
+    CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_PROVIDER: "DeepSeek",
+    DEEPSEEK_API_KEY: "deep-key"
+  });
+  assert.equal(deepseek.qqProactiveJudgeProvider, "deepseek");
+  assert.equal(deepseek.qqProactiveJudgeModel, "deepseek-v4-flash");
+  assert.equal(deepseek.deepSeekApiKey, "deep-key");
+
+  const custom = createEnvironmentConfig({
+    CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_PROVIDER: "custom",
+    CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_API_KEY: "custom-key",
+    CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_BASE_URL: "https://models.example/v1"
+  });
+  assert.equal(custom.customInterestModelApiKey, "custom-key");
+  assert.equal(custom.customInterestModelBaseUrl, "https://models.example/v1");
 });

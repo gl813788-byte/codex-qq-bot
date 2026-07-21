@@ -24,6 +24,8 @@ test("creates isolated application state from normalized configuration", () => {
   assert.equal(first.qq.enhancer.enabled, false);
   assert.equal(first.qq.proactive.enabled, false);
   assert.equal(first.qq.memory.perGroupLimit, 25);
+  assert.equal(first.qq.proactive.judge.provider, "openrouter");
+  assert.equal(first.qq.proactive.judge.model, "openrouter/free");
   assert.equal(Object.getPrototypeOf(first.qq.memory.shortTermNotes), null);
   assert.equal(first.qq.knowledgeBase.version, 1);
   assert.deepEqual(first.qq.knowledgeBase.entries, []);

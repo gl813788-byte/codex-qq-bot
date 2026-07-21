@@ -1,7 +1,21 @@
+import { readFile, stat } from "node:fs/promises";
+import { basename, extname } from "node:path";
+
 const qzoneReadEndpoint = "https://user.qzone.qq.com/proxy/domain/taotao.qq.com/cgi-bin/emotion_cgi_msglist_v6";
 const qzoneWriteBase = "https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin";
+const qzoneUploadEndpoint = "https://up.qzone.qq.com/cgi-bin/upload/cgi_upload_image";
+const maxPublishImages = 9;
+const maxImageBytes = 10 * 1024 * 1024;
+const maxTotalImageBytes = 30 * 1024 * 1024;
+const supportedImageExtensions = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"]);
 
-export function createQqZoneClient({ callOneBotAction, fetchImpl = fetch, timeoutMs = 12000 }) {
+export function createQqZoneClient({
+  callOneBotAction,
+  fetchImpl = fetch,
+  readFileImpl = readFile,
+  statImpl = stat,
+  timeoutMs = 12000
+}) {
   if (typeof callOneBotAction !== "function") throw new TypeError("callOneBotAction is required");
 
   async function credentials() {
@@ -10,10 +24,19 @@ export function createQqZoneClient({ callOneBotAction, fetchImpl = fetch, timeou
     const cookies = String(data.cookies || "");
     const token = Number(data.token);
     const loginUin = (cookies.match(/(?:^|;\s*)uin=o0*([0-9]+)/) || [])[1] || "";
+    const skey = readCookie(cookies, "skey");
+    const pSkey = readCookie(cookies, "p_skey");
     if (!result?.ok || !cookies || !Number.isFinite(token) || !loginUin) {
       throw new Error(result?.error || "NapCat 未返回可用的 QQ 空间登录凭据");
     }
-    return { cookies, token, loginUin };
+    return {
+      cookies,
+      token,
+      loginUin,
+      skey,
+      pSkey,
+      gtk: pSkey ? computeQzoneGtk(pSkey) : token
+    };
   }
 
   async function list({ uin, count = 10 } = {}) {
@@ -28,7 +51,7 @@ export function createQqZoneClient({ callOneBotAction, fetchImpl = fetch, timeou
       pos: 0,
       num: Math.max(1, Math.min(20, Number(count) || 10)),
       replynum: 0,
-      g_tk: auth.token,
+      g_tk: auth.gtk,
       callback,
       code_version: 1,
       format: "jsonp",
@@ -40,21 +63,35 @@ export function createQqZoneClient({ callOneBotAction, fetchImpl = fetch, timeou
     return items.map(normalizeQzoneMood).filter(Boolean);
   }
 
-  async function publish(content) {
-    const text = normalizeContent(content, 2000);
-    if (!text) throw new Error("动态内容不能为空");
+  async function publish(input) {
+    const options = input && typeof input === "object" && !Array.isArray(input)
+      ? input
+      : { content: input };
+    const text = normalizeContent(options.content, 2000);
+    const imagePaths = normalizeImagePaths(options.imagePaths);
+    if (!text && imagePaths.length === 0) throw new Error("动态内容和图片不能同时为空");
     const auth = await credentials();
+    const uploadedImages = [];
+    if (imagePaths.length > 0) {
+      if (!auth.pSkey) throw new Error("NapCat 凭据缺少 QQ 空间 p_skey，暂时无法上传图片");
+      let totalBytes = 0;
+      for (const imagePath of imagePaths) {
+        const info = await statImpl(imagePath);
+        if (!info?.isFile?.()) throw new Error(`动态图片不是普通文件：${basename(imagePath)}`);
+        if (Number(info.size) > maxImageBytes) throw new Error(`单张动态图片不能超过 ${maxImageBytes / 1024 / 1024} MiB`);
+        totalBytes += Number(info.size) || 0;
+        if (totalBytes > maxTotalImageBytes) throw new Error(`动态图片总大小不能超过 ${maxTotalImageBytes / 1024 / 1024} MiB`);
+        uploadedImages.push(await uploadImage(imagePath, auth));
+      }
+    }
     const url = new URL(`${qzoneWriteBase}/emotion_cgi_publish_v6`);
-    url.searchParams.set("g_tk", String(auth.token));
+    url.searchParams.set("g_tk", String(auth.gtk));
+    url.searchParams.set("uin", auth.loginUin);
     const form = new URLSearchParams();
     appendParams(form, {
       syn_tweet_verson: 1,
       paramstr: 1,
-      pic_template: "",
-      richtype: "",
-      richval: "",
-      special_url: "",
-      subrichtype: "",
+      who: 1,
       con: text,
       feedversion: 1,
       ver: 1,
@@ -62,14 +99,58 @@ export function createQqZoneClient({ callOneBotAction, fetchImpl = fetch, timeou
       to_sign: 0,
       hostuin: auth.loginUin,
       code_version: 1,
-      format: "fs"
+      format: "json",
+      qzreferrer: `https://user.qzone.qq.com/${auth.loginUin}`,
+      ...(uploadedImages.length > 0 ? {
+        pic_bo: uploadedImages.map((image) => image.picBo).join(","),
+        richtype: 1,
+        richval: uploadedImages.map((image) => image.richVal).join("\t")
+      } : {})
     });
     const body = await qzoneFetch(url, { auth, method: "POST", form });
     assertQzoneWriteSuccess(body);
     return {
       tid: String(body.tid || body.topicId || body.data?.tid || ""),
-      message: String(body.message || body.msg || "发表成功")
+      message: String(body.message || body.msg || "发表成功"),
+      imageCount: uploadedImages.length
     };
+  }
+
+  async function uploadImage(imagePath, auth) {
+    const extension = extname(imagePath).toLowerCase();
+    if (!supportedImageExtensions.has(extension)) {
+      throw new Error(`不支持的动态图片格式：${extension || "无扩展名"}`);
+    }
+    const content = await readFileImpl(imagePath);
+    const form = new URLSearchParams();
+    appendParams(form, {
+      filename: basename(imagePath),
+      uploadtype: 1,
+      albumtype: 7,
+      skey: auth.skey,
+      uin: auth.loginUin,
+      p_skey: auth.pSkey,
+      output_type: "json",
+      base64: 1,
+      picfile: Buffer.from(content).toString("base64")
+    });
+    const body = await qzoneFetch(new URL(qzoneUploadEndpoint), {
+      auth,
+      method: "POST",
+      form,
+      referer: `https://user.qzone.qq.com/${auth.loginUin}`,
+      origin: "https://user.qzone.qq.com"
+    });
+    assertQzoneWriteSuccess(body);
+    const data = body?.data;
+    if (!data || typeof data !== "object") throw new Error("QQ 空间图片上传响应缺少 data");
+    const uploadUrl = String(data.url || "");
+    const picBo = uploadUrl.includes("&bo=") ? uploadUrl.split("&bo=")[1] : "";
+    if (!picBo) throw new Error("QQ 空间图片上传响应缺少 bo 参数");
+    const height = finiteInteger(data.height);
+    const width = finiteInteger(data.width);
+    const richVal = `,${data.albumid || ""},${data.lloc || ""},${data.sloc || ""},${finiteInteger(data.type)},${height},${width},,${height},${width}`;
+    return { picBo, richVal };
   }
 
   async function comment({ uin, tid, content }) {
@@ -80,26 +161,28 @@ export function createQqZoneClient({ callOneBotAction, fetchImpl = fetch, timeou
     if (!text) throw new Error("评论内容不能为空");
     const auth = await credentials();
     const url = new URL(`${qzoneWriteBase}/emotion_cgi_re_feeds`);
-    url.searchParams.set("g_tk", String(auth.token));
+    url.searchParams.set("g_tk", String(auth.gtk));
     const form = new URLSearchParams();
     appendParams(form, {
-      topicId: `${targetUin}_${targetTid}`,
-      feedsType: 100,
-      hostUin: targetUin,
-      platformid: 52,
+      topicId: `${targetUin}_${targetTid}__1`,
       uin: auth.loginUin,
+      hostUin: targetUin,
+      feedsType: 100,
+      inCharset: "utf-8",
+      outCharset: "utf-8",
+      plat: "qzone",
+      source: "ic",
+      platformid: 52,
       format: "fs",
       ref: "feeds",
-      content: text,
-      feedversion: 1,
-      paramstr: 1
+      content: text
     });
     const body = await qzoneFetch(url, { auth, method: "POST", form });
     assertQzoneWriteSuccess(body);
     return { message: String(body.message || body.msg || "评论成功") };
   }
 
-  async function qzoneFetch(url, { auth, method, form, callback = "" }) {
+  async function qzoneFetch(url, { auth, method, form, callback = "", referer = "", origin = "" }) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -108,7 +191,8 @@ export function createQqZoneClient({ callOneBotAction, fetchImpl = fetch, timeou
         signal: controller.signal,
         headers: {
           cookie: auth.cookies,
-          referer: `https://user.qzone.qq.com/${auth.loginUin}/main`,
+          referer: referer || `https://user.qzone.qq.com/${auth.loginUin}/main`,
+          ...(origin ? { origin } : {}),
           "user-agent": "Mozilla/5.0 (Codex QQ Bot)",
           ...(form ? { "content-type": "application/x-www-form-urlencoded; charset=UTF-8" } : {})
         },
@@ -134,13 +218,21 @@ export function parseQzoneResponse(text, callback = "") {
   const lastBrace = raw.lastIndexOf("}");
   if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(raw.slice(firstBrace, lastBrace + 1));
   for (const candidate of candidates) {
-    try {
-      return JSON.parse(candidate);
-    } catch {
-      // Try the next wrapper format used by QZone's form sender.
+    for (const json of [candidate, quoteUnquotedObjectKeys(candidate)]) {
+      try {
+        return JSON.parse(json);
+      } catch {
+        // Try the next wrapper format used by QZone's form sender.
+      }
     }
   }
   throw new Error("无法解析 QQ 空间响应");
+}
+
+export function computeQzoneGtk(pSkey) {
+  let hash = 5381;
+  for (const char of String(pSkey || "")) hash += (hash << 5) + char.charCodeAt(0);
+  return hash & 0x7fffffff;
 }
 
 function normalizeQzoneMood(item) {
@@ -172,6 +264,26 @@ function normalizeContent(value, maxLength) {
 function normalizeQqId(value) {
   const id = String(value || "").trim();
   return /^[1-9][0-9]{4,12}$/.test(id) ? id : "";
+}
+
+function normalizeImagePaths(value) {
+  const paths = Array.isArray(value) ? value : [];
+  if (paths.length > maxPublishImages) throw new Error(`动态最多只能包含 ${maxPublishImages} 张图片`);
+  return [...new Set(paths.map((item) => String(item || "").trim()).filter(Boolean))];
+}
+
+function readCookie(cookies, name) {
+  const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return (String(cookies || "").match(new RegExp(`(?:^|;\\s*)${escaped}=([^;]*)`)) || [])[1] || "";
+}
+
+function finiteInteger(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.trunc(number) : 0;
+}
+
+function quoteUnquotedObjectKeys(value) {
+  return String(value || "").replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, '$1"$2"$3');
 }
 
 function appendParams(target, values) {

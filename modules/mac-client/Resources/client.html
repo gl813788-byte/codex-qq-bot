@@ -255,13 +255,14 @@
                     <input id="botProactiveToggle" type="checkbox" />
                   </label>
                   <label class="feature-toggle-card">
-                    <span><strong data-i18n="interestJudgeFeature">兴趣模型判定</strong><small data-i18n="interestJudgeFeatureHint">使用 OpenRouter 模型判断是否值得自然接话。</small></span>
+                    <span><strong data-i18n="interestJudgeFeature">兴趣模型判定</strong><small data-i18n="interestJudgeFeatureHint">使用所选厂商的模型判断是否值得自然接话。</small></span>
                     <input id="botJudgeToggle" type="checkbox" />
                   </label>
                 </div>
                 <div class="bot-tuning-grid">
                   <label class="field"><span data-i18n="judgeEveryMessages">消息间隔</span><input id="botJudgeMessages" type="number" min="1" max="1000" step="1" /></label>
                   <label class="field"><span data-i18n="judgeEveryMinutes">分钟间隔</span><input id="botJudgeMinutes" type="number" min="0" max="1440" step="1" /></label>
+                  <label class="field"><span data-i18n="judgeProvider">模型厂商</span><select id="botJudgeProvider"><option value="openrouter">OpenRouter</option><option value="deepseek">DeepSeek</option><option value="custom" data-i18n="judgeProviderCustom">自定义兼容服务</option></select></label>
                   <label class="field model-field"><span data-i18n="judgeModel">判定模型</span><input id="botJudgeModel" autocomplete="off" spellcheck="false" /></label>
                   <label class="field"><span data-i18n="judgeTimeout">静默超时（ms）</span><input id="botJudgeTimeout" type="number" min="1500" max="20000" step="100" /></label>
                   <label class="field"><span data-i18n="judgeRecentMessages">最近上下文</span><input id="botJudgeRecent" type="number" min="1" max="12" step="1" /></label>

@@ -107,6 +107,52 @@ test("NapCat social bridge keeps compatibility with one-object friend APIs", asy
   assert.equal(submitted[0].defaultCatgory, 3);
 });
 
+test("NapCat social bridge submits by UIN when stranger UID lookup fails", async () => {
+  const routes = new Map();
+  const submitted = [];
+  await plugin_init(createContext(routes, {
+    userApi: {
+      async getUidByUinV2() { throw new Error("UID lookup unavailable for stranger"); }
+    },
+    buddyService: {
+      reqToAddFriends(targetId, message) { submitted.push([targetId, message]); }
+    }
+  }));
+
+  const response = responseRecorder();
+  await routes.get("POST /add-friend")(localRequest({
+    target_id: "3596291931",
+    message: "群里认识的"
+  }), response);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.status, "submitted");
+  assert.deepEqual(submitted, [[3596291931, "群里认识的"]]);
+});
+
+test("NapCat social bridge friend preflight never submits a request", async () => {
+  const routes = new Map();
+  let submitted = 0;
+  await plugin_init(createContext(routes, {
+    buddyService: {
+      getTargetBuddySetting() {
+        return { addFriendSetting: 3, questions: ["从哪里认识的？"] };
+      },
+      reqToAddFriends() { submitted += 1; }
+    }
+  }));
+
+  const response = responseRecorder();
+  await routes.get("POST /inspect-friend")(localRequest({ target_id: "3596291931" }), response);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.status, "ready");
+  assert.equal(response.body.uid_available, true);
+  assert.equal(response.body.verification_setting, 3);
+  assert.deepEqual(response.body.questions, ["从哪里认识的？"]);
+  assert.equal(submitted, 0);
+});
+
 test("NapCat social bridge handles group questions, approval and membership states", async () => {
   const routes = new Map();
   const submitted = [];
@@ -173,7 +219,7 @@ test("NapCat social bridge refuses disabled and full group joins", async () => {
   }
 });
 
-function createContext(routes, { buddyService, groupApi, groupService } = {}) {
+function createContext(routes, { buddyService, groupApi, groupService, userApi } = {}) {
   return {
     pluginName: "napcat-plugin-builtin",
     router: {
@@ -182,7 +228,7 @@ function createContext(routes, { buddyService, groupApi, groupService } = {}) {
     },
     core: {
       apis: {
-        UserApi: { async getUidByUinV2(id) { return `uid:${id}`; } },
+        UserApi: userApi || { async getUidByUinV2(id) { return `uid:${id}`; } },
         FriendApi: { async isBuddy() { return false; } },
         GroupApi: groupApi
       },
