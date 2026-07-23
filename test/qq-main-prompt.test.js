@@ -21,6 +21,9 @@ test("main-model core prompt presents one execution path and one dynamic style a
   assert.match(prompt, /准确理解当前语境；确有需要时调用内部工具/);
   assert.match(prompt, /真人化行为规划.*唯一的长度、气泡、emoji 和表情包风格依据/);
   assert.match(prompt, /不输出分析过程/);
+  assert.match(prompt, /任何进入主模型的聊天轮.*都不强制你发言/);
+  assert.match(prompt, /重复骚扰.*已经觉得烦/);
+  assert.match(prompt, /\[\[qq_silent\]\]/);
   assert.match(prompt, /qq_memory 格式/);
   assert.match(prompt, /当前日期.*2026-07-21/);
   assert.match(prompt, /长期群聊归纳本群实际的主要话题/);
@@ -66,6 +69,9 @@ test("main tool guide keeps common tools visible and hides unrelated social oper
   assert.match(ordinary, /先查旧标题，再联网，最后沿用同一标题覆盖更新/);
   assert.doesNotMatch(ordinary, /\/主动加好友/);
   assert.match(ordinary, /调用轮只输出独占一行/);
+  assert.match(ordinary, /真实动作硬约束/);
+  assert.match(ordinary, /可见回复声称已经.*加好友/);
+  assert.match(ordinary, /一旦写操作已经成功.*不能静默吞掉/);
 
   const social = formatQqMainToolGuide({
     messageText: "给他点个赞再看看空间动态",
@@ -74,5 +80,15 @@ test("main tool guide keeps common tools visible and hides unrelated social oper
   });
   assert.match(social, /\/点赞 发送者 1/);
   assert.match(social, /\/动态 最近 QQ号 10/);
+  assert.match(social, /\/加好友、\/添加好友 也识别/);
   assert.match(social, /仍按当前发送者权限校验/);
+
+  const poke = formatQqMainToolGuide({
+    messageText: "",
+    pokeEvent: true,
+    currentSender: "小明(QQ 10000)"
+  });
+  assert.match(poke, /真实反拍/);
+  assert.match(poke, /必须先在调用轮独占输出 \[\[qq_command:\/拍一拍 发送者\]\]/);
+  assert.match(poke, /未调用或调用失败时不得把反拍写成已完成/);
 });

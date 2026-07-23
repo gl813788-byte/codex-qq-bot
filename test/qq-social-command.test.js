@@ -27,6 +27,17 @@ test("parses legacy and structured friend add commands", () => {
     category_id: 3,
     add_friend_setting: 2
   });
+
+  assert.deepEqual(parseQqActiveAddCommand("/加好友 123456"), {
+    kind: "friend",
+    targetId: "123456",
+    message: "",
+    answer: "",
+    remark: "",
+    categoryId: undefined,
+    setting: undefined
+  });
+  assert.equal(parseQqActiveAddCommand("添加好友 123456")?.kind, "friend");
 });
 
 test("parses group answers with spaces and keeps legacy syntax", () => {
