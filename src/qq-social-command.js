@@ -1,4 +1,4 @@
-const activeAddCommandPattern = /^(主动加好友|主动加群)\s+([1-9][0-9]{4,12})(?:\s+([\s\S]+))?$/i;
+const activeAddCommandPattern = /^\/?(主动加好友|加好友|添加好友|主动加群|加群|加入群)\s+([1-9][0-9]{4,12})(?:\s+([\s\S]+))?$/i;
 
 const optionKeyAliases = new Map([
   ["验证", "message"],
@@ -26,7 +26,7 @@ const namedOptionPattern = /(?:^|[\s|｜;；])(?<key>验证信息|申请说明|�
 export function parseQqActiveAddCommand(command) {
   const match = String(command || "").trim().match(activeAddCommandPattern);
   if (!match) return null;
-  const kind = match[1] === "主动加好友" ? "friend" : "group";
+  const kind = /好友/i.test(match[1]) ? "friend" : "group";
   const rawOptions = String(match[3] || "").trim();
   const { prefix, values, hasNamedOptions } = parseNamedOptions(rawOptions);
   if (kind === "friend") {

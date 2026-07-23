@@ -23,7 +23,11 @@ test("builds NapCat-compatible poke attempts with an explicit target", () => {
 test("recognizes a model's explicit poke-back intent only for poke events", () => {
   assert.equal(shouldImplicitlyPokeBack("拍回去，逮到你了。[[qq_done]]", { type: "group_poke" }), true);
   assert.equal(shouldImplicitlyPokeBack("回拍一下", { type: "private_poke" }), true);
+  assert.equal(shouldImplicitlyPokeBack("反拍一下～", { type: "group_poke" }), true);
+  assert.equal(shouldImplicitlyPokeBack("拍回来，我在呢", { type: "private_poke" }), true);
+  assert.equal(shouldImplicitlyPokeBack("反手戳回去", { type: "group_poke" }), true);
   assert.equal(shouldImplicitlyPokeBack("拍回去", { type: "group_message" }), false);
+  assert.equal(shouldImplicitlyPokeBack("不想反拍了", { type: "group_poke" }), false);
   assert.equal(shouldImplicitlyPokeBack("我没有要拍回去，只是在解释这句话的意思。", { type: "group_poke" }), false);
 });
 

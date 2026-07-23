@@ -198,7 +198,7 @@ test("formats anonymous evidence and recognizes proactive silence", () => {
   assert.match(context, /表情包规划/);
   assert.match(context, /单独一行写 ---/);
   assert.match(context, /兴趣模型已经批准的执行轮/);
-  assert.match(context, /不要再次判断是否发言/);
+  assert.match(context, /互动重复无价值.*已经厌烦/);
   assert.match(context, /\[\[qq_silent\]\]/);
   assert.equal(isQqSilentReply("[[qq_silent]]\n[[qq_memory:{\"recentTopic\":\"闲聊\"}]]"), true);
 });

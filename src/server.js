@@ -5253,14 +5253,14 @@ function isQqBotHistoryCommand(command) {
 }
 
 function isQqBotSocialCommand(command) {
-  return /^\/?(?:点赞|申请|好友申请|群申请|主动加好友|主动加群|动态|识别动态|发动态|评论动态)(?:\s+.*)?$/i.test(command);
+  return /^\/?(?:点赞|申请|好友申请|群申请|主动加好友|加好友|添加好友|主动加群|加群|加入群|动态|识别动态|发动态|评论动态)(?:\s+.*)?$/i.test(command);
 }
 
 async function executeQqBotSocialCommand(command, event) {
   const body = String(command || "").replace(/^\/+/, "").trim();
   if (/^点赞(?:\s|$)/i.test(body)) return executeQqLikeCommand(body, event);
   if (/^(申请|好友申请|群申请)(?:\s|$)/i.test(body)) return executeQqRequestCommand(body, event);
-  if (/^(主动加好友|主动加群)(?:\s|$)/i.test(body)) return executeQqActiveAddCommand(body, event);
+  if (/^(主动加好友|加好友|添加好友|主动加群|加群|加入群)(?:\s|$)/i.test(body)) return executeQqActiveAddCommand(body, event);
   if (/^(动态|识别动态|发动态|评论动态)(?:\s|$)/i.test(body)) return executeQqZoneCommand(body, event);
   return { ok: false, command, reply: "未识别的 QQ 社交工具命令。" };
 }
@@ -7056,8 +7056,8 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     }
     assertQqReplyScopeActive(replyScope);
     if (isQqSilentReply(baseReply)) {
-      if (event.proactiveDecision) return "";
-      baseReply = "在";
+      event.qqModelDeclinedReply = true;
+      return "";
     }
     const reply = state.qq.enhancer.enabled
       ? encourageQqStickerReply(
@@ -8510,7 +8510,7 @@ function logQqReplyLifecycleCompleted(record, { lifecycleStartedAt, commandActio
   if (record.error || sendFailed) outcome = "failed";
   else if (record.queued) outcome = "queued";
   else if (!decision.ok) outcome = "ignored";
-  else if (!record.reply) outcome = decision.proactive ? "silent" : "ignored";
+  else if (!record.reply) outcome = event.qqModelDeclinedReply || decision.proactive ? "silent" : "ignored";
   else if (commandAction) outcome = "command";
   else if (record.send?.skipped) outcome = "skipped";
   else outcome = "sent";
@@ -8523,6 +8523,7 @@ function logQqReplyLifecycleCompleted(record, { lifecycleStartedAt, commandActio
     messageId: event.raw?.message_id == null ? null : String(event.raw.message_id),
     messageType: event.type || (event.groupId ? "group_message" : "private_message"),
     proactive: Boolean(decision.proactive),
+    modelDeclinedReply: Boolean(event.qqModelDeclinedReply),
     triggerMode: decision.triggerMode || (isMentionEvent(event) ? "explicit" : null),
     decisionReason: decision.reason || null,
     replyChars: String(record.reply || "").length,

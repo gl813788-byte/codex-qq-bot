@@ -22,7 +22,7 @@ export function shouldImplicitlyPokeBack(reply, event = {}) {
     .trim();
   if (!visible || visible.length > 80) return false;
   if (/(?:没有|没想|不想|不要|别).{0,8}(?:拍|戳|回拍|回戳)/i.test(visible)) return false;
-  return /(?:拍|戳)(?:回去|回你|回他|回她|回ta|回一下)|(?:回拍|回戳)/i.test(visible);
+  return /(?:拍|戳)(?:回去|回来|回你|回他|回她|回ta|回一下)|(?:回拍|回戳|反拍|反戳)|反手.{0,4}(?:拍|戳)/i.test(visible);
 }
 
 export function summarizePokeFailures(results = []) {
