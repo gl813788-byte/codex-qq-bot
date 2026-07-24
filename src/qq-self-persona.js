@@ -257,6 +257,7 @@ export function buildQqSelfPersonaScopeSummaryPrompt(scopeId, entries = [], {
   existingKnowledge = "",
   previousSummary = "",
   previousTopics = [],
+  reviewId = "",
   currentDate = formatQqKnowledgePromptDate()
 } = {}) {
   const scopeType = scopeId.startsWith("private:") ? "private" : "group";
@@ -272,7 +273,7 @@ export function buildQqSelfPersonaScopeSummaryPrompt(scopeId, entries = [], {
   let nextMember = 1;
   const messages = compactConsecutiveQqMessages(
     Array.isArray(entries) ? entries : []
-  ).slice(-80).map((entry) => {
+  ).slice(-300).map((entry) => {
     const isBot = entry?.isAssistant || entry?.senderId === "assistant";
     const senderId = String(entry?.senderId || "unknown");
     if (!isBot && !memberAliases.has(senderId)) memberAliases.set(senderId, `member${nextMember++}`);
@@ -297,7 +298,7 @@ export function buildQqSelfPersonaScopeSummaryPrompt(scopeId, entries = [], {
     "最后只输出一行 FINAL_JSON，格式：",
     `FINAL_JSON: {"summary":"不超过180字","topics":["..."],"botInterests":["..."],"botDislikes":["..."],"interactionStyle":["..."],"knowledge":[{"kind":"slang","title":"...","content":"...","scope":"${knowledgeScope}","userId":"","userName":""},{"kind":"note","title":"按实际主要话题生成的稳定标题","content":"截至 YYYY-MM-DD；核验状态：会话待核查；事实：…；来源：聊天依据","scope":"${knowledgeScope}"}]}`,
     "persona 数组每项最多 8 项，knowledge 最多 16 项；证据不足就用空数组，不要编造。",
-    JSON.stringify({ scopeType, scopeId, groupName, previousScope, existingKnowledge, messages })
+    JSON.stringify({ reviewId, scopeType, scopeId, groupName, previousScope, existingKnowledge, messages })
   ].join("\n");
 }
 

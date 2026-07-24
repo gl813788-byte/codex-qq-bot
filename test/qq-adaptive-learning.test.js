@@ -67,7 +67,7 @@ test("learns and backfills the group speaker-switch interjection rate from two-m
     }));
   }
   const signals = buildQqAdaptiveLearningSignals(group, null, { now: start + 500_000 });
-  assert.equal(signals.version, 4);
+  assert.equal(signals.version, 5);
   assert.equal(signals.group.interruptionWindowSeconds, 120);
   assert.equal(signals.group.interruptionSampleSize, 3);
   assert.equal(signals.group.interruptionCount, 2);

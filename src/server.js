@@ -61,7 +61,7 @@ import {
 import {
   createEmptyQqConversationMemory,
   extractQqConversationMemoryMarkers,
-  formatQqConversationMemoryContext,
+  listQqConversationMemoryProfiles,
   normalizeQqConversationMemory,
   qqConversationMemoryVersion,
   stripQqConversationMemoryMarkers,
@@ -69,6 +69,16 @@ import {
   updateQqConversationMemoryFromEvent,
   updateQqConversationMemoryFromExchange
 } from "./qq-conversation-memory.js";
+import {
+  archiveQqShortTermEntry,
+  normalizeQqShortTermNoteScopes,
+  overwriteQqShortTermEntry,
+  parseQqShortTermContent
+} from "./qq-short-term-memory.js";
+import {
+  fetchQqHistoryForSummary,
+  mergeQqHistoryMessages
+} from "./qq-history-retrieval.js";
 import {
   applyQqKnowledgePatches,
   applyQqKnowledgeDeletionReview,
@@ -138,10 +148,12 @@ import {
 } from "./qq-human-behavior.js";
 import {
   backfillQqAdaptiveInterruptionLearning,
+  applyQqAdaptiveModelStyleReview,
   buildQqAdaptiveLearningSignals,
   ensureQqAdaptiveLearning,
   formatQqAdaptiveLearningContext,
   getQqAdaptiveColdProactivePlan,
+  getQqAdaptiveStyleReviewPlan,
   getQqAdaptivePrivateProactivePlan,
   getQqAdaptiveProactiveIntervals,
   markQqAdaptiveColdProactiveCheck,
@@ -152,6 +164,10 @@ import {
   recordQqAdaptiveHumanMessage,
   summarizeQqAdaptiveGroupLearning
 } from "./qq-adaptive-learning.js";
+import {
+  buildQqModelStyleReviewPrompt,
+  parseQqModelStyleReview
+} from "./qq-style-review.js";
 import {
   applyGeneratedQqSelfPersona,
   applyQqSelfPersonaScopeSummary,
@@ -198,6 +214,13 @@ import {
   updateQqOrdinaryInterestCycle
 } from "./qq-periodic-runtime.js";
 import { serializeFileOperation, writeJsonAtomically } from "./file-store.js";
+import {
+  buildImpressionSemanticItems,
+  buildKnowledgeSemanticItems,
+  buildQqSemanticScope,
+  buildShortTermSemanticItems,
+  formatSemanticMemoryPrompt
+} from "./unified-memory/qq-memory-items.js";
 import { createWebSearch, formatWebSearchProviderName } from "./web-search.js";
 import { isSupportedImageContentType, readResponseJson, writeResponseBodyToFile } from "./bounded-stream.js";
 import { runJsonProcess } from "./process-runner.js";
@@ -267,6 +290,7 @@ const {
   qqStickerLabelsPath,
   qqStickerInventoryPath,
   unifiedMemoryPath,
+  semanticMemoryPath,
   assistantProfilePath
 } = createRuntimePaths({ projectDir });
 const {
@@ -364,6 +388,21 @@ function fallbackMemoryStore() {
     },
     async formatForPrompt() {
       return "";
+    },
+    async replaceSemanticLayer() {
+      return { ok: false, skipped: true, reason: "unified-memory module is not installed" };
+    },
+    async semanticSearch() {
+      return [];
+    },
+    async semanticStatus() {
+      return { ok: false, backend: "disabled", count: 0, layers: [] };
+    },
+    async syncSemanticMemory() {
+      return { ok: false, skipped: true, reason: "unified-memory module is not installed" };
+    },
+    async close() {
+      return undefined;
     }
   };
 }
@@ -549,7 +588,10 @@ let assistantMentionAliases = (process.env.CODEX_REMOTE_CONTACT_ASSISTANT_MENTIO
   .split(",")
   .map((item) => item.trim())
   .filter(Boolean);
-const unifiedMemory = createUnifiedMemory({ memoryPath: unifiedMemoryPath });
+const unifiedMemory = createUnifiedMemory({
+  memoryPath: unifiedMemoryPath,
+  semanticMemoryPath
+});
 const qqStickerLabels = createQqStickerLabelStore({ filePath: qqStickerLabelsPath });
 const qqStickerInventory = createQqStickerInventory({ filePath: qqStickerInventoryPath });
 const qqRequestStore = createQqRequestStore({ filePath: qqRequestsPath });
@@ -704,10 +746,13 @@ async function loadQqMemory() {
       state.qq.memory.recentMessages = createSafeRecord(body.recentMessages);
     }
     if (body && typeof body === "object" && body.shortTermNotes && typeof body.shortTermNotes === "object") {
-      state.qq.memory.shortTermNotes = normalizeQqShortTermNoteScopes(body.shortTermNotes);
+      state.qq.memory.shortTermNotes = normalizeQqShortTermNoteScopes(body.shortTermNotes, {
+        createId: createQqPublicMemoryId,
+        normalizeTime: normalizeIsoTime
+      });
     }
     state.qq.periodicRuntime = normalizeQqPeriodicRuntime(body?.periodicRuntime);
-    const shouldPersistMigration = Number(body.version || 0) < 3 || !body.periodicRuntime;
+    const shouldPersistMigration = Number(body.version || 0) < 4 || !body.periodicRuntime;
     logger.info("QQ short-term memory loaded", {
       source: "startup",
       outcome: "loaded",
@@ -1115,30 +1160,6 @@ function normalizeQqBanExpiryMap(value) {
     if (!/^[1-9][0-9]{4,12}$/.test(id)) continue;
     const until = Number(rawUntil);
     if (Number.isFinite(until) && until > 0) output[id] = until;
-  }
-  return output;
-}
-
-function normalizeQqShortTermNoteScopes(value) {
-  const output = createSafeRecord();
-  for (const [scopeId, rawEntries] of Object.entries(value || {})) {
-    if (!/^\d{4,20}$/.test(scopeId) && !/^private:\d{4,20}$/.test(scopeId)) continue;
-    const entries = (Array.isArray(rawEntries) ? rawEntries : [])
-      .map((entry) => {
-        const text = compactPublicMemoryText(entry?.text || entry?.content || entry);
-        if (!text) return null;
-        return {
-          id: normalizeQqPublicMemoryId(entry?.id) || createQqPublicMemoryId(),
-          text,
-          createdAt: normalizeIsoTime(entry?.createdAt || entry?.at),
-          updatedAt: normalizeIsoTime(entry?.updatedAt || entry?.createdAt || entry?.at),
-          createdBy: entry?.createdBy == null ? "" : String(entry.createdBy),
-          createdByLabel: compactPublicMemoryAuthor(entry?.createdByLabel || "")
-        };
-      })
-      .filter(Boolean)
-      .slice(-40);
-    if (entries.length) output[scopeId] = entries;
   }
   return output;
 }
@@ -1800,11 +1821,52 @@ async function processQueuedQqRepliesForScope(scopeId, source = "queued") {
   });
 }
 
+async function syncQqSemanticMemoryLayer(layer) {
+  const items = layer === "short-term"
+    ? buildShortTermSemanticItems(state.qq.memory.shortTermNotes)
+    : layer === "knowledge"
+      ? buildKnowledgeSemanticItems(state.qq.knowledgeBase)
+      : layer === "impression"
+        ? buildImpressionSemanticItems(
+          listQqConversationMemoryProfiles(state.qq.conversationMemory)
+        )
+        : null;
+  if (!items) return { ok: false, skipped: true, reason: "unknown layer" };
+  try {
+    const result = await unifiedMemory.replaceSemanticLayer(layer, items);
+    logger.debug("QQ semantic memory layer synchronized", {
+      layer,
+      count: items.length,
+      outcome: result?.ok ? "synchronized" : "skipped",
+      reason: result?.reason
+    }, "memory");
+    return result;
+  } catch (error) {
+    logger.warn("Unable to synchronize QQ semantic memory layer", {
+      layer,
+      count: items.length,
+      outcome: "failed",
+      error
+    }, "memory");
+    return { ok: false, error: error.message };
+  }
+}
+
+async function syncAllSemanticMemoryLayers() {
+  const results = await Promise.all([
+    syncQqSemanticMemoryLayer("short-term"),
+    syncQqSemanticMemoryLayer("knowledge"),
+    syncQqSemanticMemoryLayer("impression"),
+    unifiedMemory.syncSemanticMemory?.()
+  ]);
+  return results;
+}
+
 const qqMemoryWriter = createCoalescingWriter(async () => {
   try {
     await serializeFileOperation(qqMemoryPath, async () => {
       await writeJsonAtomically(qqMemoryPath, {
-        version: 3,
+        version: 4,
         updatedAt: new Date().toISOString(),
         perGroupLimit: state.qq.memory.perGroupLimit,
         groupRecentLimit: state.qq.memory.groupRecentLimit,
@@ -1814,6 +1876,7 @@ const qqMemoryWriter = createCoalescingWriter(async () => {
         periodicRuntime: normalizeQqPeriodicRuntime(state.qq.periodicRuntime)
       });
     });
+    await syncQqSemanticMemoryLayer("short-term");
   } catch (error) {
     logger.warn("Unable to save QQ memory", {
       outcome: "failed",
@@ -1845,6 +1908,7 @@ const qqKnowledgeBaseWriter = createCoalescingWriter(async () => {
       throw new Error("QQ knowledge base persistence is unavailable because its data file could not be loaded safely");
     }
     await qqKnowledgeBaseRepository.save(state.qq.knowledgeBase);
+    await syncQqSemanticMemoryLayer("knowledge");
   } catch (error) {
     logger.warn("Unable to save QQ knowledge base", {
       ...buildQqKnowledgeStoreLogDetails(state.qq.knowledgeBase, {
@@ -1927,26 +1991,31 @@ async function refreshQqSelfPersona() {
     limit: 2
   });
   for (const scope of dueScopes) {
-    const entries = state.qq.memory.recentMessages[scope.scopeId] || [];
-    if (entries.length === 0) continue;
+    const localEntries = state.qq.memory.recentMessages[scope.scopeId] || [];
     try {
       const scopeEvent = scope.kind === "group"
         ? {
           groupId: scope.scopeId,
-          groupName: getQqKnowledgeGroupName(state.qq.knowledgeBase, scope.scopeId)
+          groupName: getQqKnowledgeGroupName(state.qq.knowledgeBase, scope.scopeId),
+          selfId: oneBotHealth.selfId
         }
         : {
           senderId: scope.scopeId.slice("private:".length),
-          senderName: entries.find((entry) => !entry?.isAssistant)?.senderName
-            || entries.find((entry) => !entry?.isAssistant)?.senderLabel
-            || ""
+          senderName: localEntries.find((entry) => !entry?.isAssistant)?.senderName
+            || localEntries.find((entry) => !entry?.isAssistant)?.senderLabel
+            || "",
+          selfId: oneBotHealth.selfId
         };
+      const historySnapshot = await getQqReviewHistorySnapshot(scopeEvent, { maxMessages: 300 });
+      const entries = historySnapshot.messages;
+      if (entries.length === 0) continue;
       const prompt = buildQqSelfPersonaScopeSummaryPrompt(scope.scopeId, entries, {
         botName: state.qq.selfPersona.account.nickname || assistantName,
         groupName: scopeEvent.groupName || "",
         existingKnowledge: formatQqKnowledgeSummaryReference(scopeEvent),
         previousSummary: scope.summary,
-        previousTopics: scope.topics
+        previousTopics: scope.topics,
+        reviewId: historySnapshot.snapshotId
       });
       const output = await runQqSelfPersonaModelPrompt(prompt, `scope-${scope.kind}`);
       const summary = parseQqSelfPersonaJson(output);
@@ -1977,6 +2046,10 @@ async function refreshQqSelfPersona() {
       }
       logger.info("QQ self persona scope summarized", {
         scopeType: scope.kind,
+        historySnapshotId: historySnapshot.snapshotId,
+        historySnapshotShared: historySnapshot.shared,
+        historySource: historySnapshot.history.source,
+        historyMessageCount: entries.length,
         humanMessages: scope.humanMessages,
         botReplies: scope.botReplies,
         summaryRevision: Number(state.qq.selfPersona.scopes[scope.scopeId]?.summaryRevision || 0)
@@ -2069,6 +2142,7 @@ const qqConversationMemoryWriter = createCoalescingWriter(async () => {
       updatedAt: new Date().toISOString()
     });
   });
+  await syncQqSemanticMemoryLayer("impression");
 }, { delayMs: 150 });
 
 async function saveQqConversationMemory() {
@@ -2459,7 +2533,15 @@ async function buildMemorySnapshot() {
           ? `QQ私聊短期记忆 ${scopeId.slice("private:".length)}`
           : `QQ群短期记忆 ${scopeId}`,
         count: Array.isArray(entries) ? entries.length : 0,
-        entries: normalizeMemoryEntries(entries, 40)
+        entries: (Array.isArray(entries) ? entries : []).slice(-40).map((entry) => ({
+          role: `${entry.status === "archived" ? "已过时" : "当前"} · ${entry.title || "短期记忆"} · #${entry.id}`,
+          text: [
+            entry.summary ? `简述：${entry.summary}` : null,
+            entry.detail || entry.text ? `详述：${entry.detail || entry.text}` : null,
+            entry.staleReason ? `过时原因：${entry.staleReason}` : null
+          ].filter(Boolean).join("\n"),
+          at: entry.updatedAt || entry.createdAt || null
+        }))
       })),
       knowledgeBase: normalizeQqKnowledgeBase(state.qq.knowledgeBase),
       lightweight: Object.entries(state.qq.memory.entries).map(([groupId, entries]) => ({
@@ -2498,7 +2580,11 @@ async function buildMemorySnapshot() {
           title: `QQ群印象 ${group.groupId}`,
           count: Number(group.messageCount || 0),
           impression: group.impression || "",
+          impressionSummary: group.impressionSummary || "",
+          impressionDetail: group.impressionDetail || group.impression || "",
           botThought: group.botThought || "",
+          botThoughtSummary: group.botThoughtSummary || "",
+          botThoughtDetail: group.botThoughtDetail || group.botThought || "",
           recentTopics: (group.recentTopics || []).slice(-12),
           recentLinks: (group.recentLinks || []).slice(-12),
           people: Object.values(group.people || {}).slice(0, 80)
@@ -2508,7 +2594,11 @@ async function buildMemorySnapshot() {
           title: `QQ私聊印象 ${chat.aliases?.at(-1) || chat.userId}`,
           count: Number(chat.messageCount || 0),
           impression: chat.impression || "",
+          impressionSummary: chat.impressionSummary || "",
+          impressionDetail: chat.impressionDetail || chat.impression || "",
           botThought: chat.botThought || "",
+          botThoughtSummary: chat.botThoughtSummary || "",
+          botThoughtDetail: chat.botThoughtDetail || chat.botThought || "",
           recentTopics: (chat.recentTopics || []).slice(-10),
           recentConversations: (chat.recentConversations || []).slice(-8)
         }))
@@ -3896,15 +3986,8 @@ async function runQqKnowledgeMainDeletionReview(application, interestTriage) {
 async function runQqTimedAdaptiveStyleReviews() {
   let changed = false;
   for (const [groupId, group] of Object.entries(state.qq.personas.groups)) {
-    const learningBefore = ensureQqAdaptiveLearning(group);
-    const hadClock = Boolean(learningBefore.styleReviewWindowStartedAt || learningBefore.lastStyleReviewAt);
-    const reviewed = maybeReviewQqAdaptiveLanguageStyle(
-      group,
-      state.qq.memory.recentMessages[groupId] || []
-    );
-    const learningAfter = ensureQqAdaptiveLearning(group);
-    const clockInitialized = !hadClock && Boolean(learningAfter.styleReviewWindowStartedAt);
-    if (reviewed || clockInitialized) changed = true;
+    const plan = getQqAdaptiveStyleReviewPlan(group);
+    if (plan.initialized) changed = true;
     if (!qqAdaptiveLearningSnapshotLoggedGroups.has(groupId)) {
       qqAdaptiveLearningSnapshotLoggedGroups.add(groupId);
       const snapshot = summarizeQqAdaptiveGroupLearning(group, group?.members || {});
@@ -3920,7 +4003,7 @@ async function runQqTimedAdaptiveStyleReviews() {
         )
       }, "learning");
     }
-    if (clockInitialized) {
+    if (plan.initialized) {
       const snapshot = summarizeQqAdaptiveGroupLearning(group, group?.members || {});
       logger.debug("QQ adaptive learning review clock initialized", {
         groupId,
@@ -3930,10 +4013,58 @@ async function runQqTimedAdaptiveStyleReviews() {
         nextStyleReviewAt: snapshot.nextStyleReviewAt
       }, "learning");
     }
+    if (!plan.due) continue;
+    const scopeEvent = {
+      groupId,
+      groupName: getQqKnowledgeGroupName(state.qq.knowledgeBase, groupId),
+      selfId: state.qq.selfPersona.account?.userId || ""
+    };
+    const historySnapshot = await getQqReviewHistorySnapshot(scopeEvent, { maxMessages: 300 });
+    const entries = historySnapshot.messages;
+    const humanSamples = entries.filter((entry) => !entry?.isAssistant && entry?.senderId !== "assistant").length;
+    const botSamples = entries.filter((entry) => entry?.isAssistant || entry?.senderId === "assistant").length;
+    if (humanSamples < 12 || botSamples < 4) continue;
+    let reviewed = false;
+    let reviewMode = "main-model";
+    try {
+      const previousLearning = ensureQqAdaptiveLearning(group);
+      const prompt = buildQqModelStyleReviewPrompt(entries, {
+        botName: state.qq.selfPersona.account?.nickname || assistantName,
+        scopeLabel: scopeEvent.groupName ? `QQ群“${scopeEvent.groupName}”` : `QQ群 ${groupId}`,
+        previousReview: {
+          summary: previousLearning.styleReviewSummary,
+          detail: previousLearning.styleReviewDetail,
+          guidance: previousLearning.styleGuidance
+        },
+        snapshotId: historySnapshot.snapshotId,
+        currentDate: formatQqPromptDate()
+      });
+      const output = await runQqSelfPersonaModelPrompt(prompt, "style-review");
+      const modelReview = parseQqModelStyleReview(output);
+      if (!modelReview) throw new Error("style reviewer did not return valid FINAL_JSON");
+      reviewed = applyQqAdaptiveModelStyleReview(group, modelReview, {
+        humanSamples,
+        botSamples
+      });
+    } catch (error) {
+      reviewMode = "deterministic-fallback";
+      reviewed = maybeReviewQqAdaptiveLanguageStyle(group, entries, { force: true });
+      logger.warn("QQ adaptive main-model style review failed; deterministic fallback used", {
+        groupId,
+        historySnapshotId: historySnapshot.snapshotId,
+        error
+      }, "learning");
+    }
+    if (reviewed) changed = true;
     if (reviewed) {
       const snapshot = summarizeQqAdaptiveGroupLearning(group, group?.members || {});
       logger.info("QQ adaptive learning style review completed", {
         groupId,
+        reviewMode,
+        historySnapshotId: historySnapshot.snapshotId,
+        historySnapshotShared: historySnapshot.shared,
+        historySource: historySnapshot.history.source,
+        historyMessageCount: entries.length,
         sampleSize: snapshot.sampleSize,
         textSampleSize: snapshot.textSampleSize,
         botReplyCount: snapshot.botReplyCount,
@@ -4862,7 +4993,7 @@ function isPublicQqClearContextCommand(normalized, compact) {
 
 function isPublicQqSummarizeContextCommand(normalized, compact) {
   return /^(总结上下文|总结前文|总结聊天记录|总结聊天|总结群聊|总结私聊|总结最近|概括上下文|概括前文|概括聊天记录|概括聊天|概括群聊|概括私聊|捋一下上下文|上下文总结|summary)$/i.test(compact)
-    || /^(?:总结|概括|复盘|捋一下)\s*(?:最近|前文|上文|本群|群聊|私聊|聊天|聊天记录|对话)?\s*(?:上下文|内容|消息|记录)?$/i.test(normalized);
+    || /^(?:总结|概括|复盘|捋一下)\s*(?:最近|前文|上文|本群|群聊|私聊|聊天|聊天记录|对话)?\s*(?:上下文|内容|消息|记录)?(?:\s+(?:全部|[0-9]{1,3}))?$/i.test(normalized);
 }
 
 function isQqInterestConfigCommand(normalized, compact) {
@@ -6042,7 +6173,7 @@ function isQqBotKnowledgeCommand(command) {
 }
 
 function isQqBotUnifiedMemoryCommand(command) {
-  return /^\/?(统一记忆|跨端记忆|全局记忆|unified-memory|unified memory)(?:\s+.*)?$/i.test(command);
+  return /^\/?(统一记忆|跨端记忆|全局记忆|unified-memory|unified memory|交接)(?:\s+.*)?$/i.test(command);
 }
 
 function isQqBotWebSearchCommand(command) {
@@ -6347,10 +6478,72 @@ function resolveQqBotPokeTarget(command, event) {
 
 async function executeQqBotUnifiedMemoryCommand(command, event) {
   const normalized = String(command || "").trim().replace(/^\/+/, "");
-  const body = normalized.replace(/^(?:统一记忆|跨端记忆|全局记忆|unified-memory|unified memory)\s*/i, "").trim();
+  const isHandoff = /^交接(?:\s+|$)/i.test(normalized);
+  const body = normalized.replace(/^(?:统一记忆|跨端记忆|全局记忆|unified-memory|unified memory|交接)\s*/i, "").trim();
   const addMatch = body.match(/^(?:添加|新增|写入|记住|add|write)\s+([\s\S]+)$/i);
   const searchMatch = body.match(/^(?:搜索|查找|查|search)\s+(.+)$/i);
+  const impressionDetailMatch = body.match(/^(?:印象详细|印象详情|详细印象|完整印象|impression-detail)(?:\s+([\s\S]+))?$/i);
+  if (impressionDetailMatch) {
+    const query = String(impressionDetailMatch[1] || "").trim();
+    const items = await unifiedMemory.semanticSearch({
+      query,
+      layers: ["impression"],
+      scope: buildQqSemanticScope(event),
+      statuses: ["active"],
+      limit: 10,
+      minScore: query ? 0.04 : 0
+    }).catch(() => []);
+    if (!items.length) {
+      return {
+        ok: true,
+        command,
+        reply: query ? `当前范围没有找到与“${query}”相关的完整印象。` : "当前范围还没有可查看的完整印象。"
+      };
+    }
+    return {
+      ok: true,
+      command,
+      reply: [
+        "当前消息涉及的完整印象（弱参考，不是绝对事实）：",
+        ...items.map((item) => [
+          `【${item.title || "印象"}】`,
+          `简述：${item.summary}`,
+          `详细：${item.detail || item.summary}`,
+          `更新：${item.updatedAt || "未知"}`
+        ].join("\n"))
+      ].join("\n\n").slice(0, 6000)
+    };
+  }
+  if (isHandoff) {
+    if (!state.unifiedMemory.manualHandoffCommand) {
+      return { ok: false, command, reply: "手动交接命令当前已关闭。" };
+    }
+    if (!event.isOwner) {
+      return { ok: false, command, reply: `统一记忆交接只允许${ownerLabel}上下文写入。` };
+    }
+    const text = compactPublicMemoryText(body);
+    if (!text) return { ok: false, command, reply: "交接内容为空，未写入。" };
+    const result = await unifiedMemory.write({
+      type: "handoff",
+      source: "qq_bot",
+      channel: "qq",
+      originDevice: "qq",
+      executionDevice: "desktop",
+      mode: "qq_manual_handoff",
+      topic: text.slice(0, 60),
+      summary: text,
+      sourceTextHint: event?.text || "",
+      confidence: 0.86,
+      zone: "base"
+    });
+    return {
+      ok: result.ok,
+      command,
+      reply: result.ok ? `已更新统一记忆交接：${text}` : `交接写入失败：${result.reason || "未知原因"}`
+    };
+  }
   if (!body || /^(?:列表|查看|看看|list|show)$/i.test(body)) {
+    if (!event.isOwner) return { ok: false, command, reply: `统一长期记忆列表只允许${ownerLabel}上下文查看。` };
     const snapshot = await unifiedMemory.read({ query: "", limit: 8 });
     return { ok: true, command, reply: formatUnifiedMemorySnapshotForQq(snapshot) };
   }
@@ -6359,10 +6552,12 @@ async function executeQqBotUnifiedMemoryCommand(command, event) {
     return { ok: true, command, reply: formatUnifiedMemoryStatusForQq(status) };
   }
   if (searchMatch) {
+    if (!event.isOwner) return { ok: false, command, reply: `统一长期记忆搜索只允许${ownerLabel}上下文使用。` };
     const snapshot = await unifiedMemory.read({ query: searchMatch[1], limit: 8 });
     return { ok: true, command, reply: formatUnifiedMemorySnapshotForQq(snapshot, searchMatch[1]) };
   }
   if (addMatch) {
+    if (!event.isOwner) return { ok: false, command, reply: `统一长期记忆写入只允许${ownerLabel}上下文使用。` };
     const text = compactPublicMemoryText(addMatch[1]);
     if (!text) return { ok: false, command, reply: "统一记忆内容为空，未写入。" };
     const result = await unifiedMemory.write({
@@ -6387,7 +6582,7 @@ async function executeQqBotUnifiedMemoryCommand(command, event) {
   return {
     ok: false,
     command,
-    reply: "统一记忆命令未识别。可用：/统一记忆 列表、/统一记忆 搜索 关键词、/统一记忆 添加 内容、/统一记忆 状态。"
+    reply: "统一记忆命令未识别。可用：/统一记忆 印象详细 [关键词]、列表、搜索 关键词、添加 内容、状态；交接使用 /交接 内容。"
   };
 }
 
@@ -6406,6 +6601,7 @@ function formatUnifiedMemorySnapshotForQq(snapshot, query = "") {
 
 function formatUnifiedMemoryStatusForQq(status) {
   const counts = status.counts || {};
+  const semantic = status.semantic || {};
   return [
     "统一记忆状态：",
     `总数：${status.count || 0} 条`,
@@ -6414,7 +6610,9 @@ function formatUnifiedMemoryStatusForQq(status) {
     `项目：${counts.projectNotes || 0} 条`,
     `点子：${counts.ideas || 0} 条`,
     `待办：${counts.openLoops || 0} 条`,
-    `日常状态：${counts.dailyTimeline || 0} 条`
+    `日常状态：${counts.dailyTimeline || 0} 条`,
+    `语义底座：${semantic.backend || "不可用"}，${semantic.count || 0} 条索引`,
+    ...(semantic.layers || []).map((item) => `- ${item.layer}/${item.status}：${item.count}`)
   ].join("\n");
 }
 
@@ -6423,32 +6621,96 @@ async function executeQqBotShortTermMemoryCommand(command, event) {
   if (!scopeId) return { ok: false, command, reply: "当前没有可用的 QQ 短期记忆范围。" };
   const normalized = String(command || "").trim().replace(/^\/+/, "");
   const directAdd = normalized.match(/^(?:记住|添加记忆|新增记忆|加记忆)\s+([\s\S]+)$/i);
-  const directEdit = normalized.match(/^(?:改记忆|修改记忆|编辑记忆|更新记忆)\s+(#?[A-Za-z0-9_-]+|[0-9]+)\s+([\s\S]+)$/i);
+  const directEdit = normalized.match(/^(?:改记忆|修改记忆|编辑记忆|更新记忆|覆盖记忆)\s+(#?[A-Za-z0-9_-]+|[0-9]+)\s+([\s\S]+)$/i);
   const directDelete = normalized.match(/^(?:删记忆|删除记忆|移除记忆)\s+(#?[A-Za-z0-9_-]+|[0-9]+)$/i);
   const body = normalized.replace(/^(?:记忆|公共记忆|长期记忆|memory)\s*/i, "").trim();
-  const addMatch = directAdd || body.match(/^(?:添加|新增|加|记住|add)\s+([\s\S]+)$/i);
-  const editMatch = directEdit || body.match(/^(?:修改|编辑|更新|改|edit)\s+(#?[A-Za-z0-9_-]+|[0-9]+)\s+([\s\S]+)$/i);
+  const forceAddMatch = body.match(/^(?:强制添加|保留添加|force-add)\s+([\s\S]+)$/i);
+  const addMatch = directAdd || forceAddMatch || body.match(/^(?:添加|新增|加|记住|add)\s+([\s\S]+)$/i);
+  const editMatch = directEdit || body.match(/^(?:修改|编辑|更新|覆盖|改|edit|overwrite)\s+(#?[A-Za-z0-9_-]+|[0-9]+)\s+([\s\S]+)$/i);
   const deleteMatch = directDelete || body.match(/^(?:删除|删|移除|忘记|delete|remove)\s+(#?[A-Za-z0-9_-]+|[0-9]+)$/i);
   const searchMatch = body.match(/^(?:搜索|查找|查|search)\s+(.+)$/i);
+  const detailMatch = body.match(/^(?:详细|详情|完整|detail)\s+(#?[A-Za-z0-9_-]+|[0-9]+)$/i);
+  const archiveMatch = body.match(/^(?:过时|归档|失效|archive|stale)\s+(#?[A-Za-z0-9_-]+|[0-9]+)(?:\s+([\s\S]+))?$/i);
   const entries = state.qq.memory.shortTermNotes[scopeId] || [];
+  const activeEntries = entries.filter((entry) => entry.status !== "archived");
 
   if (!body || /^(?:列表|查看|看看|list|show)$/i.test(body)) {
-    logQqShortTermMemoryQuery(event, { action: "list", resultCount: entries.length });
+    logQqShortTermMemoryQuery(event, { action: "list", resultCount: activeEntries.length });
     return { ok: true, command, reply: formatQqShortTermMemoryList(event) };
   }
   if (searchMatch) {
-    const normalizedQuery = normalizeSemanticText(searchMatch[1]);
-    const resultCount = entries.filter((entry) => normalizeSemanticText(entry.text).includes(normalizedQuery)).length;
-    logQqShortTermMemoryQuery(event, { action: "search", query: searchMatch[1], resultCount });
-    return { ok: true, command, reply: formatQqShortTermMemoryList(event, searchMatch[1]) };
+    const hits = await unifiedMemory.semanticSearch({
+      query: searchMatch[1],
+      layers: ["short-term"],
+      scope: buildQqSemanticScope(event),
+      limit: 12
+    }).catch(() => []);
+    const resultEntries = hits
+      .map((hit) => entries.find((entry) => entry.id === hit.metadata?.entryId))
+      .filter(Boolean);
+    logQqShortTermMemoryQuery(event, {
+      action: "semantic-search",
+      query: searchMatch[1],
+      resultCount: resultEntries.length
+    });
+    return {
+      ok: true,
+      command,
+      reply: formatQqShortTermMemoryList(event, searchMatch[1], resultEntries)
+    };
+  }
+  if (detailMatch) {
+    const found = resolveQqShortTermMemoryEntry(entries, detailMatch[1]);
+    if (!found) return { ok: false, command, reply: `找不到短期记忆：${detailMatch[1]}。` };
+    return {
+      ok: true,
+      command,
+      reply: [
+        `短期记忆 ${found.position}. #${found.entry.id}${found.entry.status === "archived" ? "（已过时）" : ""}`,
+        `标题：${found.entry.title}`,
+        `简述：${found.entry.summary}`,
+        `详细：${found.entry.detail || found.entry.text}`,
+        found.entry.staleReason ? `过时原因：${found.entry.staleReason}` : null,
+        `更新：${found.entry.updatedAt || "未知"}`
+      ].filter(Boolean).join("\n").slice(0, 4000)
+    };
   }
   if (addMatch) {
-    const text = compactPublicMemoryText(addMatch[1]);
-    if (!text) return { ok: false, command, reply: "短期记忆内容为空。" };
+    const parsed = parseQqShortTermContent(addMatch[1]);
+    if (!parsed.detail) return { ok: false, command, reply: "短期记忆内容为空。" };
+    const candidates = forceAddMatch ? [] : await unifiedMemory.semanticSearch({
+      query: [parsed.title, parsed.summary, parsed.detail].filter(Boolean).join(" "),
+      layers: ["short-term"],
+      scope: buildQqSemanticScope(event),
+      limit: 3,
+      minScore: 0.1
+    }).catch(() => []);
+    const existingCandidate = candidates.find((item) => Number(item.score || 0) >= 0.22);
+    if (existingCandidate) {
+      const candidate = entries.find((entry) => entry.id === existingCandidate.metadata?.entryId);
+      if (candidate) {
+        return {
+          ok: false,
+          command,
+          decisionRequired: true,
+          reply: [
+            "发现语义相近的当前短期记忆，尚未新增。",
+            `候选 #${candidate.id}「${candidate.title}」：${candidate.summary}`,
+            `新内容：${parsed.summary}`,
+            `若是同一主题的新版本，请调用 /记忆 覆盖 #${candidate.id} ${addMatch[1]}`,
+            `若旧项已经失效，请先调用 /记忆 过时 #${candidate.id} 原因，再添加新主题；确实并存时调用 /记忆 强制添加 ${addMatch[1]}。`
+          ].join("\n")
+        };
+      }
+    }
     const now = new Date().toISOString();
     const entry = {
       id: createQqPublicMemoryId(),
-      text,
+      ...parsed,
+      text: parsed.detail,
+      status: "active",
+      staleReason: "",
+      archivedAt: null,
       createdAt: now,
       updatedAt: now,
       createdBy: event.senderId || "bot",
@@ -6462,14 +6724,21 @@ async function executeQqBotShortTermMemoryCommand(command, event) {
       previousCount: entries.length,
       entryCount: state.qq.memory.shortTermNotes[scopeId].length
     });
-    return { ok: true, command, reply: `已添加当前会话短期记忆 #${entry.id}：${entry.text}` };
+    return {
+      ok: true,
+      command,
+      reply: `已添加当前会话短期记忆 #${entry.id}「${entry.title}」：${entry.summary}`
+    };
   }
   if (editMatch) {
     const found = resolveQqShortTermMemoryEntry(entries, editMatch[1]);
     if (!found) return { ok: false, command, reply: `找不到短期记忆：${editMatch[1]}。` };
-    const text = compactPublicMemoryText(editMatch[2]);
-    if (!text) return { ok: false, command, reply: "新的短期记忆内容为空。" };
-    entries[found.index] = { ...found.entry, text, updatedAt: new Date().toISOString() };
+    const updated = overwriteQqShortTermEntry(found.entry, editMatch[2], {
+      updatedBy: event.senderId || "bot",
+      updatedByLabel: event.senderName || event.senderLabel || assistantName
+    });
+    if (!updated) return { ok: false, command, reply: "新的短期记忆内容为空。" };
+    entries[found.index] = updated;
     state.qq.memory.shortTermNotes[scopeId] = entries;
     await saveQqMemory();
     logQqShortTermMemoryChange(event, {
@@ -6478,7 +6747,32 @@ async function executeQqBotShortTermMemoryCommand(command, event) {
       previousCount: entries.length,
       entryCount: entries.length
     });
-    return { ok: true, command, reply: `已修改短期记忆 ${found.position}. #${found.entry.id}：${text}` };
+    return {
+      ok: true,
+      command,
+      reply: `已覆盖短期记忆 ${found.position}. #${found.entry.id}「${updated.title}」：${updated.summary}`
+    };
+  }
+  if (archiveMatch) {
+    const found = resolveQqShortTermMemoryEntry(entries, archiveMatch[1]);
+    if (!found) return { ok: false, command, reply: `找不到短期记忆：${archiveMatch[1]}。` };
+    entries[found.index] = archiveQqShortTermEntry(found.entry, archiveMatch[2], {
+      updatedBy: event.senderId || "bot",
+      updatedByLabel: event.senderName || event.senderLabel || assistantName
+    });
+    state.qq.memory.shortTermNotes[scopeId] = entries;
+    await saveQqMemory();
+    logQqShortTermMemoryChange(event, {
+      action: "archive-stale",
+      entryId: found.entry.id,
+      previousCount: activeEntries.length,
+      entryCount: entries.filter((entry) => entry.status !== "archived").length
+    });
+    return {
+      ok: true,
+      command,
+      reply: `已将短期记忆 #${found.entry.id}「${found.entry.title}」标记为过时；它不会再被检索或注入。`
+    };
   }
   if (deleteMatch) {
     const found = resolveQqShortTermMemoryEntry(entries, deleteMatch[1]);
@@ -6512,7 +6806,7 @@ async function executeQqBotShortTermMemoryCommand(command, event) {
   return {
     ok: false,
     command,
-    reply: "短期记忆命令未识别。可用：/记忆 列表、/记忆 搜索 关键词、/记忆 添加 内容、/记忆 修改 编号 内容、/记忆 删除 编号、/记忆 清空。长期内容请用 /知识库。"
+    reply: "短期记忆命令未识别。可用：/记忆 列表、搜索 关键词、详细 编号、添加 标题 | 简述 | 详情、覆盖 编号 内容、过时 编号 原因、删除 编号、清空。长期内容请用 /知识库。"
   };
 }
 
@@ -6529,29 +6823,28 @@ function resolveQqShortTermMemoryEntry(entries, identifier) {
   return index >= 0 ? { entry: entries[index], index, position: index + 1 } : null;
 }
 
-function formatQqShortTermMemoryList(event, query = "") {
+function formatQqShortTermMemoryList(event, query = "", selectedEntries = null) {
   const scopeId = getQqMemoryScopeId(event);
   const normalizedQuery = normalizeSemanticText(query);
   const all = scopeId ? state.qq.memory.shortTermNotes[scopeId] || [] : [];
-  const entries = normalizedQuery
-    ? all.filter((entry) => normalizeSemanticText(entry.text).includes(normalizedQuery))
-    : all;
+  const active = all.filter((entry) => entry.status !== "archived");
+  const entries = Array.isArray(selectedEntries)
+    ? selectedEntries.filter((entry) => entry.status !== "archived")
+    : normalizedQuery
+      ? active.filter((entry) => normalizeSemanticText([
+        entry.title,
+        entry.summary,
+        entry.detail || entry.text
+      ].join(" ")).includes(normalizedQuery))
+      : active;
   if (!entries.length) return normalizedQuery ? `当前会话短期记忆没有命中：${query}` : "当前会话短期记忆为空。";
   return [
     `${getQqMemoryScopeLabel(event)}短期记忆${normalizedQuery ? `搜索“${query}”` : ""}（/新对话会清除）：`,
-    ...entries.map((entry) => `${all.findIndex((item) => item.id === entry.id) + 1}. #${entry.id} ${entry.text}`)
-  ].join("\n").slice(0, 4000);
-}
-
-function formatQqShortTermMemoryContext(event) {
-  const scopeId = getQqMemoryScopeId(event);
-  const entries = scopeId ? state.qq.memory.shortTermNotes[scopeId] || [] : [];
-  if (!entries.length) return "";
-  return [
-    "当前会话短期记忆：",
-    "这些内容只属于当前群/私聊，从最近一次 /新对话 开始有效；它们会随下一次 /新对话 清除，不能当作跨群长期事实。",
-    ...entries.slice(-20).map((entry, index) => `${index + 1}. #${entry.id} ${entry.text}`)
-  ].join("\n").slice(0, 4000);
+    ...entries.map((entry) => `${all.findIndex((item) => item.id === entry.id) + 1}. #${entry.id}「${entry.title}」${entry.summary}`),
+    all.some((entry) => entry.status === "archived")
+      ? `另有 ${all.filter((entry) => entry.status === "archived").length} 条已过时记录，仅可用 /记忆 详细 编号查看。`
+      : null
+  ].filter(Boolean).join("\n").slice(0, 4000);
 }
 
 async function executeQqBotKnowledgeCommand(command, event) {
@@ -6616,8 +6909,24 @@ async function executeQqBotKnowledgeCommand(command, event) {
     if (!query) return { ok: false, command, reply: "知识库标题搜索词为空。" };
     const range = resolveQqKnowledgeCommandRange(rangeText, event);
     if (!range.ok) return { ok: false, command, reply: range.reply };
-    const entries = listQqKnowledgeEntries(state.qq.knowledgeBase, { query, range: range.value });
-    logQqKnowledgeQuery(event, { source: "internal-tool", action: "search", query, range: range.value, resultCount: entries.length });
+    const hits = await unifiedMemory.semanticSearch({
+      query,
+      layers: ["knowledge"],
+      scope: { ...buildQqSemanticScope(event), includeGlobal: true },
+      limit: 20
+    }).catch(() => []);
+    const semanticEntryIds = new Set(hits.map((hit) => hit.metadata?.entryId).filter(Boolean));
+    const scopedEntries = listQqKnowledgeEntries(state.qq.knowledgeBase, { range: range.value });
+    const entries = semanticEntryIds.size
+      ? scopedEntries.filter((entry) => semanticEntryIds.has(String(entry.id)))
+      : listQqKnowledgeEntries(state.qq.knowledgeBase, { query, range: range.value });
+    logQqKnowledgeQuery(event, {
+      source: "internal-tool",
+      action: "semantic-search",
+      query,
+      range: range.value,
+      resultCount: entries.length
+    });
     return {
       ok: true,
       command,
@@ -7304,14 +7613,49 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     adaptiveActivityLevel: humanChatStyle.adaptivePersonalization?.activityLevel || "unknown",
     adaptiveStyleReviewAt: adaptiveSignals?.group?.lastStyleReviewAt || null
   };
-  const conversationMemoryContext = formatQqConversationMemoryContext(state.qq.conversationMemory, event);
-  const shortTermMemoryContext = formatQqShortTermMemoryContext(event);
   const knowledgeMatches = getQqKnowledgeMatchesForEvent(event);
   event.qqKnowledgeMatches = knowledgeMatches;
-  const knowledgeMatchContext = formatQqKnowledgeMatches(knowledgeMatches);
   const selfPersonaContext = formatQqSelfPersonaContext(state.qq.selfPersona);
   const scopeTopicContext = formatQqSelfPersonaScopeTopicContext(state.qq.selfPersona, scopeId);
-  const unifiedMemoryContext = await unifiedMemory.formatForPrompt({ query: text, limit: 6 });
+  const semanticScope = buildQqSemanticScope(event);
+  const publicSemanticScope = { ...semanticScope, includeGlobal: true };
+  const ownerSemanticScope = { ...semanticScope, includeGlobal: Boolean(event.isOwner) };
+  const [semanticImpressions, semanticScopedMemory, semanticKnowledge, semanticUnified] = await Promise.all([
+    unifiedMemory.semanticSearch({
+      query: "",
+      layers: ["impression"],
+      scope: semanticScope,
+      limit: 8,
+      minScore: 0
+    }).catch(() => []),
+    unifiedMemory.semanticSearch({
+      query: text,
+      layers: ["short-term"],
+      scope: semanticScope,
+      limit: 6
+    }).catch(() => []),
+    unifiedMemory.semanticSearch({
+      query: text,
+      layers: ["knowledge"],
+      scope: publicSemanticScope,
+      limit: 6
+    }).catch(() => []),
+    event.isOwner
+      ? unifiedMemory.semanticSearch({
+        query: text,
+        layers: ["unified"],
+        scope: ownerSemanticScope,
+        limit: 4
+      }).catch(() => [])
+      : Promise.resolve([])
+  ]);
+  const semanticMemoryItems = [
+    ...semanticImpressions,
+    ...semanticScopedMemory,
+    ...semanticKnowledge,
+    ...semanticUnified
+  ];
+  const semanticMemoryContext = formatSemanticMemoryPrompt(semanticMemoryItems);
   const personaContext = formatQqPersonaContext(event);
   const repetitionGuard = state.qq.enhancer.enabled ? buildQqRepetitionGuard(event) : "";
   const webContext = await buildWebLookupContext(event);
@@ -7332,6 +7676,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     : [];
   event.imagePaths = imagePaths;
   const botToolContext = event.qqPrivateProactive ? "" : formatQqBotInternalToolContext(event);
+  let semanticMemoryContextDelivered = false;
   const proactiveExecutionContext = event.qqColdProactive
     ? (event.proactiveDecision?.promptHint || formatQqColdProactivePrompt({
       mode: event.proactiveDecision?.coldTopicStart?.mode
@@ -7380,9 +7725,13 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     botToolResults = "",
     priorDraft = "",
     toolRound = 0,
-    { persistentResume = false, includeCurrentBatch = true } = {}
+    {
+      persistentResume = false,
+      includeCurrentBatch = true,
+      includeSemanticMemory = false
+    } = {}
   ) => {
-    const publicMemoryContext = formatQqPublicMemoryContext(event);
+    const publicMemoryContext = semanticKnowledge.length ? "" : formatQqPublicMemoryContext(event);
     return [
       persistentResume
         ? "你正在继续同一个 QQ 长期会话。沿用线程中已经建立的身份、关系、稳定规则和前文，不要要求重新介绍背景。"
@@ -7403,16 +7752,10 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       !persistentResume && selfPersonaContext ? "" : null,
       !persistentResume ? scopeTopicContext : null,
       !persistentResume && scopeTopicContext ? "" : null,
-      !persistentResume ? conversationMemoryContext : null,
-      !persistentResume && conversationMemoryContext ? "" : null,
-      !persistentResume ? shortTermMemoryContext : null,
-      !persistentResume && shortTermMemoryContext ? "" : null,
-      knowledgeMatchContext,
-      knowledgeMatchContext ? "" : null,
       !persistentResume ? publicMemoryContext : null,
       !persistentResume && publicMemoryContext ? "" : null,
-      !persistentResume ? unifiedMemoryContext : null,
-      !persistentResume && unifiedMemoryContext ? "" : null,
+      includeSemanticMemory ? semanticMemoryContext : null,
+      includeSemanticMemory && semanticMemoryContext ? "" : null,
       !persistentResume ? personaContext : null,
       !persistentResume && personaContext ? "" : null,
       !persistentResume || includeCurrentBatch || (!forceLocalReply && expandLevel > 0) ? memoryBlock : null,
@@ -7486,13 +7829,15 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     priorDraft = "",
     toolRound = 0
   ) => {
+    const includeSemanticMemory = !semanticMemoryContextDelivered;
     const fullPrompt = await buildReplyPrompt(
       memoryBlock,
       expandLevel,
       forceLocalReply,
       botToolResults,
       priorDraft,
-      toolRound
+      toolRound,
+      { includeSemanticMemory }
     );
     const shouldResume = qqCodexSessionPlan.persistent && Boolean(qqCodexThreadId);
     let resumeMemoryBlock = "";
@@ -7520,12 +7865,14 @@ async function buildModelReply(event, { replyScope = null } = {}) {
         priorDraft,
         toolRound,
         {
-        persistentResume: true,
-        includeCurrentBatch: !qqCodexSessionContextDelivered
+          persistentResume: true,
+          includeCurrentBatch: !qqCodexSessionContextDelivered,
+          includeSemanticMemory
         }
       )
       : fullPrompt;
     const result = await runReplyPrompt(fullPrompt, resumePrompt);
+    semanticMemoryContextDelivered = true;
     qqCodexSessionContextDelivered = true;
     return result;
   };
@@ -7697,14 +8044,69 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   }
 }
 
+const qqReviewSnapshotCache = new Map();
+
+async function getQqReviewHistorySnapshot(event, {
+  maxMessages = 300,
+  maxAgeMs = 45_000
+} = {}) {
+  const scopeId = getQqMemoryScopeId(event);
+  if (!scopeId) {
+    return {
+      snapshotId: `qq-history-${crypto.randomUUID()}`,
+      scopeId: "",
+      capturedAt: new Date().toISOString(),
+      messages: [],
+      history: { ok: false, source: "local-fallback", pages: 0, reason: "missing scope" }
+    };
+  }
+  const requestedLimit = Math.max(20, Math.min(600, Number(maxMessages) || 300));
+  const cached = qqReviewSnapshotCache.get(scopeId);
+  if (cached && Date.now() - cached.createdAt <= maxAgeMs && cached.limit >= requestedLimit) {
+    const snapshot = await cached.promise;
+    return { ...snapshot, messages: snapshot.messages.slice(-requestedLimit), shared: true };
+  }
+  for (const [key, value] of qqReviewSnapshotCache) {
+    if (Date.now() - value.createdAt > Math.max(maxAgeMs, 5 * 60_000)) {
+      qqReviewSnapshotCache.delete(key);
+    }
+  }
+  const promise = (async () => {
+    const localMessages = state.qq.memory.recentMessages[scopeId] || [];
+    const history = await fetchQqHistoryForSummary({
+      event,
+      callAction: callOneBotAction,
+      maxMessages: requestedLimit
+    });
+    return {
+      snapshotId: `qq-history-${crypto.randomUUID()}`,
+      scopeId,
+      capturedAt: new Date().toISOString(),
+      messages: mergeQqHistoryMessages(history.messages, localMessages, { limit: requestedLimit }),
+      history,
+      shared: false
+    };
+  })();
+  qqReviewSnapshotCache.set(scopeId, { createdAt: Date.now(), limit: requestedLimit, promise });
+  try {
+    return await promise;
+  } catch (error) {
+    qqReviewSnapshotCache.delete(scopeId);
+    throw error;
+  }
+}
+
 async function buildQqContextSummary(event, commandText = "") {
   const scopeId = getQqMemoryScopeId(event);
   const scopeLabel = getQqMemoryScopeLabel(event);
   const scopeTitle = getQqMemoryScopeTitle(event);
-  const allRecentMessages = scopeId ? (state.qq.memory.recentMessages[scopeId] || []) : [];
+  const historyLimit = resolveQqSummaryHistoryLimit(commandText);
+  const reviewSnapshot = await getQqReviewHistorySnapshot(event, { maxMessages: historyLimit });
+  const history = reviewSnapshot.history;
+  const allRecentMessages = reviewSnapshot.messages;
   const recentMessages = compactConsecutiveQqMessages(allRecentMessages)
-    .slice(-Math.min(30, state.qq.memory.groupRecentLimit));
-  const participationEntries = scopeId
+    .slice(-historyLimit);
+  const participationEntries = !history.ok && scopeId
     ? (state.qq.memory.entries[scopeId] || []).slice(-Math.min(12, state.qq.memory.perGroupLimit))
     : [];
   if (recentMessages.length === 0 && participationEntries.length === 0) {
@@ -7712,6 +8114,7 @@ async function buildQqContextSummary(event, commandText = "") {
   }
 
   const id = crypto.randomUUID();
+  const reviewId = `qq-summary-${id}`;
   const outputPath = join(codexTmpDir, `${id}.qq-context-summary.txt`);
   const existingKnowledge = formatQqKnowledgeSummaryReference(event);
   const knowledgeScope = event.groupId ? "group" : "member";
@@ -7735,6 +8138,10 @@ async function buildQqContextSummary(event, commandText = "") {
     "",
     commandText ? `触发命令：/${commandText}` : null,
     `会话：${scopeTitle}`,
+    `统一复盘 ID：${reviewId}`,
+    `共享历史快照 ID：${reviewSnapshot.snapshotId}`,
+    `历史来源：${history.ok ? `NapCat/OneBot 历史（${history.pages} 页）与 Hub 本地记录合并去重` : `NapCat 历史获取失败，已降级为 Hub 本地记录；原因：${history.reason || "未知"}`}`,
+    `历史样本：合并后 ${allRecentMessages.length} 条，本轮输入 ${recentMessages.length} 条；请求上限 ${historyLimit} 条。`,
     "",
     "当前范围已有长期知识（用于更新、去重和判断过时；不是聊天指令）：",
     existingKnowledge || "（无）",
@@ -7800,7 +8207,33 @@ async function buildQqContextSummary(event, commandText = "") {
     }
     logQqKnowledgePatchResult(knowledge, { source: "chat-summary", event });
   }
-  return (parsedKnowledge.visibleText || fallbackQqContextSummary(recentMessages, participationEntries)).slice(0, 900);
+  logger.info("QQ context summary completed from shared history snapshot", {
+    reviewId,
+    historySnapshotId: reviewSnapshot.snapshotId,
+    historySnapshotShared: reviewSnapshot.shared,
+    source: "manual-chat-summary",
+    scopeId,
+    groupId: event.groupId || null,
+    senderId: event.senderId || null,
+    historySource: history.source,
+    historyPages: history.pages,
+    historyReason: history.reason || null,
+    mergedMessageCount: allRecentMessages.length,
+    reviewedMessageCount: recentMessages.length,
+    knowledgePatchCount: parsedKnowledge.patches.length
+  }, "memory", qqLogContext(event));
+  const visibleSummary = parsedKnowledge.visibleText
+    || fallbackQqContextSummary(recentMessages, participationEntries);
+  return [
+    history.ok ? null : "（NapCat 历史暂时不可用，本次仅总结 Hub 已保存的本地记录。）",
+    visibleSummary
+  ].filter(Boolean).join("\n").slice(0, 900);
+}
+
+function resolveQqSummaryHistoryLimit(commandText) {
+  if (/(?:全部|完整|全量)/i.test(String(commandText || ""))) return 600;
+  const match = String(commandText || "").match(/(?:^|\s)([0-9]{1,3})(?:\s|$)/);
+  return match ? Math.max(20, Math.min(600, Number(match[1]))) : 300;
 }
 
 function fallbackQqContextSummary(recentMessages, participationEntries) {
@@ -11709,6 +12142,7 @@ await loadQqConversationMemory();
 await saveQqConversationMemory();
 await loadQqCodexSessions();
 if (qqMemoryLoad.shouldPersistMigration) await saveQqMemory();
+await syncAllSemanticMemoryLayers();
 await qqRequestStore.load().catch((error) => logger.warn("Unable to load QQ request store", { error }, "qq"));
 updateQqPeriodicScheduler();
 
@@ -11866,6 +12300,7 @@ function shutdown(signal) {
       qqCodexSessionsWriter.close(),
       qqKnowledgeBaseWriter.close()
     ]);
+    await unifiedMemory.close?.();
     await logger.info("Codex QQ Bot hub stopped", { signal, closeMode }, "system");
     await logger.flush();
   })();

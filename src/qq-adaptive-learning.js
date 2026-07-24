@@ -6,7 +6,7 @@ import {
   isQqStickerStyleMessage
 } from "./qq-human-behavior.js";
 
-const profileVersion = 4;
+const profileVersion = 5;
 const bootstrapVersion = 1;
 const interruptionBootstrapVersion = 1;
 const interruptionWindowSeconds = 120;
@@ -143,13 +143,16 @@ export function maybeReviewQqAdaptiveLanguageStyle(group, entries = [], {
   if (human.textSampleSize < 12 || bot.textSampleSize < 4) return false;
 
   const guidance = deriveStyleGuidance(human, bot);
+  const differences = deriveStyleDifferences(human, bot);
   learning.styleGuidance = compactGuidance(guidance);
-  learning.styleReviewSummary = [
-    `真人文字中位 ${human.medianTextChars} 字、90% 不超过 ${human.p90TextChars} 字`,
-    `Bot 平均 ${bot.averageTextChars} 字`,
-    `真人/Bot 表情率 ${percentage(human.stickerMessageRatio)}/${percentage(bot.stickerMessageRatio)}`,
-    `短句句号率 ${percentage(human.terminalPeriodRatio)}/${percentage(bot.terminalPeriodRatio)}`
-  ].join("；").slice(0, 260);
+  learning.styleReviewSummary = differences.slice(0, 3).join("；").slice(0, 420);
+  learning.styleReviewDetail = [
+    `样本：真人 ${human.textSampleSize} 条，Bot ${bot.textSampleSize} 条。`,
+    "差异：",
+    ...differences.map((item) => `- ${item}`),
+    "本轮覆盖后的优化规则：",
+    ...learning.styleGuidance.map((item) => `- ${item}`)
+  ].join("\n").slice(0, 2_400);
   learning.styleHumanSampleSize = human.textSampleSize;
   learning.styleBotSampleSize = bot.textSampleSize;
   learning.lastStyleReviewSampleCount = learning.sampleCount;
@@ -157,6 +160,57 @@ export function maybeReviewQqAdaptiveLanguageStyle(group, entries = [], {
   learning.lastStyleReviewAt = currentAt.toISOString();
   learning.styleReviewWindowStartedAt = currentAt.toISOString();
   return true;
+}
+
+export function applyQqAdaptiveModelStyleReview(group, review, {
+  now = Date.now(),
+  humanSamples = 0,
+  botSamples = 0
+} = {}) {
+  if (!group || !review || typeof review !== "object") return false;
+  const learning = ensureQqAdaptiveLearning(group);
+  const summary = String(review.summary || "").replace(/\s+/g, " ").trim().slice(0, 420);
+  const detail = String(review.detail || "").trim().slice(0, 2_400);
+  const guidance = compactGuidance(review.guidance);
+  if (!summary && !detail && guidance.length === 0) return false;
+  learning.styleReviewSummary = summary || detail.replace(/\s+/g, " ").slice(0, 420);
+  learning.styleReviewDetail = detail || summary;
+  learning.styleGuidance = guidance;
+  learning.styleHumanSampleSize = Math.max(0, Number(humanSamples) || 0);
+  learning.styleBotSampleSize = Math.max(0, Number(botSamples) || 0);
+  learning.lastStyleReviewSampleCount = learning.sampleCount;
+  learning.lastStyleReviewBotReplyCount = learning.botReplyCount;
+  const currentAt = resolveObservedAt({}, now).toISOString();
+  learning.lastStyleReviewAt = currentAt;
+  learning.styleReviewWindowStartedAt = currentAt;
+  return true;
+}
+
+export function getQqAdaptiveStyleReviewPlan(group, {
+  now = Date.now(),
+  reviewEveryMs = styleReviewIntervalMs
+} = {}) {
+  if (!group) return { due: false, initialized: false, reason: "missing-group" };
+  const learning = ensureQqAdaptiveLearning(group);
+  const currentAt = resolveObservedAt({}, now);
+  if (!learning.styleReviewWindowStartedAt) {
+    learning.styleReviewWindowStartedAt = currentAt.toISOString();
+    return { due: false, initialized: true, reason: "clock-initialized" };
+  }
+  const reviewedAt = Date.parse(learning.lastStyleReviewAt || learning.styleReviewWindowStartedAt || "");
+  const newHumanSamples = Math.max(0, learning.sampleCount - learning.lastStyleReviewSampleCount);
+  const newBotSamples = Math.max(0, learning.botReplyCount - learning.lastStyleReviewBotReplyCount);
+  const timeDue = newHumanSamples + newBotSamples > 0
+    && Number.isFinite(reviewedAt)
+    && currentAt.getTime() - reviewedAt >= Math.max(60_000, Number(reviewEveryMs || styleReviewIntervalMs));
+  return {
+    due: timeDue,
+    initialized: false,
+    reason: timeDue ? "wall-clock-due" : "not-due",
+    newHumanSamples,
+    newBotSamples,
+    reviewedAt: Number.isFinite(reviewedAt) ? new Date(reviewedAt).toISOString() : null
+  };
 }
 
 export function ensureQqAdaptiveLearning(container) {
@@ -577,6 +631,7 @@ function createQqAdaptiveLearning() {
     lastStyleReviewSampleCount: 0,
     lastStyleReviewBotReplyCount: 0,
     styleReviewSummary: "",
+    styleReviewDetail: "",
     styleGuidance: [],
     styleHumanSampleSize: 0,
     styleBotSampleSize: 0,
@@ -626,7 +681,8 @@ function normalizeQqAdaptiveLearning(value) {
   base.lastBotTargetId = normalizeId(source.lastBotTargetId);
   base.awaitingBotFollowUp = Boolean(source.awaitingBotFollowUp);
   base.coldProactiveAwaitingHuman = Boolean(source.coldProactiveAwaitingHuman);
-  base.styleReviewSummary = String(source.styleReviewSummary || "").replace(/\s+/g, " ").trim().slice(0, 260);
+  base.styleReviewSummary = String(source.styleReviewSummary || "").replace(/\s+/g, " ").trim().slice(0, 420);
+  base.styleReviewDetail = String(source.styleReviewDetail || "").trim().slice(0, 2_400);
   base.styleGuidance = compactGuidance(source.styleGuidance);
   return base;
 }
@@ -779,6 +835,7 @@ function summarizeLearning(learning, currentHour, { confidenceAt }) {
       ? new Date(styleReviewAnchorMs + styleReviewIntervalMs).toISOString()
       : null,
     styleReviewSummary: learning.styleReviewSummary,
+    styleReviewDetail: learning.styleReviewDetail,
     styleGuidance: learning.styleGuidance.slice(0, 5),
     styleHumanSampleSize: learning.styleHumanSampleSize,
     styleBotSampleSize: learning.styleBotSampleSize,
@@ -813,6 +870,47 @@ function deriveStyleGuidance(human, bot) {
   if (bot.multiBubbleRatio > Math.max(0.6, human.multiMessageRunRatio + 0.2)) guidance.push("减少机械拆气泡，只有自然的第二层意思才连发");
   if (guidance.length === 0) guidance.push("当前结构风格已接近群聊基线，保持短、具体、不客服化");
   return guidance;
+}
+
+function deriveStyleDifferences(human, bot) {
+  const differences = [];
+  if (bot.averageTextChars > Math.max(human.p90TextChars * 1.2, human.medianTextChars * 2)) {
+    differences.push(`Bot 容易把接话写成完整解释（平均 ${bot.averageTextChars} 字），真人更常用省略式短句承接（中位 ${human.medianTextChars} 字，九成不超过 ${human.p90TextChars} 字）`);
+  } else if (bot.averageTextChars < Math.max(4, human.medianTextChars * 0.55)) {
+    differences.push(`Bot 回复比真人基线更碎更短（平均 ${bot.averageTextChars} 字），容易只给反应而没接住信息；真人中位约 ${human.medianTextChars} 字`);
+  }
+  if (bot.genericOpeningRatio >= 0.1) {
+    differences.push(`Bot 有 ${percentage(bot.genericOpeningRatio)} 的文字回复以“好的/收到/明白”等确认词开头，真人群聊通常直接接内容，显得更少客服确认腔`);
+  }
+  if (bot.serviceEndingRatio >= 0.05) {
+    differences.push(`Bot 有 ${percentage(bot.serviceEndingRatio)} 的回复带“需要我可以继续”等服务式收尾，真人更常在意思说完后自然停住`);
+  }
+  if (bot.terminalPeriodRatio > human.terminalPeriodRatio + 0.15) {
+    differences.push(`Bot 短回复使用完整句号明显更多（真人/Bot ${percentage(human.terminalPeriodRatio)}/${percentage(bot.terminalPeriodRatio)}），真人语气更像半句、停顿或直接落下`);
+  } else if (human.terminalPeriodRatio > bot.terminalPeriodRatio + 0.2) {
+    differences.push(`Bot 省略句末标点比真人更频繁（真人/Bot 句号率 ${percentage(human.terminalPeriodRatio)}/${percentage(bot.terminalPeriodRatio)}），部分说明可能显得过碎`);
+  }
+  if (bot.questionRatio > human.questionRatio + 0.18) {
+    differences.push(`Bot 问句率高于真人（真人/Bot ${percentage(human.questionRatio)}/${percentage(bot.questionRatio)}），容易每次靠反问续聊；真人更多是直接接住或表态`);
+  }
+  if (bot.emojiMessageRatio > human.emojiMessageRatio + 0.12) {
+    differences.push(`Bot 的文字 emoji 比真人密集（真人/Bot ${percentage(human.emojiMessageRatio)}/${percentage(bot.emojiMessageRatio)}），情绪提示显得刻意`);
+  } else if (human.emojiMessageRatio > bot.emojiMessageRatio + 0.18) {
+    differences.push(`真人更常用 emoji 补语气（真人/Bot ${percentage(human.emojiMessageRatio)}/${percentage(bot.emojiMessageRatio)}），Bot 文字相对板正`);
+  }
+  if (bot.multiBubbleRatio > Math.max(0.55, human.multiMessageRunRatio + 0.18)) {
+    differences.push(`Bot 多气泡率 ${percentage(bot.multiBubbleRatio)}，高于真人连续发言基线 ${percentage(human.multiMessageRunRatio)}，拆分更像机械分段而非自然追加`);
+  }
+  const stickerDelta = bot.stickerMessageRatio - human.stickerMessageRatio;
+  if (stickerDelta > 0.16) {
+    differences.push(`Bot 表情包使用比真人高 ${percentage(stickerDelta)}，容易抢过文字语义或形成刷图感`);
+  } else if (stickerDelta < -0.16) {
+    differences.push(`Bot 表情包使用比真人低 ${percentage(Math.abs(stickerDelta))}，在轻松接话中相对偏文字化`);
+  }
+  if (!differences.length) {
+    differences.push("Bot 与真人在长度、句末语气、问句、emoji、表情包和气泡节奏上没有显著偏差；当前重点是继续直接承接前文，避免模板开头与客服式结尾");
+  }
+  return differences.slice(0, 8);
 }
 
 function compactGuidance(value) {
