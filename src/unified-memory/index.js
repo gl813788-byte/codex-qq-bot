@@ -1,11 +1,23 @@
 import { readFile } from "node:fs/promises";
 import crypto from "node:crypto";
 import { serializeFileOperation, writeJsonAtomically } from "../file-store.js";
+import { createSemanticMemoryIndex } from "./semantic-index.js";
 
 const maxEntries = 600;
 
-export function createUnifiedMemory({ memoryPath } = {}) {
+export function createUnifiedMemory({ memoryPath, semanticMemoryPath = "" } = {}) {
   if (!memoryPath) throw new Error("memoryPath is required");
+  const semanticIndexPromise = semanticMemoryPath
+    ? createSemanticMemoryIndex({
+      dbPath: semanticMemoryPath,
+      fallbackPath: `${semanticMemoryPath}.json`
+    })
+    : Promise.resolve(null);
+  const replaceUnifiedLayer = async (entries) => {
+    const index = await semanticIndexPromise;
+    if (!index) return { ok: false, skipped: true, reason: "semantic index disabled" };
+    return index.replaceLayer("unified", entries.map(unifiedEntryToSemanticItem));
+  };
   return {
     async read({ query = "", limit = 20 } = {}) {
       const store = await readStore(memoryPath);
@@ -21,13 +33,17 @@ export function createUnifiedMemory({ memoryPath } = {}) {
     },
     async status() {
       const store = await readStore(memoryPath);
+      const semantic = await semanticIndexPromise
+        .then((index) => index?.status())
+        .catch((error) => ({ ok: false, error: error.message }));
       return {
         ok: true,
         enabled: true,
         updatedAt: store.updatedAt || null,
         count: store.entries.length,
         counts: countEntries(store.entries),
-        currentState: buildCurrentState(store.entries)
+        currentState: buildCurrentState(store.entries),
+        semantic
       };
     },
     async write(entry = {}) {
@@ -50,7 +66,12 @@ export function createUnifiedMemory({ memoryPath } = {}) {
         store.entries = store.entries.slice(-maxEntries);
         store.updatedAt = new Date().toISOString();
         await writeStore(memoryPath, store);
-        return { ok: true, entry: normalized, count: store.entries.length };
+        await replaceUnifiedLayer(store.entries);
+        return {
+          ok: true,
+          entry: duplicateIndex >= 0 ? store.entries[duplicateIndex] : store.entries.at(-1),
+          count: store.entries.length
+        };
       });
     },
     async clear() {
@@ -58,8 +79,36 @@ export function createUnifiedMemory({ memoryPath } = {}) {
         const store = emptyStore();
         store.updatedAt = new Date().toISOString();
         await writeStore(memoryPath, store);
+        await replaceUnifiedLayer([]);
         return { ok: true };
       });
+    },
+    async replaceSemanticLayer(layer, entries = []) {
+      const index = await semanticIndexPromise;
+      if (!index) return { ok: false, skipped: true, reason: "semantic index disabled" };
+      return index.replaceLayer(layer, entries);
+    },
+    async semanticSearch(options = {}) {
+      const index = await semanticIndexPromise;
+      if (!index) return [];
+      return index.search(options);
+    },
+    async semanticStatus() {
+      const index = await semanticIndexPromise;
+      return index ? index.status() : {
+        ok: false,
+        backend: "disabled",
+        count: 0,
+        layers: []
+      };
+    },
+    async syncSemanticMemory() {
+      const store = await readStore(memoryPath);
+      return replaceUnifiedLayer(store.entries);
+    },
+    async close() {
+      const index = await semanticIndexPromise;
+      index?.close();
     },
     async formatForPrompt({ query = "", limit = 8 } = {}) {
       const snapshot = await this.read({ query, limit });
@@ -76,6 +125,29 @@ export function createUnifiedMemory({ memoryPath } = {}) {
         "以下内容是跨设备长期记忆，只在相关时参考；如果与最新上下文冲突，以最新上下文为准。",
         ...[...new Set(lines)].slice(0, Math.max(1, Number(limit) || 8))
       ].join("\n");
+    }
+  };
+}
+
+function unifiedEntryToSemanticItem(entry) {
+  return {
+    id: `unified:${entry.id}`,
+    layer: "unified",
+    kind: entry.type || "note",
+    scopeType: "global",
+    scopeId: "global",
+    groupId: "",
+    userId: "",
+    title: entry.topic || "统一记忆",
+    summary: entry.summary || "",
+    detail: entry.summary || "",
+    status: "active",
+    updatedAt: entry.updatedAt || entry.createdAt || null,
+    metadata: {
+      entryId: entry.id,
+      source: entry.source || "",
+      channel: entry.channel || "",
+      confidence: entry.confidence
     }
   };
 }

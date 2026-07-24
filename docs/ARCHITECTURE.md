@@ -41,7 +41,10 @@ environment + runtime paths
 | `src/qq-knowledge-base.js` | QQ long-term knowledge domain | changing title/scope policy, slang matching, frequency evidence, deletion review state or its repository |
 | `src/dashboard-knowledge-base.js` | Dashboard knowledge-management boundary | validating exact scoped upserts/deletes, stale conflicts, and frequency-evidence preservation |
 | `src/qq-knowledge-review.js` | Complex knowledge-review prompt boundary | bounded interest triage, full-evidence main review, and strict result parsing |
-| `src/unified-memory/` | Cross-channel memory | changing recall, storage or prompt formatting |
+| `src/qq-history-retrieval.js` | QQ review-history boundary | NapCat pagination, normalization, local merging and deduplication |
+| `src/qq-short-term-memory.js` | QQ short-term memory domain | legacy migration, brief/detail, overwrite and stale lifecycle |
+| `src/qq-style-review.js` | Human/Bot style-review boundary | flexible main-model prompt, structured parsing and safe compaction |
+| `src/unified-memory/` | Cross-channel memory | SQLite/FTS/vector hybrid recall, scope filtering and one-shot brief injection |
 | `src/*.js` | Existing domain and infrastructure modules | changing the named capability while it is migrated incrementally |
 | `modules/` | Platform clients and optional integrations | changing shared UI, launchers or the QQ social bridge |
 | `scripts/` | Operator and deployment commands | changing checks, deployment or the `ncc` CLI |

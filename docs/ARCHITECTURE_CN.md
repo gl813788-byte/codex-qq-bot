@@ -41,7 +41,10 @@
 | `src/qq-knowledge-base.js` | QQ 长期知识库领域模块 | 标题/范围、黑话匹配、频率证据、删除复核状态与 repository |
 | `src/dashboard-knowledge-base.js` | 网页知识管理领域边界 | 校验并精确增删改单个标题范围解释，处理并发冲突且保留频率证据 |
 | `src/qq-knowledge-review.js` | 知识复杂审核提示词边界 | 兴趣模型有界初筛、主模型完整证据终审与严格结果解析 |
-| `src/unified-memory/` | 跨通道统一记忆 | 召回、存储、提示词格式 |
+| `src/qq-history-retrieval.js` | QQ 复盘历史边界 | NapCat 分页、消息归一化、本地合并和去重 |
+| `src/qq-short-term-memory.js` | QQ 短期记忆领域 | 旧数据迁移、简述/详述、覆盖和过时生命周期 |
+| `src/qq-style-review.js` | 真人/Bot 风格复盘边界 | 灵活主模型提示、结构解析和安全压缩 |
+| `src/unified-memory/` | 跨通道统一记忆 | SQLite/FTS/语义向量混合召回、范围过滤和单次摘要注入 |
 | `src/*.js` | 现有领域与基础设施模块 | 修改对应能力并渐进迁移 |
 | `modules/` | 平台客户端和可选集成 | 共享界面、启动器、QQ 社交桥接 |
 | `scripts/` | 部署与运维命令 | 检查、部署、日志和仓库 `ncc` |

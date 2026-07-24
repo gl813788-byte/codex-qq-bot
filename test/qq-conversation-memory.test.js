@@ -4,6 +4,7 @@ import {
   createEmptyQqConversationMemory,
   extractQqConversationMemoryMarkers,
   formatQqConversationMemoryContext,
+  listQqConversationMemoryProfiles,
   normalizeQqConversationMemory,
   qqConversationMemoryVersion,
   updateQqConversationMemoryFromEvent,
@@ -91,10 +92,53 @@ test("migrates legacy per-group people into the cross-group QQ identity layer", 
     }
   });
 
-  assert.equal(qqConversationMemoryVersion, 2);
+  assert.equal(qqConversationMemoryVersion, 3);
   assert.equal(memory.version, qqConversationMemoryVersion);
   assert.equal(memory.people["20002"].impression, "旧版已有的人物印象");
   assert.deepEqual(memory.people["20002"].groupAliases["10001"], ["旧群名片"]);
+});
+
+test("migrates legacy impressions into short and detailed descriptions and overwrites by stable profile id", () => {
+  const event = {
+    groupId: "10001",
+    senderId: "20002",
+    senderName: "群友甲",
+    text: "继续优化记忆"
+  };
+  let memory = normalizeQqConversationMemory({
+    version: 2,
+    groups: {
+      "10001": {
+        impression: "旧版群印象很详细",
+        people: {}
+      }
+    },
+    people: {
+      "20002": {
+        aliases: ["群友甲"],
+        impression: "旧版人物印象"
+      }
+    }
+  });
+  assert.equal(memory.groups["10001"].impressionSummary, "旧版群印象很详细");
+  assert.equal(memory.groups["10001"].impressionDetail, "旧版群印象很详细");
+
+  memory = updateQqConversationMemoryFromEvent(memory, event);
+  memory = updateQqConversationMemoryFromExchange(memory, event, "可以", [{
+    scopeImpressionSummary: "新版群简述",
+    scopeImpressionDetail: "新版群详细描述，整体替代迁移前版本",
+    personImpressionSummary: "新版人物简述",
+    personImpressionDetail: "新版人物详细描述"
+  }]);
+  const profiles = listQqConversationMemoryProfiles(memory);
+  const groupProfiles = profiles.filter((profile) => profile.key === "qq:group:10001");
+  const personProfiles = profiles.filter((profile) => profile.key === "qq:person:20002");
+  assert.equal(groupProfiles.length, 1);
+  assert.equal(groupProfiles[0].shortDescription, "新版群简述");
+  assert.match(groupProfiles[0].detailedDescription, /新版群详细描述/);
+  assert.equal(personProfiles.length, 1);
+  assert.equal(personProfiles[0].shortDescription, "新版人物简述");
+  assert.doesNotMatch(personProfiles[0].detailedDescription, /旧版人物印象/);
 });
 
 test("tracks private-chat impressions and strips invisible model memory metadata", () => {

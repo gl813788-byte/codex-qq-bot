@@ -35,6 +35,7 @@ export function createRuntimePaths({
     qqStickerLabelsPath: join(dataDir, "qq-sticker-labels.json"),
     qqStickerInventoryPath: join(dataDir, "qq-sticker-inventory.json"),
     unifiedMemoryPath: join(dataDir, "unified-memory.json"),
+    semanticMemoryPath: join(dataDir, "semantic-memory.sqlite"),
     assistantProfilePath: env.CODEX_REMOTE_CONTACT_ASSISTANT_PROFILE_PATH || ""
   };
 }

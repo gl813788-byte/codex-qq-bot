@@ -26,7 +26,7 @@ const translations = {
     oneBot: "OneBot", codexCli: "Codex CLI", webLookup: "联网查询", qqChannel: "QQ 通道", pathReady: "命令路径可用", pathMissing: "命令路径缺失", neverRun: "尚未运行", lastRun: "上次运行 {time}", trustedCount: "{count} 位可信联系人", provider: "提供方 {value}", lastQuery: "查询：{value}", noQuery: "尚无查询", model: "模型 {value}", reasoning: "推理 {value}", queueState: "活动 {active} · 排队 {pending}/{max}", noRecentActivity: "还没有最近活动。",
     noGroups: "尚未添加群白名单。", noContacts: "尚未添加可信联系人。", removeGroupTitle: "移除群白名单", removeGroupMessage: "确定从白名单移除群 {value} 吗？", removeContactTitle: "移除可信联系人", removeContactMessage: "确定移除 {value} 吗？", groupInvalid: "请输入 4–20 位数字群 ID。", handleInvalid: "请输入有效的手机号或邮箱。", saved: "已保存", channelUpdated: "通道状态已更新", added: "已添加", removed: "已移除",
     replied: "已回复", ignored: "已忽略", trusted: "可信", unauthorized: "未授权", noEvents: "还没有事件。", replyLabel: "回复：", attachmentCount: "{count} 个附件",
-    autoSkillMemory: "Skill 回看后写入", autoSkillHint: "桌面 Skill 调用记忆后自动沉淀", manualHandoff: "允许手动交接", manualHandoffHint: "允许 /交接 指令写入摘要", recentState: "近期状态", latestHandoff: "最近交接", noState: "暂无近期状态", unifiedEntries: "统一摘要", handoffs: "交接", ideas: "点子", projects: "项目", todos: "待办", notes: "记录", updated: "更新于 {time}", noMemory: "没有符合条件的记忆。", entriesCount: "{count} 条", clear: "清空", clearMemoryTitle: "清空记忆", clearMemoryMessage: "此操作会永久清理“{value}”中的记忆，确定继续吗？", allRelatedMemory: "{value} 的全部相关记忆", memoryCleared: "记忆已清空", roleUser: "用户", roleAssistant: "助手", publicMemory: "公共长期记忆", personas: "群友画像", conversationImpressions: "对话印象",
+    autoSkillMemory: "Skill 回看后写入", autoSkillHint: "桌面 Skill 调用记忆后自动沉淀", manualHandoff: "允许手动交接", manualHandoffHint: "允许 /交接 指令写入摘要", recentState: "近期状态", latestHandoff: "最近交接", noState: "暂无近期状态", unifiedEntries: "统一摘要", handoffs: "交接", ideas: "点子", projects: "项目", todos: "待办", notes: "记录", updated: "更新于 {time}", noMemory: "没有符合条件的记忆。", entriesCount: "{count} 条", clear: "清空", clearMemoryTitle: "清空记忆", clearMemoryMessage: "此操作会永久清理“{value}”中的记忆，确定继续吗？", allRelatedMemory: "{value} 的全部相关记忆", memoryCleared: "记忆已清空", roleUser: "用户", roleAssistant: "助手", publicMemory: "公共长期记忆", personas: "群友画像", conversationImpressions: "对话印象", impressionBrief: "印象简述", impressionDetail: "印象详述", thoughtBrief: "感想简述", thoughtDetail: "感想详述", recentTopic: "近期话题", recentInteraction: "近期互动",
     matchedLogs: "显示 {visible} 条 · 匹配 {matched} 条", totalLogs: "日志总数", traces: "Trace 数", p95Latency: "P95 耗时", maxLatency: "最慢耗时", noLogs: "没有符合筛选条件的日志。", copied: "已复制", filterApplied: "筛选已应用",
     runtimeModel: "当前模型", runtimeReasoning: "推理等级", runtimeStarted: "启动时间", apiTokenPrompt: "此 Hub 已启用 API Token。请输入 Token（只保存在当前标签页）：", authRequired: "需要 API Token 才能连接。", requestFailed: "请求失败", networkError: "无法连接到本地 Hub。", copyFailed: "复制失败，请手动选择内容。", unknown: "未知"
   },
@@ -53,7 +53,7 @@ const translations = {
     oneBot: "OneBot", codexCli: "Codex CLI", webLookup: "Web lookup", qqChannel: "QQ channel", pathReady: "Command path ready", pathMissing: "Command path missing", neverRun: "Not run yet", lastRun: "Last run {time}", trustedCount: "{count} trusted contacts", provider: "Provider {value}", lastQuery: "Query: {value}", noQuery: "No query yet", model: "Model {value}", reasoning: "Reasoning {value}", queueState: "Active {active} · pending {pending}/{max}", noRecentActivity: "No recent activity yet.",
     noGroups: "No allowlisted groups yet.", noContacts: "No trusted contacts yet.", removeGroupTitle: "Remove group", removeGroupMessage: "Remove group {value} from the allowlist?", removeContactTitle: "Remove contact", removeContactMessage: "Remove {value}?", groupInvalid: "Enter a 4–20 digit group ID.", handleInvalid: "Enter a valid phone number or email.", saved: "Saved", channelUpdated: "Channel updated", added: "Added", removed: "Removed",
     replied: "Replied", ignored: "Ignored", trusted: "Trusted", unauthorized: "Unauthorized", noEvents: "No events yet.", replyLabel: "Reply: ", attachmentCount: "{count} attachments",
-    autoSkillMemory: "Write after Skill recall", autoSkillHint: "Persist useful context after a desktop Skill recall", manualHandoff: "Allow manual handoff", manualHandoffHint: "Allow /handoff to write a summary", recentState: "Recent state", latestHandoff: "Latest handoff", noState: "No recent state", unifiedEntries: "Unified summaries", handoffs: "Handoffs", ideas: "Ideas", projects: "Projects", todos: "Todos", notes: "Notes", updated: "Updated {time}", noMemory: "No matching memory.", entriesCount: "{count} entries", clear: "Clear", clearMemoryTitle: "Clear memory", clearMemoryMessage: "This permanently removes memory from “{value}”. Continue?", allRelatedMemory: "All memory related to {value}", memoryCleared: "Memory cleared", roleUser: "User", roleAssistant: "Assistant", publicMemory: "Public long-term memory", personas: "Personas", conversationImpressions: "Conversation impressions",
+    autoSkillMemory: "Write after Skill recall", autoSkillHint: "Persist useful context after a desktop Skill recall", manualHandoff: "Allow manual handoff", manualHandoffHint: "Allow /handoff to write a summary", recentState: "Recent state", latestHandoff: "Latest handoff", noState: "No recent state", unifiedEntries: "Unified summaries", handoffs: "Handoffs", ideas: "Ideas", projects: "Projects", todos: "Todos", notes: "Notes", updated: "Updated {time}", noMemory: "No matching memory.", entriesCount: "{count} entries", clear: "Clear", clearMemoryTitle: "Clear memory", clearMemoryMessage: "This permanently removes memory from “{value}”. Continue?", allRelatedMemory: "All memory related to {value}", memoryCleared: "Memory cleared", roleUser: "User", roleAssistant: "Assistant", publicMemory: "Public long-term memory", personas: "Personas", conversationImpressions: "Conversation impressions", impressionBrief: "Impression brief", impressionDetail: "Impression detail", thoughtBrief: "Thought brief", thoughtDetail: "Thought detail", recentTopic: "Recent topic", recentInteraction: "Recent interaction",
     matchedLogs: "Showing {visible} · matched {matched}", totalLogs: "Total logs", traces: "Traces", p95Latency: "P95 latency", maxLatency: "Max latency", noLogs: "No logs match these filters.", copied: "Copied", filterApplied: "Filter applied",
     runtimeModel: "Current model", runtimeReasoning: "Reasoning", runtimeStarted: "Started", apiTokenPrompt: "This Hub requires an API token. Enter it here (stored only in this tab):", authRequired: "An API token is required.", requestFailed: "Request failed", networkError: "Unable to reach the local Hub.", copyFailed: "Copy failed. Select the content manually.", unknown: "Unknown"
   }
@@ -961,6 +961,7 @@ function renderQqAdaptiveLearning(groups) {
     const hours = (item.activeHours || []).map((hour) => `${hour}:00`).join(" · ") || "—";
     const guidance = (item.styleGuidance || []).slice(0, 5);
     const review = item.styleReviewSummary || t("adaptiveCollecting");
+    const reviewDetail = String(item.styleReviewDetail || "").split("\n").filter(Boolean).slice(0, 18);
     const intervals = item.proactiveIntervals || {};
     const cold = item.coldInterest || {};
     const sections = [
@@ -1001,7 +1002,8 @@ function renderQqAdaptiveLearning(groups) {
         t("detailLastReview", { value: formatTime(item.lastStyleReviewAt) }),
         t("detailNextReview", { value: formatTime(item.nextStyleReviewAt) }),
         review,
-        ...guidance.map((rule) => `↳ ${rule}`)
+        ...reviewDetail.map((line) => `↳ ${line}`),
+        ...(reviewDetail.length ? [] : guidance.map((rule) => `↳ ${rule}`))
       ]),
       adaptiveDetailSection(t("learningInterest"), [
         t("detailOrdinaryInterest", { messages: intervals.judgeEveryMessages ?? "—", minutes: intervals.judgeEveryMinutes ?? "—" }),
@@ -1229,16 +1231,24 @@ function renderQqMemory(qq) {
   for (const group of qq.recent || []) addEntries(group, t("recentActivity"));
   for (const group of qq.personas || []) addEntries(group, t("personas"));
   for (const group of qq.conversationMemory?.groups || []) {
-    const entries = [group.impression, group.botThought, ...(group.recentTopics || []).map((topic) => topic.summary || topic.label)].filter(Boolean).map((text) => ({ text }));
+    const entries = [
+      group.impressionSummary ? { role: t("impressionBrief"), text: group.impressionSummary } : null,
+      group.impressionDetail ? { role: t("impressionDetail"), text: group.impressionDetail } : null,
+      group.botThoughtSummary ? { role: t("thoughtBrief"), text: group.botThoughtSummary } : null,
+      group.botThoughtDetail ? { role: t("thoughtDetail"), text: group.botThoughtDetail } : null,
+      ...(group.recentTopics || []).map((topic) => ({ role: t("recentTopic"), text: topic.summary || topic.label }))
+    ].filter((entry) => entry?.text);
     if (entries.length) addEntries({ id: group.id, title: group.title, entries }, t("conversationImpressions"));
   }
   for (const chat of qq.conversationMemory?.privateChats || []) {
     const entries = [
-      chat.impression,
-      chat.botThought,
-      ...(chat.recentTopics || []).map((topic) => topic.summary || topic.label || topic.text),
-      ...(chat.recentConversations || []).map((item) => item.summary || item.text)
-    ].filter(Boolean).map((text) => ({ text }));
+      chat.impressionSummary ? { role: t("impressionBrief"), text: chat.impressionSummary } : null,
+      chat.impressionDetail ? { role: t("impressionDetail"), text: chat.impressionDetail } : null,
+      chat.botThoughtSummary ? { role: t("thoughtBrief"), text: chat.botThoughtSummary } : null,
+      chat.botThoughtDetail ? { role: t("thoughtDetail"), text: chat.botThoughtDetail } : null,
+      ...(chat.recentTopics || []).map((topic) => ({ role: t("recentTopic"), text: topic.summary || topic.label || topic.text })),
+      ...(chat.recentConversations || []).map((item) => ({ role: t("recentInteraction"), text: item.summary || item.text }))
+    ].filter((entry) => entry?.text);
     if (entries.length) addEntries({ id: `private:${chat.id}`, title: chat.title, entries }, t("conversationImpressions"));
   }
   const groups = [...grouped.values()];

@@ -4,7 +4,7 @@ const markerPattern = /\[\[qq_memory:(\{[^\n]*?\})\]\]/g;
 const anyMarkerPattern = /\[\[qq_memory:[\s\S]*?\]\]/g;
 const maxPeoplePerGroup = 500;
 const maxGlobalPeople = 2_000;
-export const qqConversationMemoryVersion = 2;
+export const qqConversationMemoryVersion = 3;
 
 export function createEmptyQqConversationMemory() {
   return {
@@ -26,8 +26,11 @@ export function normalizeQqConversationMemory(value) {
     people: normalizeRecord(input.people),
     privateChats: normalizeRecord(input.privateChats)
   };
+  normalizeConversationProfiles(state);
   normalizeGlobalPeople(state.people);
-  if (Number(input.version || 1) < qqConversationMemoryVersion) migrateLegacyGroupPeople(state);
+  if (Number(input.version || 1) < 2) migrateLegacyGroupPeople(state);
+  normalizeConversationProfiles(state);
+  normalizeGlobalPeople(state.people);
   return state;
 }
 
@@ -117,14 +120,14 @@ export function updateQqConversationMemoryFromExchange(memory, event, reply, pat
     if (person) {
       person.recentInteractions = pushLimited(person.recentInteractions, { at, userText, assistantText }, 6);
     }
-    for (const patch of patches) applyPatchToGroup(group, person, globalPerson, patch, at);
+    for (const patch of patches) applyPatchToGroup(group, person, globalPerson, normalizePatch(patch), at);
   } else if (event?.senderId) {
     const chat = getPrivateChat(state, event.senderId, event.senderLabel || event.senderName);
     if (!chat) return state;
     chat.updatedAt = at;
     if (assistantText) chat.recentMessages = pushLimited(chat.recentMessages, { at, role: "assistant", text: assistantText }, 12);
     chat.recentConversations = pushLimited(chat.recentConversations, { at, userText, assistantText }, 8);
-    for (const patch of patches) applyPatchToPrivateChat(chat, patch, at);
+    for (const patch of patches) applyPatchToPrivateChat(chat, normalizePatch(patch), at);
   }
   state.updatedAt = at;
   return state;
@@ -159,11 +162,11 @@ export function formatQqConversationMemoryContext(memory, event) {
     const lines = [
       "群聊印象记忆（弱参考）：",
       "群印象只属于当前群；人物印象按 QQ 号跨群共享。它们都只是长期积累的弱参考，不要当成绝对事实，也不要主动宣称在给群友建档。",
-      group.impression ? `- 对这个群的印象：${group.impression}` : null,
+      group.impressionSummary ? `- 对这个群的印象：${group.impressionSummary}` : null,
       recentTopics ? `- 这个群最近聊过：${recentTopics}` : null,
-      group.botThought ? `- Bot 最近对群聊的感想：${group.botThought}` : null,
-      person?.impression ? `- 对当前发送者的跨群人物印象：${person.impression}` : null,
-      groupPerson?.botThought ? `- 与当前发送者在本群互动后的感想：${groupPerson.botThought}` : null
+      group.botThoughtSummary ? `- Bot 最近对群聊的感想：${group.botThoughtSummary}` : null,
+      person?.impressionSummary ? `- 对当前发送者的跨群人物印象：${person.impressionSummary}` : null,
+      groupPerson?.botThoughtSummary ? `- 与当前发送者在本群互动后的感想：${groupPerson.botThoughtSummary}` : null
     ].filter(Boolean);
     return lines.length > 2 ? lines.join("\n") : "";
   }
@@ -173,11 +176,77 @@ export function formatQqConversationMemoryContext(memory, event) {
   return [
     "私聊印象记忆（弱参考）：",
     "这些是和当前联系人长期互动形成的印象、最近话题和 Bot 自己的主观感受；只用于自然承接，不要把推测说成事实，不要主动说自己在记录对方。",
-    chat.impression ? `- 对这个人的印象：${chat.impression}` : null,
+    chat.impressionSummary ? `- 对这个人的印象：${chat.impressionSummary}` : null,
     recentTopics ? `- 最近聊过：${recentTopics}` : null,
-    chat.botThought ? `- Bot 最近的感想：${chat.botThought}` : null,
+    chat.botThoughtSummary ? `- Bot 最近的感想：${chat.botThoughtSummary}` : null,
     chat.recentConversations?.length ? `- 最近一次互动：${formatConversation(chat.recentConversations.at(-1))}` : null
   ].filter(Boolean).join("\n");
+}
+
+export function listQqConversationMemoryProfiles(memory) {
+  const state = ensureMemory(memory);
+  const profiles = [];
+  for (const [groupId, group] of Object.entries(state.groups)) {
+    const shortDescription = group.impressionSummary || group.botThoughtSummary || "";
+    const detailedDescription = joinDescriptionDetails(
+      group.impressionDetail || group.impression,
+      group.botThoughtDetail || group.botThought
+    );
+    if (shortDescription || detailedDescription) {
+      profiles.push({
+        key: `qq:group:${groupId}`,
+        kind: "group-impression",
+        scopeType: "group",
+        scopeId: groupId,
+        groupId,
+        userId: "",
+        title: `群 ${groupId}`,
+        shortDescription: shortDescription || summarizeDescription(detailedDescription),
+        detailedDescription,
+        aliases: [],
+        updatedAt: group.descriptionUpdatedAt || group.updatedAt || null
+      });
+    }
+  }
+  for (const [userId, person] of Object.entries(state.people)) {
+    const detailedDescription = person.impressionDetail || person.impression || "";
+    if (!person.impressionSummary && !detailedDescription) continue;
+    profiles.push({
+      key: `qq:person:${userId}`,
+      kind: "person-impression",
+      scopeType: "member",
+      scopeId: `member:${userId}`,
+      groupId: "",
+      userId,
+      title: person.aliases?.at(-1) || `QQ ${userId}`,
+      shortDescription: person.impressionSummary || summarizeDescription(detailedDescription),
+      detailedDescription,
+      aliases: person.aliases || [],
+      updatedAt: person.descriptionUpdatedAt || person.updatedAt || null
+    });
+  }
+  for (const [userId, chat] of Object.entries(state.privateChats)) {
+    const shortDescription = chat.impressionSummary || chat.botThoughtSummary || "";
+    const detailedDescription = joinDescriptionDetails(
+      chat.impressionDetail || chat.impression,
+      chat.botThoughtDetail || chat.botThought
+    );
+    if (!shortDescription && !detailedDescription) continue;
+    profiles.push({
+      key: `qq:private:${userId}`,
+      kind: "private-impression",
+      scopeType: "private",
+      scopeId: `private:${userId}`,
+      groupId: "",
+      userId,
+      title: chat.aliases?.at(-1) || `QQ ${userId}`,
+      shortDescription: shortDescription || summarizeDescription(detailedDescription),
+      detailedDescription,
+      aliases: chat.aliases || [],
+      updatedAt: chat.descriptionUpdatedAt || chat.updatedAt || null
+    });
+  }
+  return profiles;
 }
 
 export function summarizeQqConversationMemory(memory) {
@@ -196,8 +265,9 @@ function ensureMemory(memory) {
   memory.version = qqConversationMemoryVersion;
   memory.groups = normalizeRecord(memory.groups);
   memory.people = normalizeRecord(memory.people);
-  normalizeGlobalPeople(memory.people);
   memory.privateChats = normalizeRecord(memory.privateChats);
+  normalizeConversationProfiles(memory);
+  normalizeGlobalPeople(memory.people);
   return memory;
 }
 
@@ -209,7 +279,12 @@ function getGroup(state, groupId) {
     messageCount: 0,
     updatedAt: null,
     impression: "",
+    impressionSummary: "",
+    impressionDetail: "",
     botThought: "",
+    botThoughtSummary: "",
+    botThoughtDetail: "",
+    descriptionUpdatedAt: null,
     recentTopics: [],
     recentLinks: [],
     recentSharedContent: [],
@@ -238,7 +313,12 @@ function getGroupPerson(group, senderId, senderName = "") {
     messageCount: 0,
     updatedAt: null,
     impression: "",
+    impressionSummary: "",
+    impressionDetail: "",
     botThought: "",
+    botThoughtSummary: "",
+    botThoughtDetail: "",
+    descriptionUpdatedAt: null,
     recentTopics: [],
     recentInteractions: []
   };
@@ -277,7 +357,12 @@ function getPrivateChat(state, senderId, senderName = "") {
     messageCount: 0,
     updatedAt: null,
     impression: "",
+    impressionSummary: "",
+    impressionDetail: "",
     botThought: "",
+    botThoughtSummary: "",
+    botThoughtDetail: "",
+    descriptionUpdatedAt: null,
     recentTopics: [],
     recentLinks: [],
     recentMessages: [],
@@ -353,14 +438,31 @@ function pushLinks(items, links, event, at) {
 }
 
 function applyPatchToGroup(group, person, globalPerson, patch, at) {
-  if (patch.scopeImpression) group.impression = patch.scopeImpression;
-  if (patch.personImpression) {
-    if (person) person.impression = patch.personImpression;
-    if (globalPerson) globalPerson.impression = patch.personImpression;
+  if (patch.scopeImpressionDetail || patch.scopeImpressionSummary) {
+    applyDescriptionPatch(group, {
+      summary: patch.scopeImpressionSummary,
+      detail: patch.scopeImpressionDetail
+    }, "impression", at);
   }
-  if (patch.botThought) {
-    group.botThought = patch.botThought;
-    if (person) person.botThought = patch.botThought;
+  if (patch.personImpressionDetail || patch.personImpressionSummary) {
+    if (person) applyDescriptionPatch(person, {
+      summary: patch.personImpressionSummary,
+      detail: patch.personImpressionDetail
+    }, "impression", at);
+    if (globalPerson) applyDescriptionPatch(globalPerson, {
+      summary: patch.personImpressionSummary,
+      detail: patch.personImpressionDetail
+    }, "impression", at);
+  }
+  if (patch.botThoughtDetail || patch.botThoughtSummary) {
+    applyDescriptionPatch(group, {
+      summary: patch.botThoughtSummary,
+      detail: patch.botThoughtDetail
+    }, "botThought", at);
+    if (person) applyDescriptionPatch(person, {
+      summary: patch.botThoughtSummary,
+      detail: patch.botThoughtDetail
+    }, "botThought", at);
   }
   if (patch.recentTopic) {
     group.recentTopics = pushLimited(group.recentTopics, {
@@ -382,7 +484,10 @@ function createGlobalPerson(userId) {
     groupAliases: Object.create(null),
     messageCount: 0,
     updatedAt: null,
-    impression: ""
+    impression: "",
+    impressionSummary: "",
+    impressionDetail: "",
+    descriptionUpdatedAt: null
   };
 }
 
@@ -402,7 +507,7 @@ function normalizeGlobalPeople(people) {
     }
     person.messageCount = Math.max(0, Number(person.messageCount) || 0);
     person.updatedAt = person.updatedAt || null;
-    person.impression = safeMemoryField(person.impression);
+    normalizeDescriptionFields(person, "impression");
     people[userId] = person;
   }
 }
@@ -420,7 +525,10 @@ function migrateLegacyGroupPeople(state) {
       person.messageCount = Number(person.messageCount || 0) + Math.max(0, Number(legacy?.messageCount) || 0);
       const updatedAt = Date.parse(legacy?.updatedAt || "") || 0;
       if (updatedAt >= (newestByUserId.get(userId) || 0)) {
-        if (legacy?.impression) person.impression = safeMemoryField(legacy.impression);
+        if (legacy?.impression) {
+          person.impression = safeMemoryField(legacy.impression, 1_200);
+          normalizeDescriptionFields(person, "impression");
+        }
         person.updatedAt = legacy?.updatedAt || person.updatedAt;
         newestByUserId.set(userId, updatedAt);
       }
@@ -429,8 +537,19 @@ function migrateLegacyGroupPeople(state) {
 }
 
 function applyPatchToPrivateChat(chat, patch, at) {
-  if (patch.scopeImpression || patch.personImpression) chat.impression = patch.personImpression || patch.scopeImpression;
-  if (patch.botThought) chat.botThought = patch.botThought;
+  if (patch.personImpressionDetail || patch.personImpressionSummary
+    || patch.scopeImpressionDetail || patch.scopeImpressionSummary) {
+    applyDescriptionPatch(chat, {
+      summary: patch.personImpressionSummary || patch.scopeImpressionSummary,
+      detail: patch.personImpressionDetail || patch.scopeImpressionDetail
+    }, "impression", at);
+  }
+  if (patch.botThoughtDetail || patch.botThoughtSummary) {
+    applyDescriptionPatch(chat, {
+      summary: patch.botThoughtSummary,
+      detail: patch.botThoughtDetail
+    }, "botThought", at);
+  }
   if (patch.recentTopic) {
     chat.recentTopics = pushLimited(chat.recentTopics, {
       label: patch.recentTopic,
@@ -444,11 +563,26 @@ function applyPatchToPrivateChat(chat, patch, at) {
 }
 
 function normalizePatch(value) {
+  const legacyScope = safeMemoryField(value.scopeImpression, 1_200);
+  const legacyPerson = safeMemoryField(value.personImpression, 1_200);
+  const legacyThought = safeMemoryField(value.botThought, 1_200);
   return {
-    scopeImpression: safeMemoryField(value.scopeImpression),
-    personImpression: safeMemoryField(value.personImpression),
+    scopeImpressionSummary: safeMemoryField(
+      value.scopeImpressionSummary || (legacyScope ? summarizeDescription(legacyScope) : ""),
+      96
+    ),
+    scopeImpressionDetail: safeMemoryField(value.scopeImpressionDetail || legacyScope, 1_200),
+    personImpressionSummary: safeMemoryField(
+      value.personImpressionSummary || (legacyPerson ? summarizeDescription(legacyPerson) : ""),
+      96
+    ),
+    personImpressionDetail: safeMemoryField(value.personImpressionDetail || legacyPerson, 1_200),
     recentTopic: safeMemoryField(value.recentTopic, 80),
-    botThought: safeMemoryField(value.botThought)
+    botThoughtSummary: safeMemoryField(
+      value.botThoughtSummary || (legacyThought ? summarizeDescription(legacyThought) : ""),
+      96
+    ),
+    botThoughtDetail: safeMemoryField(value.botThoughtDetail || legacyThought, 1_200)
   };
 }
 
@@ -456,6 +590,77 @@ function safeMemoryField(value, limit = 180) {
   const text = memoryText(value, limit);
   if (!text || containsLikelySecret(text)) return "";
   return text;
+}
+
+function normalizeConversationProfiles(state) {
+  for (const [groupId, value] of Object.entries(state.groups)) {
+    const group = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    group.groupId = String(group.groupId || groupId);
+    group.people = normalizeRecord(group.people);
+    normalizeDescriptionFields(group, "impression");
+    normalizeDescriptionFields(group, "botThought");
+    group.descriptionUpdatedAt = group.descriptionUpdatedAt || null;
+    for (const [userId, personValue] of Object.entries(group.people)) {
+      const person = personValue && typeof personValue === "object" && !Array.isArray(personValue)
+        ? personValue
+        : {};
+      person.userId = String(person.userId || userId);
+      normalizeDescriptionFields(person, "impression");
+      normalizeDescriptionFields(person, "botThought");
+      person.descriptionUpdatedAt = person.descriptionUpdatedAt || null;
+      group.people[userId] = person;
+    }
+    state.groups[groupId] = group;
+  }
+  for (const [userId, value] of Object.entries(state.privateChats)) {
+    const chat = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    chat.userId = String(chat.userId || userId);
+    chat.aliases = Array.isArray(chat.aliases)
+      ? chat.aliases.map((item) => memoryText(item, 48)).filter(Boolean).slice(-8)
+      : [];
+    normalizeDescriptionFields(chat, "impression");
+    normalizeDescriptionFields(chat, "botThought");
+    chat.descriptionUpdatedAt = chat.descriptionUpdatedAt || null;
+    state.privateChats[userId] = chat;
+  }
+}
+
+function normalizeDescriptionFields(record, prefix) {
+  const legacy = safeMemoryField(record?.[prefix], 1_200);
+  const detail = safeMemoryField(record?.[`${prefix}Detail`] || legacy, 1_200);
+  const summary = safeMemoryField(
+    record?.[`${prefix}Summary`] || summarizeDescription(detail),
+    96
+  );
+  record[prefix] = detail;
+  record[`${prefix}Summary`] = summary;
+  record[`${prefix}Detail`] = detail;
+}
+
+function applyDescriptionPatch(record, patch, prefix, at) {
+  if (!record) return;
+  const detail = safeMemoryField(patch?.detail, 1_200);
+  const summary = safeMemoryField(patch?.summary || summarizeDescription(detail), 96);
+  if (detail) {
+    record[prefix] = detail;
+    record[`${prefix}Detail`] = detail;
+  }
+  if (summary) record[`${prefix}Summary`] = summary;
+  record.descriptionUpdatedAt = at;
+}
+
+function summarizeDescription(value) {
+  const text = safeMemoryField(value, 1_200);
+  if (!text) return "";
+  const sentence = text.split(/(?<=[。！？!?；;])\s*/u).find(Boolean) || text;
+  return memoryText(sentence, 96);
+}
+
+function joinDescriptionDetails(impression, thought) {
+  return [
+    impression ? `印象：${impression}` : null,
+    thought ? `Bot 感想：${thought}` : null
+  ].filter(Boolean).join("\n");
 }
 
 function hasPatchContent(patch) {
