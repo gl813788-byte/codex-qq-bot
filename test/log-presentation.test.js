@@ -120,6 +120,10 @@ test("follow-up fusion logs use the existing Chinese detail style", () => {
     formatLogMessage("Queued QQ messages restarted after steering was unavailable"),
     "当前回复无法接收融合追问，已截断并用新输入续答"
   );
+  assert.equal(
+    formatLogMessage("QQ pending follow-ups fused before send"),
+    "QQ 待处理追问已在发送前融合"
+  );
   assert.deepEqual(localizeLogDetails({
     outcome: "steered",
     action: "fuse-and-steer",
@@ -151,6 +155,15 @@ test("follow-up fusion logs use the existing Chinese detail style", () => {
     操作: "融合后截断并续答",
     "被截断的 Codex 轮次": "turn-1",
     "Codex 轮次": "turn-2"
+  });
+  assert.deepEqual(localizeLogDetails({
+    outcome: "completed",
+    action: "fuse-before-send",
+    fusionRound: 2
+  }), {
+    结果: "已完成",
+    操作: "发送前统一融合",
+    发送前融合轮次: 2
   });
 });
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createQqReplySteeringCoordinator,
+  fuseCompletedQqReplyFollowUps,
   QQ_FOLLOW_UP_WINDOW_MS
 } from "../src/qq-reply-steering.js";
 
@@ -175,7 +176,7 @@ test("resets the fusion window so bursty triggers reach the model as one steer",
   coordinator.close();
 });
 
-test("waits for the resettable fusion window before next-lifecycle handoff", async () => {
+test("waits for the resettable fusion window when scheduled work is explicitly drained", async () => {
   const pending = { group: [{ id: "one", text: "first" }] };
   const coordinator = createQqReplySteeringCoordinator({
     delayMs: 25,
@@ -196,7 +197,7 @@ test("waits for the resettable fusion window before next-lifecycle handoff", asy
   coordinator.close();
 });
 
-test("hands a pending quiet-window batch to the next lifecycle immediately after send", async () => {
+test("hands a pending quiet-window batch to completed-reply fusion before send", async () => {
   const pending = { group: [{ id: "one", text: "first" }] };
   const coordinator = createQqReplySteeringCoordinator({
     delayMs: 5_000,
@@ -213,6 +214,71 @@ test("hands a pending quiet-window batch to the next lifecycle immediately after
   assert.equal(pending.group.length, 1);
   assert.equal(coordinator.snapshot().scheduled, 0);
   coordinator.close();
+});
+
+test("replaces an unsent completed reply immediately and repeats for newer follow-ups", async () => {
+  const pending = {
+    group: [{ id: "one", text: "first follow-up" }]
+  };
+  const replacements = [];
+  let handoffCount = 0;
+
+  const result = await fuseCompletedQqReplyFollowUps({
+    scopeId: "group",
+    initialReply: "stale completed answer",
+    handoff: async () => {
+      handoffCount += 1;
+    },
+    takePendingEntries: (scopeId) => {
+      const entries = pending[scopeId] || [];
+      pending[scopeId] = [];
+      return entries;
+    },
+    replaceReply: async ({ draft, entries, fusionRound }) => {
+      replacements.push({ draft, entries, fusionRound });
+      if (fusionRound === 1) {
+        pending.group.push({ id: "two", text: "newer follow-up" });
+      }
+      return `replacement ${fusionRound}`;
+    }
+  });
+
+  assert.deepEqual(result, {
+    reply: "replacement 2",
+    fusedCount: 2,
+    fusionRounds: 2
+  });
+  assert.equal(replacements[0].draft, "stale completed answer");
+  assert.equal(replacements[1].draft, "replacement 1");
+  assert.deepEqual(pending.group, []);
+  assert.equal(handoffCount, 3);
+});
+
+test("restores a completed-reply fusion batch when the replacement turn fails", async () => {
+  const pending = {
+    group: [{ id: "one", text: "follow-up" }]
+  };
+
+  await assert.rejects(
+    fuseCompletedQqReplyFollowUps({
+      scopeId: "group",
+      initialReply: "stale completed answer",
+      takePendingEntries: (scopeId) => {
+        const entries = pending[scopeId] || [];
+        pending[scopeId] = [];
+        return entries;
+      },
+      restorePendingEntries: (scopeId, entries) => {
+        pending[scopeId] = [...entries, ...(pending[scopeId] || [])];
+      },
+      replaceReply: async () => {
+        throw new Error("replacement failed");
+      }
+    }),
+    /replacement failed/
+  );
+
+  assert.deepEqual(pending.group, [{ id: "one", text: "follow-up" }]);
 });
 
 async function waitFor(predicate, timeoutMs = 1_000) {

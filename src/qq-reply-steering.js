@@ -1,5 +1,44 @@
 export const QQ_FOLLOW_UP_WINDOW_MS = 5_000;
 
+export async function fuseCompletedQqReplyFollowUps({
+  scopeId,
+  initialReply = "",
+  handoff,
+  takePendingEntries,
+  restorePendingEntries,
+  replaceReply
+} = {}) {
+  const key = String(scopeId || "").trim();
+  let reply = String(initialReply || "");
+  let fusedCount = 0;
+  let fusionRounds = 0;
+  if (!key) return { reply, fusedCount, fusionRounds };
+
+  while (true) {
+    await handoff?.(key);
+    const entries = [...(takePendingEntries?.(key) || [])];
+    if (entries.length === 0) break;
+    fusionRounds += 1;
+    try {
+      if (typeof replaceReply !== "function") {
+        throw new TypeError("replaceReply must be a function when pending follow-ups exist");
+      }
+      reply = String(await replaceReply({
+        scopeId: key,
+        draft: reply,
+        entries,
+        fusionRound: fusionRounds
+      }) || "");
+      fusedCount += entries.length;
+    } catch (error) {
+      restorePendingEntries?.(key, entries);
+      throw error;
+    }
+  }
+
+  return { reply, fusedCount, fusionRounds };
+}
+
 export function createQqReplySteeringCoordinator({
   delayMs = QQ_FOLLOW_UP_WINDOW_MS,
   maxDelayMs = null,
