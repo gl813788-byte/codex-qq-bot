@@ -75,6 +75,41 @@ test("rejects steering after completion and aborts an active app-server turn", a
   await assert.rejects(abortedResult, (error) => error.code === "ABORT_ERR");
 });
 
+test("interrupts the current turn and starts a replacement turn with new input", async () => {
+  const server = createFakeAppServer();
+  let ready;
+  const readyPromise = new Promise((resolve) => { ready = resolve; });
+  const resultPromise = runCodexAppServerTurn({
+    prompt: "first",
+    timeoutMs: 5_000,
+    spawnProcess: server.spawn,
+    onReady: ready
+  });
+  const controls = await readyPromise;
+  const restarted = await controls.restart([
+    { type: "text", text: "merged follow-up" },
+    { type: "localImage", path: "/tmp/follow-up.png" }
+  ]);
+  assert.deepEqual(restarted, {
+    threadId: "thread-1",
+    turnId: "turn-2",
+    interruptedTurnId: "turn-1"
+  });
+  server.complete("replacement answer");
+
+  const result = await resultPromise;
+  assert.equal(result.finalResponse, "replacement answer");
+  assert.equal(result.turnId, "turn-2");
+  assert.deepEqual(
+    server.messages.map((message) => message.method),
+    ["initialize", "initialized", "thread/start", "turn/start", "turn/interrupt", "turn/start"]
+  );
+  assert.deepEqual(server.messages[5].params.input, [
+    { type: "text", text: "merged follow-up" },
+    { type: "localImage", path: "/tmp/follow-up.png", detail: null }
+  ]);
+});
+
 test("resumes a persistent thread and falls back to a new one when it is stale", async () => {
   const resumedServer = createFakeAppServer({ resume: "ok" });
   let resumedReady;
@@ -124,6 +159,8 @@ test("resumes a persistent thread and falls back to a new one when it is stale",
 function createFakeAppServer({ resume = "ok" } = {}) {
   const messages = [];
   let child;
+  let currentTurnId = null;
+  let turnCount = 0;
 
   const send = (message) => {
     queueMicrotask(() => child.stdout.write(`${JSON.stringify(message)}\n`));
@@ -146,11 +183,23 @@ function createFakeAppServer({ resume = "ok" } = {}) {
             if (resume === "fail") send({ id: message.id, error: { code: -32000, message: "missing thread" } });
             else send({ id: message.id, result: { thread: { id: "thread-1" } } });
           } else if (message.method === "turn/start") {
-            send({ id: message.id, result: { turn: { id: "turn-1", status: "inProgress", items: [] } } });
+            currentTurnId = `turn-${++turnCount}`;
+            send({ id: message.id, result: { turn: { id: currentTurnId, status: "inProgress", items: [] } } });
           } else if (message.method === "turn/steer") {
-            send({ id: message.id, result: { turnId: "turn-1" } });
+            send({ id: message.id, result: { turnId: currentTurnId } });
           } else if (message.method === "turn/interrupt") {
             send({ id: message.id, result: {} });
+            send({
+              method: "turn/completed",
+              params: {
+                threadId: "thread-1",
+                turn: {
+                  id: currentTurnId,
+                  status: "interrupted",
+                  items: []
+                }
+              }
+            });
           }
         }
         callback();
@@ -171,7 +220,7 @@ function createFakeAppServer({ resume = "ok" } = {}) {
         method: "item/completed",
         params: {
           threadId: "thread-1",
-          turnId: "turn-1",
+          turnId: currentTurnId,
           completedAtMs: Date.now(),
           item: { id: "message-1", type: "agentMessage", phase: "final_answer", text }
         }
@@ -181,7 +230,7 @@ function createFakeAppServer({ resume = "ok" } = {}) {
         params: {
           threadId: "thread-1",
           turn: {
-            id: "turn-1",
+            id: currentTurnId,
             status: "completed",
             items: [{ id: "message-1", type: "agentMessage", phase: "final_answer", text }]
           }

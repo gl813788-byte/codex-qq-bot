@@ -1,6 +1,8 @@
+export const QQ_FOLLOW_UP_WINDOW_MS = 5_000;
+
 export function createQqReplySteeringCoordinator({
-  delayMs = 120,
-  maxDelayMs = 2_500,
+  delayMs = QQ_FOLLOW_UP_WINDOW_MS,
+  maxDelayMs = null,
   getActiveGeneration,
   getPendingEntries,
   buildSteeringInput,
@@ -37,14 +39,27 @@ export function createQqReplySteeringCoordinator({
       if (!currentGeneration || currentGeneration.id !== generation.id || currentGeneration.steer !== generation.steer) {
         return report({ ok: false, scopeId, reason: "generation_changed", consumedCount: 0 });
       }
-      const steered = await generation.steer(input);
-      const consumedCount = Number(consumeEntries?.(scopeId, entries, generation, steered) || 0);
+      let accepted;
+      let deliveryMode = "steered";
+      let steerError = null;
+      try {
+        accepted = await generation.steer(input);
+      } catch (error) {
+        steerError = error;
+        if (typeof generation.restart !== "function") throw error;
+        accepted = await generation.restart(input);
+        deliveryMode = "restarted";
+      }
+      const consumedCount = Number(consumeEntries?.(scopeId, entries, generation, accepted) || 0);
       return report({
         ok: true,
         scopeId,
         generationId: generation.id,
-        threadId: steered?.threadId || generation.threadId || null,
-        turnId: steered?.turnId || generation.turnId || null,
+        threadId: accepted?.threadId || generation.threadId || null,
+        turnId: accepted?.turnId || generation.turnId || null,
+        interruptedTurnId: accepted?.interruptedTurnId || null,
+        deliveryMode,
+        steerError,
         queuedCount: entries.length,
         consumedCount
       });
@@ -69,9 +84,14 @@ export function createQqReplySteeringCoordinator({
     if (existing) {
       if (existing.timer) {
         clearTimeout(existing.timer);
-        const elapsed = Date.now() - existing.startedAt;
-        const remaining = Math.max(0, normalizeMaxDelay(maxDelayMs) - elapsed);
-        existing.timer = setTimeout(existing.run, Math.min(normalizeDelay(delayMs), remaining));
+        const normalizedMaxDelay = normalizeMaxDelay(maxDelayMs);
+        if (normalizedMaxDelay == null) {
+          existing.timer = setTimeout(existing.run, normalizeDelay(delayMs));
+        } else {
+          const elapsed = Date.now() - existing.startedAt;
+          const remaining = Math.max(0, normalizedMaxDelay - elapsed);
+          existing.timer = setTimeout(existing.run, Math.min(normalizeDelay(delayMs), remaining));
+        }
       }
       return existing.promise;
     }
@@ -109,6 +129,38 @@ export function createQqReplySteeringCoordinator({
   return {
     schedule,
 
+    async waitForIdle(scopeId) {
+      const key = String(scopeId || "").trim();
+      if (!key) {
+        return { ok: false, scopeId: key, reason: "missing_scope", consumedCount: 0 };
+      }
+      let result = { ok: false, scopeId: key, reason: "not_scheduled", consumedCount: 0 };
+      while (scheduled.has(key)) {
+        result = await scheduled.get(key).promise;
+      }
+      return result;
+    },
+
+    async handoff(scopeId) {
+      const key = String(scopeId || "").trim();
+      if (!key) {
+        return { ok: false, scopeId: key, reason: "missing_scope", consumedCount: 0 };
+      }
+      let result = { ok: false, scopeId: key, reason: "not_scheduled", consumedCount: 0 };
+      while (scheduled.has(key)) {
+        const entry = scheduled.get(key);
+        if (!entry.timer) {
+          result = await entry.promise;
+          continue;
+        }
+        clearTimeout(entry.timer);
+        scheduled.delete(key);
+        result = { ok: false, scopeId: key, reason: "handed_off", consumedCount: 0 };
+        entry.resolve?.(result);
+      }
+      return result;
+    },
+
     cancel(scopeId) {
       const key = String(scopeId || "").trim();
       const entry = scheduled.get(key);
@@ -131,17 +183,27 @@ export function createQqReplySteeringCoordinator({
     },
 
     snapshot() {
-      return { scheduled: scheduled.size, closed };
+      return {
+        scheduled: scheduled.size,
+        closed,
+        delayMs: normalizeDelay(delayMs),
+        maxDelayMs: normalizeMaxDelay(maxDelayMs)
+      };
     }
   };
 }
 
 function normalizeDelay(value) {
   const number = Number(value);
-  return Number.isFinite(number) ? Math.max(0, Math.min(2_000, Math.floor(number))) : 120;
+  return Number.isFinite(number)
+    ? Math.max(0, Math.min(10_000, Math.floor(number)))
+    : QQ_FOLLOW_UP_WINDOW_MS;
 }
 
 function normalizeMaxDelay(value) {
+  if (value == null || value === Infinity) return null;
   const number = Number(value);
-  return Number.isFinite(number) ? Math.max(100, Math.min(10_000, Math.floor(number))) : 2_500;
+  return Number.isFinite(number)
+    ? Math.max(100, Math.min(10_000, Math.floor(number)))
+    : null;
 }
