@@ -116,6 +116,10 @@ test("private proactive gate details expose the model decision and human-like va
 test("follow-up fusion logs use the existing Chinese detail style", () => {
   assert.equal(formatLogMessage("QQ follow-up trigger entered fusion buffer"), "QQ 追问触发已进入融合缓冲");
   assert.equal(formatLogMessage("Queued QQ messages steered into active turn"), "QQ 融合追问已一次性补充进当前回复");
+  assert.equal(
+    formatLogMessage("Queued QQ messages restarted after steering was unavailable"),
+    "当前回复无法接收融合追问，已截断并用新输入续答"
+  );
   assert.deepEqual(localizeLogDetails({
     outcome: "steered",
     action: "fuse-and-steer",
@@ -136,6 +140,17 @@ test("follow-up fusion logs use the existing Chinese detail style", () => {
     模型输入批次数: 1,
     融合触发来源: ["@ 机器人", "兴趣模型选中"],
     融合内容预览: "消息一：继续说"
+  });
+  assert.deepEqual(localizeLogDetails({
+    outcome: "restarted",
+    action: "fuse-and-restart",
+    interruptedTurnId: "turn-1",
+    turnId: "turn-2"
+  }), {
+    结果: "已截断并续答",
+    操作: "融合后截断并续答",
+    "被截断的 Codex 轮次": "turn-1",
+    "Codex 轮次": "turn-2"
   });
 });
 

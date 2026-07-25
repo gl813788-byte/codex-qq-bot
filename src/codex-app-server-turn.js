@@ -54,6 +54,8 @@ export function runCodexAppServerTurn({
     let resumed = false;
     let turnId = null;
     let turnActive = false;
+    let restartInProgress = false;
+    let pendingRestart = null;
     let forceKillTimer = null;
     const pendingRequests = new Map();
     const agentMessages = [];
@@ -95,6 +97,10 @@ export function runCodexAppServerTurn({
       if (settled) return;
       settled = true;
       turnActive = false;
+      if (pendingRestart) {
+        pendingRestart.reject(error || createTurnInactiveError());
+        pendingRestart = null;
+      }
       clearTimeout(timeoutTimer);
       signal?.removeEventListener("abort", abortTurn);
       const terminalError = error || null;
@@ -151,7 +157,15 @@ export function runCodexAppServerTurn({
       if (message.method !== "turn/completed") return;
       const completedTurn = message.params?.turn;
       if (threadId && message.params?.threadId && message.params.threadId !== threadId) return;
-      if (turnId && completedTurn?.id && completedTurn.id !== turnId) return;
+      const completedTurnId = completedTurn?.id || null;
+      if (pendingRestart?.turnId && completedTurnId === pendingRestart.turnId) {
+        turnActive = false;
+        const waiter = pendingRestart;
+        pendingRestart = null;
+        waiter.resolve(completedTurn);
+        return;
+      }
+      if (turnId && completedTurnId && completedTurnId !== turnId) return;
       turnActive = false;
       const status = completedTurn?.status;
       if (status !== "completed") {
@@ -231,6 +245,53 @@ export function runCodexAppServerTurn({
         threadId,
         turnId: result?.turnId || turnId
       };
+    };
+
+    const restart = async (input) => {
+      if (!turnActive || !threadId || !turnId) throw createTurnInactiveError();
+      if (restartInProgress || pendingRestart) throw createTurnRestartingError();
+      const interruptedTurnId = turnId;
+      restartInProgress = true;
+      const completion = new Promise((restartResolve, restartReject) => {
+        pendingRestart = {
+          turnId: interruptedTurnId,
+          resolve: restartResolve,
+          reject: restartReject
+        };
+      });
+      let interruptionCompleted = false;
+      try {
+        await request("turn/interrupt", { threadId, turnId: interruptedTurnId });
+        await completion;
+        interruptionCompleted = true;
+        if (settled || !threadId) throw createTurnInactiveError();
+        agentMessages.length = 0;
+        const nextTurn = await request("turn/start", {
+          threadId,
+          input: normalizeUserInput(input),
+          cwd,
+          model: model || null,
+          effort: reasoningEffort || null
+        });
+        turnId = nextTurn?.turn?.id || null;
+        if (!turnId) throw createProtocolError("Codex app-server did not return a replacement turn id");
+        turnActive = true;
+        return {
+          threadId,
+          turnId,
+          interruptedTurnId
+        };
+      } catch (error) {
+        if (pendingRestart?.turnId === interruptedTurnId) {
+          pendingRestart = null;
+        }
+        if (interruptionCompleted && !settled && !turnActive) {
+          finish(error);
+        }
+        throw error;
+      } finally {
+        restartInProgress = false;
+      }
     };
 
     const interrupt = async () => {
@@ -347,7 +408,7 @@ export function runCodexAppServerTurn({
         if (!turnId) throw createProtocolError("Codex app-server did not return a turn id");
         turnActive = true;
         try {
-          onReady?.({ child, threadId, turnId, steer, interrupt, resumed });
+          onReady?.({ child, threadId, turnId, steer, restart, interrupt, resumed });
         } catch {
           // Lifecycle observers must not change the turn outcome.
         }
@@ -393,6 +454,12 @@ function createProtocolError(message, protocolCode = null) {
 function createTurnInactiveError() {
   const error = new Error("Codex app-server turn is no longer active");
   error.code = "CODEX_TURN_NOT_ACTIVE";
+  return error;
+}
+
+function createTurnRestartingError() {
+  const error = new Error("Codex app-server turn is already being restarted");
+  error.code = "CODEX_TURN_RESTARTING";
   return error;
 }
 

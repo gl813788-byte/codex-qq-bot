@@ -57,6 +57,7 @@ const messageTranslationsZh = Object.freeze({
   "Unable to process queued QQ replies": "处理排队中的 QQ 回复失败",
   "QQ follow-up trigger entered fusion buffer": "QQ 追问触发已进入融合缓冲",
   "Queued QQ messages steered into active turn": "QQ 融合追问已一次性补充进当前回复",
+  "Queued QQ messages restarted after steering was unavailable": "当前回复无法接收融合追问，已截断并用新输入续答",
   "Queued QQ messages kept for follow-up after steering was unavailable": "当前回复无法接收融合补充，追问已保留到发送前合并",
   "QQ pending follow-ups fused before send": "QQ 待处理追问已在发送前融合",
   "QQ pending follow-ups kept after send-time fusion failed": "发送前融合失败，QQ 追问已保留",
@@ -147,6 +148,7 @@ const detailLabelsZh = Object.freeze({
   generationId: "生成任务",
   threadId: "Codex 会话",
   turnId: "Codex 轮次",
+  interruptedTurnId: "被截断的 Codex 轮次",
   sessionMode: "会话模式",
   parentSpanId: "父片段",
   action: "操作",
@@ -437,6 +439,7 @@ const detailValuesZh = Object.freeze({
     list: "列出", search: "搜索", view: "查看", status: "查看状态", add: "添加", added: "添加",
     edit: "修改", updated: "更新", confirmed: "确认", delete: "删除", deleted: "删除", clear: "清空", pause: "暂停当前回复",
     "fusion-buffer": "进入追问融合缓冲", "fuse-and-steer": "融合后补充当前回答",
+    "fuse-and-restart": "融合后截断并续答",
     "fuse-before-send": "发送前统一融合"
   },
   operation: {
@@ -447,6 +450,7 @@ const detailValuesZh = Object.freeze({
     duplicate: "重复记录", "no-match": "没有命中", completed: "已完成", kept: "已保留", deleted: "已删除",
     failed: "失败", blocked: "已进入只读保护", persisted: "已保存", cleared: "已清除", submitted: "已提交",
     approved: "已批准启动", declined: "继续保持沉默", queued: "等待融合", steered: "已融合补充",
+    restarted: "已截断并续答",
     started: "已开始", stopped: "已暂停",
     superseded: "候选已变化", "kept_due_to_activity": "因新活动而保留", "candidate-selected": "已选出候选", "no-candidate": "没有候选"
   },

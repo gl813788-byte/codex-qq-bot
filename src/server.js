@@ -193,7 +193,10 @@ import {
 } from "./qq-relationship-interest.js";
 import { createRuntimePaths } from "./runtime-paths.js";
 import { createScopedReplyScheduler } from "./scoped-reply-scheduler.js";
-import { createQqReplySteeringCoordinator } from "./qq-reply-steering.js";
+import {
+  createQqReplySteeringCoordinator,
+  QQ_FOLLOW_UP_WINDOW_MS
+} from "./qq-reply-steering.js";
 import { createQqOutgoingMentionResolver } from "./qq-outgoing-mentions.js";
 import { runCodexAppServerTurn } from "./codex-app-server-turn.js";
 import {
@@ -677,8 +680,8 @@ const backgroundTasks = new Set();
 const shutdownController = new AbortController();
 const qqReplyScheduler = createScopedReplyScheduler();
 const qqReplySteering = createQqReplySteeringCoordinator({
-  delayMs: 900,
-  maxDelayMs: 2500,
+  delayMs: QQ_FOLLOW_UP_WINDOW_MS,
+  maxDelayMs: null,
   getActiveGeneration: getSteerableQqGeneration,
   getPendingEntries: getQqPendingReplyEvents,
   buildSteeringInput: buildQqPendingSteeringInput,
@@ -1448,8 +1451,8 @@ function queueQqPendingReplyEvent(event, source, decision) {
     triggerKind: getQqFusionTriggerKind({ event, decision }),
     decisionReason: decision?.reason || null,
     triggerMessageCount: pending.events.length,
-    fusionDelayMs: 900,
-    fusionMaxDelayMs: 2500
+    fusionDelayMs: QQ_FOLLOW_UP_WINDOW_MS,
+    fusionMaxDelayMs: null
   }, "qq", qqLogContext(event));
   trackBackgroundTask(qqReplySteering.schedule(scopeId), () => null);
   return pending;
@@ -1492,29 +1495,6 @@ function takeQqPendingReplyEvents(scopeId) {
   const pending = state.qq.pendingReplies[scopeId];
   delete state.qq.pendingReplies[scopeId];
   return Array.isArray(pending?.events) ? pending.events : [];
-}
-
-function restoreQqPendingReplyEvents(scopeId, entries, source = "queued") {
-  const key = String(scopeId || "");
-  const restored = Array.isArray(entries) ? entries.filter(Boolean) : [];
-  if (!key || restored.length === 0) return 0;
-  const current = state.qq.pendingReplies[key];
-  const currentEntries = Array.isArray(current?.events) ? current.events : [];
-  const ids = new Set();
-  const events = [...restored, ...currentEntries].filter((entry) => {
-    const id = String(entry?.id || "");
-    if (!id || ids.has(id)) return false;
-    ids.add(id);
-    return true;
-  }).slice(-qqPendingReplyLimit);
-  state.qq.pendingReplies[key] = {
-    scopeId: key,
-    source: current?.source || source,
-    queuedAt: current?.queuedAt || restored[0]?.receivedAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    events
-  };
-  return events.length;
 }
 
 function getQqPendingReplyEvents(scopeId) {
@@ -1592,7 +1572,7 @@ async function buildQqPendingSteeringInput(entries, generation) {
     type: "text",
     text: [
       `你处理当前 QQ 回复期间又收到了 ${aggregate.queuedMessageCount || entries.length} 条新消息。Hub 已沿用连续消息合并规则，把相邻重复内容压成一条并标出总次数。`,
-      "这些是当前用户输入的追加上下文，不是新的独立任务。立即结合先前请求和下面所有新增消息继续当前思考；最终只给出一份统一的 QQ 回复，不要先发旧答案，也不要逐条机械回复“消息一/消息二”。",
+      "这些是当前用户输入的追加上下文，不是新的独立任务。优先把它们补进当前思考；如果 Hub 因无法补入而截断了上一段生成，就从这里作为新的输入段继续，并放弃未发送的旧草稿。最终只给出一份统一的 QQ 回复，不要先发旧答案，也不要逐条机械回复“消息一/消息二”。",
       "",
       aggregate.text,
       interleavedContext.text ? "" : null,
@@ -1620,17 +1600,29 @@ function logQqReplySteeringResult(result) {
     : null;
   if (result?.ok) {
     if (generation) {
-      generation.steeredMessageCount = Number(generation.steeredMessageCount || 0) + Number(result.consumedCount || 0);
-      generation.lastSteeredAt = new Date().toISOString();
+      generation.turnId = result.turnId || generation.turnId;
+      generation.followUpMessageCount = Number(generation.followUpMessageCount || 0) + Number(result.consumedCount || 0);
+      if (result.deliveryMode === "restarted") {
+        generation.restartedMessageCount = Number(generation.restartedMessageCount || 0) + Number(result.consumedCount || 0);
+        generation.lastRestartedAt = new Date().toISOString();
+      } else {
+        generation.steeredMessageCount = Number(generation.steeredMessageCount || 0) + Number(result.consumedCount || 0);
+        generation.lastSteeredAt = new Date().toISOString();
+      }
     }
-    logger.info("Queued QQ messages steered into active turn", {
-      outcome: "steered",
-      action: "fuse-and-steer",
+    const restarted = result.deliveryMode === "restarted";
+    logger.info(restarted
+      ? "Queued QQ messages restarted after steering was unavailable"
+      : "Queued QQ messages steered into active turn", {
+      outcome: restarted ? "restarted" : "steered",
+      action: restarted ? "fuse-and-restart" : "fuse-and-steer",
       source: "qq-follow-up",
       scopeId: result.scopeId,
       generationId: result.generationId,
       threadId: result.threadId,
       turnId: result.turnId,
+      interruptedTurnId: result.interruptedTurnId || null,
+      steerError: restarted ? result.steerError || null : null,
       queuedCount: result.queuedCount,
       consumedCount: result.consumedCount,
       triggerMessageCount: generation?.qqLastSteeringFusion?.triggerMessageCount || result.queuedCount,
@@ -1810,6 +1802,7 @@ function getQqScopeUpdatedAt(scopeId) {
 }
 
 async function processQueuedQqRepliesForScope(scopeId, source = "queued") {
+  await qqReplySteering.handoff(scopeId);
   const queued = takeQqPendingReplyEvents(scopeId);
   if (queued.length === 0) return;
   const event = buildAggregatedQqEvent(queued);
@@ -2456,8 +2449,12 @@ function sanitizeActiveGeneration(generation) {
     startedAt: generation.startedAt || null,
     mode: String(generation.mode || "").slice(0, 80),
     steerable: typeof generation.steer === "function",
+    restartable: typeof generation.restart === "function",
+    followUpMessageCount: Number(generation.followUpMessageCount || 0),
     steeredMessageCount: Number(generation.steeredMessageCount || 0),
     lastSteeredAt: generation.lastSteeredAt || null,
+    restartedMessageCount: Number(generation.restartedMessageCount || 0),
+    lastRestartedAt: generation.lastRestartedAt || null,
     lastFusion: generation.qqLastSteeringFusion ? {
       triggerMessageCount: Number(generation.qqLastSteeringFusion.triggerMessageCount || 0),
       compactedTriggerCount: Number(generation.qqLastSteeringFusion.compactedTriggerCount || 0),
@@ -2664,8 +2661,12 @@ async function buildMaintenanceStatus({ force = false } = {}) {
           taskType: state.qq.activeGeneration.taskType,
           timeoutMs: state.qq.activeGeneration.timeoutMs,
           steerable: typeof state.qq.activeGeneration.steer === "function",
+          restartable: typeof state.qq.activeGeneration.restart === "function",
+          followUpMessageCount: Number(state.qq.activeGeneration.followUpMessageCount || 0),
           steeredMessageCount: Number(state.qq.activeGeneration.steeredMessageCount || 0),
-          lastSteeredAt: state.qq.activeGeneration.lastSteeredAt || null
+          lastSteeredAt: state.qq.activeGeneration.lastSteeredAt || null,
+          restartedMessageCount: Number(state.qq.activeGeneration.restartedMessageCount || 0),
+          lastRestartedAt: state.qq.activeGeneration.lastRestartedAt || null
         }
         : null,
       activeGenerations: Object.keys(state.qq.activeGenerations).length,
@@ -7876,103 +7877,6 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     qqCodexSessionContextDelivered = true;
     return result;
   };
-  const fuseQueuedFollowUpsBeforeSend = async (initialReply) => {
-    let reply = String(initialReply || "");
-    let fusedCount = 0;
-    if (!scopeId) return { reply, fusedCount };
-    for (let fusionRound = 1; fusionRound <= 3; fusionRound += 1) {
-      qqReplySteering.cancel(scopeId);
-      const queuedEntries = takeQqPendingReplyEvents(scopeId);
-      if (queuedEntries.length === 0) break;
-      const fusionGeneration = {
-        id: `send-boundary-${id}-${fusionRound}`,
-        qqEvent: event
-      };
-      const previousContextAt = event.qqCodexContextAt;
-      const previousInjectedIds = [...(event.qqCodexInjectedMessageIds || [])];
-      try {
-        const fusionInput = await buildQqPendingSteeringInput(queuedEntries, fusionGeneration);
-        const fusionText = fusionInput
-          .filter((item) => item?.type === "text")
-          .map((item) => item.text)
-          .filter(Boolean)
-          .join("\n\n");
-        const candidate = fusionGeneration.qqSteeringContextCandidate;
-        event.qqCodexContextAt = candidate?.latestAt || event.qqCodexContextAt;
-        event.qqCodexInjectedMessageIds = [
-          ...(event.qqCodexInjectedMessageIds || []),
-          ...(candidate?.messageIds || [])
-        ];
-        const fullBase = await buildReplyPrompt(memoryContext, 1, false, "", reply, 0);
-        const fullPrompt = [
-          fullBase,
-          "",
-          "发送前融合到达的追问批次：",
-          fusionText,
-          "",
-          "上一版回复尚未发送。请把它与这份融合追问重新整合，只输出一份替代上一版的最终 QQ 回复；不要解释融合过程。"
-        ].join("\n");
-        const resumePrompt = [
-          "你正在继续同一个 QQ 长期线程。上一轮助手输出尚未真正发送到 QQ，只是待修订草稿。",
-          fusionText,
-          "",
-          "把本批触发消息及筛选后的中间语境融合进草稿，只输出一份替代草稿的最终 QQ 回复。不要逐条作答，不要解释内部过程。"
-        ].join("\n");
-        logger.info("QQ pending follow-ups fused before send", {
-          outcome: "started",
-          action: "fuse-before-send",
-          source: "qq-follow-up",
-          scopeId,
-          groupId: event.groupId || null,
-          senderId: event.senderId || null,
-          fusionRound,
-          triggerMessageCount: queuedEntries.length,
-          compactedTriggerCount: candidate?.compactedTriggerCount || queuedEntries.length,
-          contextMessageCount: candidate?.contextMessageCount || 0,
-          inputBatchCount: 1,
-          inputImageCount: candidate?.inputImageCount || 0,
-          triggerKinds: candidate?.triggerKinds || [],
-          fusionPreview: candidate?.fusionPreview || null
-        }, "qq", qqLogContext(event));
-        reply = await runReplyPrompt(fullPrompt, resumePrompt);
-        fusedCount += queuedEntries.length;
-        logger.success("QQ pending follow-ups fused before send", {
-          outcome: "completed",
-          action: "fuse-before-send",
-          source: "qq-follow-up",
-          scopeId,
-          groupId: event.groupId || null,
-          senderId: event.senderId || null,
-          fusionRound,
-          triggerMessageCount: queuedEntries.length,
-          compactedTriggerCount: candidate?.compactedTriggerCount || queuedEntries.length,
-          contextMessageCount: candidate?.contextMessageCount || 0,
-          inputBatchCount: 1,
-          inputImageCount: candidate?.inputImageCount || 0,
-          triggerKinds: candidate?.triggerKinds || [],
-          fusionPreview: candidate?.fusionPreview || null
-        }, "qq", qqLogContext(event));
-      } catch (error) {
-        event.qqCodexContextAt = previousContextAt;
-        event.qqCodexInjectedMessageIds = previousInjectedIds;
-        restoreQqPendingReplyEvents(scopeId, queuedEntries);
-        logger.warn("QQ pending follow-ups kept after send-time fusion failed", {
-          outcome: "kept",
-          action: "fuse-before-send",
-          source: "qq-follow-up",
-          scopeId,
-          groupId: event.groupId || null,
-          senderId: event.senderId || null,
-          fusionRound,
-          triggerMessageCount: queuedEntries.length,
-          error
-        }, "qq", qqLogContext(event));
-        break;
-      }
-    }
-    return { reply, fusedCount };
-  };
-
   await ensureCodexReplyWorkspace();
 
   try {
@@ -7986,8 +7890,6 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     if (shouldRequestExpandedQqContext(baseReply)) {
       baseReply = await runBuiltReplyPrompt(memoryContext, 1, true);
     }
-    let fusion = await fuseQueuedFollowUpsBeforeSend(baseReply);
-    baseReply = fusion.reply;
     if (!event.qqPrivateProactive) {
       baseReply = await runQqBotToolLoop({
         initialReply: baseReply,
@@ -7996,19 +7898,6 @@ async function buildModelReply(event, { replyScope = null } = {}) {
         runBuiltReplyPrompt,
         replyScope
       });
-      fusion = await fuseQueuedFollowUpsBeforeSend(baseReply);
-      baseReply = fusion.reply;
-      if (fusion.fusedCount > 0) {
-        baseReply = await runQqBotToolLoop({
-          initialReply: baseReply,
-          event,
-          memoryContext,
-          runBuiltReplyPrompt,
-          replyScope
-        });
-        fusion = await fuseQueuedFollowUpsBeforeSend(baseReply);
-        baseReply = fusion.reply;
-      }
     }
     assertQqReplyScopeActive(replyScope);
     if (isQqSilentReply(baseReply)) {
@@ -10119,9 +10008,13 @@ function trackQqGeneration(child, options = {}) {
     threadId: null,
     turnId: null,
     steer: null,
+    restart: null,
     interrupt: null,
+    followUpMessageCount: 0,
     steeredMessageCount: 0,
-    lastSteeredAt: null
+    lastSteeredAt: null,
+    restartedMessageCount: 0,
+    lastRestartedAt: null
   };
   state.qq.activeGeneration = generation;
   if (scopeId) state.qq.activeGenerations[scopeId] = generation;
@@ -10135,6 +10028,7 @@ function attachQqGenerationSteering(id, controls = {}) {
   generation.threadId = controls.threadId || null;
   generation.turnId = controls.turnId || null;
   generation.steer = typeof controls.steer === "function" ? controls.steer : null;
+  generation.restart = typeof controls.restart === "function" ? controls.restart : null;
   generation.interrupt = typeof controls.interrupt === "function" ? controls.interrupt : null;
   if (generation.scopeId && generation.steer) {
     trackBackgroundTask(qqReplySteering.schedule(generation.scopeId), () => null);

@@ -31,6 +31,9 @@ test("main-model core prompt presents one execution path and one dynamic style a
   assert.match(prompt, /不得预设领域或固定知识类别/);
   assert.match(prompt, /核验状态：已联网核验\/群聊待核查/);
   assert.match(prompt, /同一标题和范围.*覆盖旧正文/);
+  assert.match(prompt, /这个项目的开发者 QQ 固定为 3784642920/);
+  assert.match(prompt, /项目开发者身份不从当前主人名单推导/);
+  assert.match(prompt, /主人权限仍只认 Hub 的 isOwner 验证/);
   assert.doesNotMatch(prompt, /群聊像普通群友接话，通常 1 到 3 句/);
   assert.doesNotMatch(prompt, /自己判断是否应该回复/);
 
