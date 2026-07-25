@@ -195,6 +195,7 @@ import { createRuntimePaths } from "./runtime-paths.js";
 import { createScopedReplyScheduler } from "./scoped-reply-scheduler.js";
 import {
   createQqReplySteeringCoordinator,
+  fuseCompletedQqReplyFollowUps,
   QQ_FOLLOW_UP_WINDOW_MS
 } from "./qq-reply-steering.js";
 import { createQqOutgoingMentionResolver } from "./qq-outgoing-mentions.js";
@@ -1495,6 +1496,29 @@ function takeQqPendingReplyEvents(scopeId) {
   const pending = state.qq.pendingReplies[scopeId];
   delete state.qq.pendingReplies[scopeId];
   return Array.isArray(pending?.events) ? pending.events : [];
+}
+
+function restoreQqPendingReplyEvents(scopeId, entries, source = "queued") {
+  const key = String(scopeId || "");
+  const restored = Array.isArray(entries) ? entries.filter(Boolean) : [];
+  if (!key || restored.length === 0) return 0;
+  const current = state.qq.pendingReplies[key];
+  const currentEntries = Array.isArray(current?.events) ? current.events : [];
+  const ids = new Set();
+  const events = [...restored, ...currentEntries].filter((entry) => {
+    const id = String(entry?.id || "");
+    if (!id || ids.has(id)) return false;
+    ids.add(id);
+    return true;
+  }).slice(-qqPendingReplyLimit);
+  state.qq.pendingReplies[key] = {
+    scopeId: key,
+    source: current?.source || source,
+    queuedAt: current?.queuedAt || restored[0]?.receivedAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    events
+  };
+  return events.length;
 }
 
 function getQqPendingReplyEvents(scopeId) {
@@ -7877,6 +7901,104 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     qqCodexSessionContextDelivered = true;
     return result;
   };
+  const fuseQueuedFollowUpsBeforeSend = async (initialReply) => fuseCompletedQqReplyFollowUps({
+    scopeId,
+    initialReply,
+    handoff: (key) => qqReplySteering.handoff(key),
+    takePendingEntries: takeQqPendingReplyEvents,
+    restorePendingEntries: restoreQqPendingReplyEvents,
+    replaceReply: async ({ draft, entries, fusionRound }) => {
+      const fusionGeneration = {
+        id: `send-boundary-${id}-${fusionRound}`,
+        qqEvent: event
+      };
+      const previousContextAt = event.qqCodexContextAt;
+      const previousInjectedIds = [...(event.qqCodexInjectedMessageIds || [])];
+      try {
+        const fusionInput = await buildQqPendingSteeringInput(entries, fusionGeneration);
+        const fusionText = fusionInput
+          .filter((item) => item?.type === "text")
+          .map((item) => item.text)
+          .filter(Boolean)
+          .join("\n\n");
+        const candidate = fusionGeneration.qqSteeringContextCandidate;
+        event.qqCodexContextAt = candidate?.latestAt || event.qqCodexContextAt;
+        event.qqCodexInjectedMessageIds = [
+          ...(event.qqCodexInjectedMessageIds || []),
+          ...(candidate?.messageIds || [])
+        ];
+        const fullBase = await buildReplyPrompt(memoryContext, 1, false, "", draft, 0);
+        const fullPrompt = [
+          fullBase,
+          "",
+          "上一版回答已经生成，但尚未发送。现在有新的追问到达：",
+          fusionText,
+          "",
+          "不要发送或复述上一版回答。立即进入下一轮，把上一版草稿与这批追问融合，只输出一份替代旧草稿的最终 QQ 回复；不要解释融合过程。"
+        ].join("\n");
+        const resumePrompt = [
+          "你正在继续同一个 QQ 长期线程。上一轮助手输出尚未真正发送到 QQ，只是一份必须丢弃或改写的草稿。",
+          fusionText,
+          "",
+          "立即进入下一轮，把本批触发消息及筛选后的中间语境融合进草稿，只输出一份替代草稿的最终 QQ 回复。不要逐条作答，不要解释内部过程。"
+        ].join("\n");
+        logger.info("QQ pending follow-ups fused before send", {
+          outcome: "started",
+          action: "fuse-before-send",
+          source: "qq-follow-up",
+          scopeId,
+          groupId: event.groupId || null,
+          senderId: event.senderId || null,
+          fusionRound,
+          triggerMessageCount: entries.length,
+          compactedTriggerCount: candidate?.compactedTriggerCount || entries.length,
+          contextMessageCount: candidate?.contextMessageCount || 0,
+          inputBatchCount: 1,
+          inputImageCount: candidate?.inputImageCount || 0,
+          triggerKinds: candidate?.triggerKinds || [],
+          fusionPreview: candidate?.fusionPreview || null
+        }, "qq", qqLogContext(event));
+        const replacement = await runReplyPrompt(fullPrompt, resumePrompt);
+        logger.success("QQ pending follow-ups fused before send", {
+          outcome: "completed",
+          action: "fuse-before-send",
+          source: "qq-follow-up",
+          scopeId,
+          groupId: event.groupId || null,
+          senderId: event.senderId || null,
+          fusionRound,
+          triggerMessageCount: entries.length,
+          compactedTriggerCount: candidate?.compactedTriggerCount || entries.length,
+          contextMessageCount: candidate?.contextMessageCount || 0,
+          inputBatchCount: 1,
+          inputImageCount: candidate?.inputImageCount || 0,
+          triggerKinds: candidate?.triggerKinds || [],
+          fusionPreview: candidate?.fusionPreview || null
+        }, "qq", qqLogContext(event));
+        return replacement;
+      } catch (error) {
+        event.qqCodexContextAt = previousContextAt;
+        event.qqCodexInjectedMessageIds = previousInjectedIds;
+        const failure = ["QQ_REPLY_STOPPED", "HUB_SHUTTING_DOWN"].includes(error?.code)
+          ? error
+          : Object.assign(new Error(error?.message || "QQ follow-up replacement turn failed", { cause: error }), {
+            code: "QQ_FOLLOW_UP_FUSION_RETRY"
+          });
+        logger.warn("QQ pending follow-ups kept after send-time fusion failed", {
+          outcome: "kept",
+          action: "fuse-before-send",
+          source: "qq-follow-up",
+          scopeId,
+          groupId: event.groupId || null,
+          senderId: event.senderId || null,
+          fusionRound,
+          triggerMessageCount: entries.length,
+          error: failure
+        }, "qq", qqLogContext(event));
+        throw failure;
+      }
+    }
+  });
   await ensureCodexReplyWorkspace();
 
   try {
@@ -7890,14 +8012,21 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     if (shouldRequestExpandedQqContext(baseReply)) {
       baseReply = await runBuiltReplyPrompt(memoryContext, 1, true);
     }
+    let fusion = await fuseQueuedFollowUpsBeforeSend(baseReply);
+    baseReply = fusion.reply;
     if (!event.qqPrivateProactive) {
-      baseReply = await runQqBotToolLoop({
-        initialReply: baseReply,
-        event,
-        memoryContext,
-        runBuiltReplyPrompt,
-        replyScope
-      });
+      while (true) {
+        baseReply = await runQqBotToolLoop({
+          initialReply: baseReply,
+          event,
+          memoryContext,
+          runBuiltReplyPrompt,
+          replyScope
+        });
+        fusion = await fuseQueuedFollowUpsBeforeSend(baseReply);
+        baseReply = fusion.reply;
+        if (fusion.fusedCount === 0) break;
+      }
     }
     assertQqReplyScopeActive(replyScope);
     if (isQqSilentReply(baseReply)) {
@@ -9354,7 +9483,7 @@ async function processQqReplyEvent(event, options = {}) {
       error = caught.message;
       reply = event.qqColdProactive || event.qqPrivateProactive
         ? null
-        : ["QQ_GENERATION_STOPPED", "QQ_REPLY_STOPPED", "HUB_SHUTTING_DOWN"].includes(caught.code)
+        : ["QQ_GENERATION_STOPPED", "QQ_REPLY_STOPPED", "QQ_FOLLOW_UP_FUSION_RETRY", "HUB_SHUTTING_DOWN"].includes(caught.code)
           ? null
           : "这边刚刚卡了一下，等我再试一次。";
     } finally {
