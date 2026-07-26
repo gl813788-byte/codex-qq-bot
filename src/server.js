@@ -1665,6 +1665,7 @@ function logQqReplySteeringResult(result) {
       threadId: result.threadId,
       turnId: result.turnId,
       interruptedTurnId: result.interruptedTurnId || null,
+      deadlineRenewalCount: Number(result.deadlineRenewalCount || 0),
       queuedCount: result.queuedCount,
       consumedCount: result.consumedCount,
       triggerMessageCount: generation?.qqLastSteeringFusion?.triggerMessageCount || result.queuedCount,
@@ -10395,6 +10396,7 @@ function runSteerableQqCodexTurn(input, options = {}) {
         qqGenerationId,
         threadId: result.threadId,
         turnId: result.turnId,
+        deadlineRenewalCount: Number(result.deadlineRenewalCount || 0),
         groupId: options.qqEvent?.groupId || null,
         senderId: options.qqEvent?.senderId || null,
         ...(diagnostics.lines.length > 0 ? {
@@ -10438,6 +10440,7 @@ function runSteerableQqCodexTurn(input, options = {}) {
         taskType: options.taskType || null,
         timeoutMs: options.timeout,
         qqGenerationId,
+        deadlineRenewalCount: Number(caught?.deadlineRenewalCount || 0),
         groupId: options.qqEvent?.groupId || null,
         senderId: options.qqEvent?.senderId || null,
         error: caught

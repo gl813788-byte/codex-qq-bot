@@ -453,7 +453,7 @@ function formatInterestDetails(details, options) {
 
 function formatGenericDetails(details, options) {
   const compactKeys = new Set([
-    "durationMs", "totalDurationMs", "modelDurationMs", "modelTemperature", "resultCount", "status", "outcome", "code", "error", "reason", "url",
+    "durationMs", "totalDurationMs", "modelDurationMs", "modelTemperature", "deadlineRenewalCount", "resultCount", "status", "outcome", "code", "error", "reason", "url",
     "source", "action", "operation", "scopeType", "scopeId", "entryId", "variantId", "title", "titles", "matchedTerms",
     "appliedCount", "rejectedCount", "removedCount", "entryCount", "scopeCount", "titleCount", "slangCount", "variantCount",
     "matchedTitleCount", "recordedHitCount", "contextExtendedCount", "hitCount", "totalHits", "recentHits", "retainedOccurrenceCount",

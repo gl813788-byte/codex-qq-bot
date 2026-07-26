@@ -23,12 +23,14 @@ test("runs one app-server turn and steers additional input into the active turn"
   const controls = await readyPromise;
   const steered = await controls.steer("消息一：later one\n\n消息二：later two");
   assert.equal(steered.turnId, "turn-1");
+  assert.equal(steered.deadlineRenewalCount, 1);
   server.complete("the one combined reply");
 
   const result = await resultPromise;
   assert.equal(result.finalResponse, "the one combined reply");
   assert.equal(result.threadId, "thread-1");
   assert.equal(result.turnId, "turn-1");
+  assert.equal(result.deadlineRenewalCount, 1);
   assert.deepEqual(
     server.messages.map((message) => message.method),
     ["initialize", "initialized", "thread/start", "turn/start", "turn/steer"]
@@ -93,13 +95,15 @@ test("interrupts the current turn and starts a replacement turn with new input",
   assert.deepEqual(restarted, {
     threadId: "thread-1",
     turnId: "turn-2",
-    interruptedTurnId: "turn-1"
+    interruptedTurnId: "turn-1",
+    deadlineRenewalCount: 1
   });
   server.complete("replacement answer");
 
   const result = await resultPromise;
   assert.equal(result.finalResponse, "replacement answer");
   assert.equal(result.turnId, "turn-2");
+  assert.equal(result.deadlineRenewalCount, 1);
   assert.deepEqual(
     server.messages.map((message) => message.method),
     ["initialize", "initialized", "thread/start", "turn/start", "turn/interrupt", "turn/start"]
@@ -108,6 +112,34 @@ test("interrupts the current turn and starts a replacement turn with new input",
     { type: "text", text: "merged follow-up" },
     { type: "localImage", path: "/tmp/follow-up.png", detail: null }
   ]);
+});
+
+test("renews the full turn deadline when a follow-up starts a replacement", async () => {
+  const server = createFakeAppServer();
+  let ready;
+  const readyPromise = new Promise((resolve) => { ready = resolve; });
+  const resultPromise = runCodexAppServerTurn({
+    prompt: "first",
+    timeoutMs: 300,
+    spawnProcess: server.spawn,
+    onReady: ready
+  });
+  const observedResult = resultPromise.then(
+    (value) => ({ value, error: null }),
+    (error) => ({ value: null, error })
+  );
+  const controls = await readyPromise;
+
+  await delay(200);
+  const restarted = await controls.restart("late merged follow-up");
+  await delay(200);
+  server.complete("completed inside the renewed window");
+
+  const outcome = await observedResult;
+  assert.equal(outcome.error, null);
+  assert.equal(outcome.value.finalResponse, "completed inside the renewed window");
+  assert.equal(outcome.value.deadlineRenewalCount, 1);
+  assert.equal(restarted.deadlineRenewalCount, 1);
 });
 
 test("starts the replacement when app-server reports that the old turn already became inactive", async () => {
@@ -125,7 +157,8 @@ test("starts the replacement when app-server reports that the old turn already b
   assert.deepEqual(restarted, {
     threadId: "thread-1",
     turnId: "turn-2",
-    interruptedTurnId: "turn-1"
+    interruptedTurnId: "turn-1",
+    deadlineRenewalCount: 1
   });
   assert.deepEqual(
     server.messages.map((message) => message.method),
@@ -180,6 +213,10 @@ test("resumes a persistent thread and falls back to a new one when it is stale",
     "full fallback context"
   );
 });
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function createFakeAppServer({ resume = "ok", interrupt = "ok" } = {}) {
   const messages = [];
