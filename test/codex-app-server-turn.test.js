@@ -110,6 +110,31 @@ test("interrupts the current turn and starts a replacement turn with new input",
   ]);
 });
 
+test("starts the replacement when app-server reports that the old turn already became inactive", async () => {
+  const server = createFakeAppServer({ interrupt: "inactive" });
+  let ready;
+  const readyPromise = new Promise((resolve) => { ready = resolve; });
+  const resultPromise = runCodexAppServerTurn({
+    prompt: "first",
+    timeoutMs: 5_000,
+    spawnProcess: server.spawn,
+    onReady: ready
+  });
+  const controls = await readyPromise;
+  const restarted = await controls.restart("new fused input");
+  assert.deepEqual(restarted, {
+    threadId: "thread-1",
+    turnId: "turn-2",
+    interruptedTurnId: "turn-1"
+  });
+  assert.deepEqual(
+    server.messages.map((message) => message.method),
+    ["initialize", "initialized", "thread/start", "turn/start", "turn/interrupt", "turn/start"]
+  );
+  server.complete("replacement after inactive race");
+  assert.equal((await resultPromise).finalResponse, "replacement after inactive race");
+});
+
 test("resumes a persistent thread and falls back to a new one when it is stale", async () => {
   const resumedServer = createFakeAppServer({ resume: "ok" });
   let resumedReady;
@@ -156,7 +181,7 @@ test("resumes a persistent thread and falls back to a new one when it is stale",
   );
 });
 
-function createFakeAppServer({ resume = "ok" } = {}) {
+function createFakeAppServer({ resume = "ok", interrupt = "ok" } = {}) {
   const messages = [];
   let child;
   let currentTurnId = null;
@@ -188,18 +213,22 @@ function createFakeAppServer({ resume = "ok" } = {}) {
           } else if (message.method === "turn/steer") {
             send({ id: message.id, result: { turnId: currentTurnId } });
           } else if (message.method === "turn/interrupt") {
-            send({ id: message.id, result: {} });
-            send({
-              method: "turn/completed",
-              params: {
-                threadId: "thread-1",
-                turn: {
-                  id: currentTurnId,
-                  status: "interrupted",
-                  items: []
+            if (interrupt === "inactive") {
+              send({ id: message.id, error: { code: -32000, message: "no active turn to interrupt" } });
+            } else {
+              send({ id: message.id, result: {} });
+              send({
+                method: "turn/completed",
+                params: {
+                  threadId: "thread-1",
+                  turn: {
+                    id: currentTurnId,
+                    status: "interrupted",
+                    items: []
+                  }
                 }
-              }
-            });
+              });
+            }
           }
         }
         callback();

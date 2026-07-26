@@ -561,6 +561,9 @@ export async function runQqInterestModelStructuredTask(options = {}) {
   const validate = typeof options.validate === "function"
     ? options.validate
     : (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+  const normalizeValue = typeof options.normalizeValue === "function"
+    ? options.normalizeValue
+    : (value) => value;
   const controller = new AbortController();
   let idleTimeout = null;
   let idleTimedOut = false;
@@ -630,7 +633,8 @@ export async function runQqInterestModelStructuredTask(options = {}) {
       const streamed = await readInterestModelCompletion(response, { onToken: resetIdleTimeout });
       const content = String(streamed.content || "").trim();
       const parsed = parseJsonObject(content);
-      if (!validate(parsed)) {
+      const normalized = normalizeValue(parsed);
+      if (!validate(normalized)) {
         if (attempt < 2) {
           formatRetryCount += 1;
           continue;
@@ -652,7 +656,8 @@ export async function runQqInterestModelStructuredTask(options = {}) {
         ok: true,
         provider,
         model: String(options.model || getDefaultInterestModel(provider)),
-        value: parsed,
+        value: normalized,
+        normalizedOutput: normalized !== parsed,
         raw: content.slice(0, 4000),
         finishReason: streamed.finishReason,
         durationMs: Date.now() - startedAt,
@@ -701,7 +706,8 @@ export async function judgeQqColdGroupTopicStart(options = {}) {
       "判断顺序：先看当前是否适合出现，再看 Bot 的长期兴趣是否让它产生主动探索/分享冲动，最后用连续未获回应和抑制系数降低打扰欲望。",
       "topic 不要求你给出题目；chatter 也不要求你写句子。你不能提供具体话题、搜索词、回复草稿或聊天风格，这些全部由主模型完成。",
       "冷群检查本身已经低频。不要因为没有现成话题就机械拒绝，也不要把每次检查都当成露面机会。",
-      "shouldStart 是最终开关；mode 必须与它一致：true 对应 topic/chatter，false 对应 silent。interest 表示这次主动出现的真实意愿。"
+      "shouldStart 是最终开关；mode 必须与它一致：true 对应 topic/chatter，false 对应 silent。interest 必须是 0 到 100 的数字，reason 必须是非空字符串。",
+      "完整示例：{\"shouldStart\":false,\"mode\":\"silent\",\"interest\":25,\"reason\":\"当前不适合主动出现\"}"
     ].join("\n"),
     payload: {
       scene: "cold_group_topic_start",
@@ -733,6 +739,7 @@ export async function judgeQqColdGroupTopicStart(options = {}) {
       required: ["shouldStart", "mode", "interest", "reason"],
       additionalProperties: false
     },
+    normalizeValue: normalizeColdGroupStartDecision,
     validate: (value) => typeof value?.shouldStart === "boolean"
       && ["silent", "topic", "chatter"].includes(value?.mode)
       && (value.shouldStart ? value.mode !== "silent" : value.mode === "silent")
@@ -763,7 +770,8 @@ export async function judgeQqPrivateProactiveStart(options = {}) {
       "结合双方最近对话、互动频率阶段、空闲时长、连续未获回应、频率先验和 Bot 的长期兴趣判断是否真的有联系冲动。",
       "frequencyPrior.probability 是期望频率，roll 是本轮自然波动值：通常 roll 越高于 probability 越应保守，但它只是拟人化节奏信号，不是替你做决定的硬门。",
       "只有能自然延续关系或确有一句想说时才批准；机械问候、催回复、追问为什么不回、为了完成任务而联系都应拒绝。",
-      "不能写具体私聊内容、开场句或风格建议；批准后由主模型结合完整上下文自行表达。shouldStart 是唯一开关。"
+      "不能写具体私聊内容、开场句或风格建议；批准后由主模型结合完整上下文自行表达。shouldStart 是唯一开关。",
+      "interest 必须是 0 到 100 的数字，reason 必须是非空字符串。完整示例：{\"shouldStart\":false,\"interest\":20,\"reason\":\"现在联系会显得机械\"}"
     ].join("\n"),
     payload: {
       scene: "private_proactive_start",
@@ -791,12 +799,66 @@ export async function judgeQqPrivateProactiveStart(options = {}) {
       required: ["shouldStart", "interest", "reason"],
       additionalProperties: false
     },
+    normalizeValue: normalizePrivateStartDecision,
     validate: (value) => typeof value?.shouldStart === "boolean"
       && Number.isFinite(Number(value?.interest))
       && Number(value.interest) >= 0
       && Number(value.interest) <= 100
       && typeof value?.reason === "string"
   });
+}
+
+function normalizeColdGroupStartDecision(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  if (typeof value.shouldStart !== "boolean") return value;
+  const mode = ["silent", "topic", "chatter"].includes(value.mode)
+    ? value.mode
+    : (value.shouldStart ? "topic" : "silent");
+  const interest = normalizeInterestScore(value.interest, value.shouldStart);
+  if (interest == null) return value;
+  const reason = normalizeDecisionReason(value.reason, value.shouldStart);
+  const normalized = { shouldStart: value.shouldStart, mode, interest, reason };
+  return sameDecisionShape(value, normalized) ? value : normalized;
+}
+
+function normalizePrivateStartDecision(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  if (typeof value.shouldStart !== "boolean") return value;
+  const interest = normalizeInterestScore(value.interest, value.shouldStart);
+  if (interest == null) return value;
+  const reason = normalizeDecisionReason(value.reason, value.shouldStart);
+  const normalized = { shouldStart: value.shouldStart, interest, reason };
+  return sameDecisionShape(value, normalized) ? value : normalized;
+}
+
+function normalizeInterestScore(value, shouldStart) {
+  if (typeof value === "boolean") return value ? (shouldStart ? 80 : 65) : 0;
+  const labels = {
+    low: 25,
+    medium: 50,
+    high: 80,
+    "低": 25,
+    "中": 50,
+    "高": 80
+  };
+  const label = String(value ?? "").trim().toLowerCase();
+  if (Object.hasOwn(labels, label)) return labels[label];
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return null;
+  const scaled = number > 0 && number < 1 ? number * 100 : number;
+  return Math.max(0, Math.min(100, Math.round(scaled * 1000) / 1000));
+}
+
+function normalizeDecisionReason(value, shouldStart) {
+  const reason = String(value || "").trim().slice(0, 600);
+  if (reason) return reason;
+  return shouldStart ? "兴趣模型选择现在主动出现。" : "兴趣模型选择本轮继续静默。";
+}
+
+function sameDecisionShape(value, normalized) {
+  const keys = Object.keys(normalized);
+  return Object.keys(value).length === keys.length
+    && keys.every((key) => value[key] === normalized[key]);
 }
 
 async function readInterestModelCompletion(response, { onToken } = {}) {

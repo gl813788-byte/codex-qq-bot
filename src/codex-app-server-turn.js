@@ -59,6 +59,7 @@ export function runCodexAppServerTurn({
     let forceKillTimer = null;
     const pendingRequests = new Map();
     const agentMessages = [];
+    const supersededTurnIds = new Set();
 
     const notifyExit = () => {
       if (exited) return;
@@ -158,6 +159,7 @@ export function runCodexAppServerTurn({
       const completedTurn = message.params?.turn;
       if (threadId && message.params?.threadId && message.params.threadId !== threadId) return;
       const completedTurnId = completedTurn?.id || null;
+      if (completedTurnId && supersededTurnIds.delete(completedTurnId)) return;
       if (pendingRestart?.turnId && completedTurnId === pendingRestart.turnId) {
         turnActive = false;
         const waiter = pendingRestart;
@@ -261,8 +263,15 @@ export function runCodexAppServerTurn({
       });
       let interruptionCompleted = false;
       try {
-        await request("turn/interrupt", { threadId, turnId: interruptedTurnId });
-        await completion;
+        try {
+          await request("turn/interrupt", { threadId, turnId: interruptedTurnId });
+          await completion;
+        } catch (error) {
+          if (!isNoActiveTurnProtocolError(error)) throw error;
+          supersededTurnIds.add(interruptedTurnId);
+          if (pendingRestart?.turnId === interruptedTurnId) pendingRestart = null;
+          turnActive = false;
+        }
         interruptionCompleted = true;
         if (settled || !threadId) throw createTurnInactiveError();
         agentMessages.length = 0;
@@ -449,6 +458,11 @@ function createProtocolError(message, protocolCode = null) {
   error.code = "CODEX_APP_SERVER_PROTOCOL";
   error.protocolCode = protocolCode;
   return error;
+}
+
+function isNoActiveTurnProtocolError(error) {
+  return error?.code === "CODEX_APP_SERVER_PROTOCOL"
+    && /no active turn|turn (?:is )?not active|already completed/i.test(String(error?.message || ""));
 }
 
 function createTurnInactiveError() {

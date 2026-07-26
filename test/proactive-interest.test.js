@@ -41,6 +41,59 @@ test("cold-group interest model decides only whether to start before the main mo
   assert.deepEqual(requestBody.response_format.json_schema.schema.required, ["shouldStart", "mode", "interest", "reason"]);
 });
 
+test("cold-group start safely repairs common DeepSeek JSON shape drift without a failed retry", async () => {
+  let fetchCount = 0;
+  const result = await judgeQqColdGroupTopicStart({
+    provider: "deepseek",
+    apiKey: "test-key",
+    baseUrl: "https://deepseek.test",
+    model: "deepseek-test",
+    timeoutMs: 1500,
+    fetch: async () => {
+      fetchCount += 1;
+      return new Response(JSON.stringify({
+        choices: [{
+          message: { content: JSON.stringify({ shouldStart: true, mode: "topic", interest: 0.85 }) },
+          finish_reason: "stop"
+        }]
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(fetchCount, 1);
+  assert.equal(result.formatRetryCount, 0);
+  assert.equal(result.normalizedOutput, true);
+  assert.deepEqual(result.value, {
+    shouldStart: true,
+    mode: "topic",
+    interest: 85,
+    reason: "兴趣模型选择现在主动出现。"
+  });
+});
+
+test("cold-group start converts boolean and label interest values while keeping the start switch strict", async () => {
+  const outputs = [
+    { shouldStart: true, mode: "topic", interest: true },
+    { shouldStart: false, mode: "silent", interest: "low" }
+  ];
+  for (const [index, output] of outputs.entries()) {
+    const result = await judgeQqColdGroupTopicStart({
+      provider: "deepseek",
+      apiKey: "test-key",
+      baseUrl: "https://deepseek.test",
+      model: "deepseek-test",
+      timeoutMs: 1500,
+      fetch: async () => new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify(output) }, finish_reason: "stop" }]
+      }), { status: 200, headers: { "content-type": "application/json" } })
+    });
+    assert.equal(result.ok, true, `output ${index} should be normalized`);
+    assert.equal(typeof result.value.interest, "number");
+    assert.equal(typeof result.value.reason, "string");
+  }
+});
+
 test("cold-group interest input compresses adjacent duplicate messages from two onward", async () => {
   let requestBody = null;
   await judgeQqColdGroupTopicStart({

@@ -29,6 +29,7 @@ test("creates isolated application state from normalized configuration", () => {
   assert.equal(first.qq.codexSession.settings.defaultMode, "auto");
   assert.equal(Object.getPrototypeOf(first.qq.codexSession.settings.scopes), null);
   assert.equal(Object.getPrototypeOf(first.qq.codexSession.store.threads), null);
+  assert.equal(Object.getPrototypeOf(first.qq.memory.deliveryFailures), null);
   assert.equal(Object.getPrototypeOf(first.qq.memory.shortTermNotes), null);
   assert.equal(first.qq.knowledgeBase.version, 1);
   assert.deepEqual(first.qq.knowledgeBase.entries, []);
@@ -41,9 +42,11 @@ test("creates isolated application state from normalized configuration", () => {
 
   first.qq.allowedGroups.push("123456");
   first.qq.memory.entries.group = ["message"];
+  first.qq.memory.deliveryFailures.group = ["failed"];
   first.qq.knowledgeBase.entries.push({ title: "测试" });
   assert.deepEqual(second.qq.allowedGroups, []);
   assert.equal(second.qq.memory.entries.group, undefined);
+  assert.equal(second.qq.memory.deliveryFailures.group, undefined);
   assert.deepEqual(second.qq.knowledgeBase.entries, []);
   assert.equal(Object.getPrototypeOf(first.qq.memory.entries), null);
 });

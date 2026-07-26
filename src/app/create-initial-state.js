@@ -78,6 +78,7 @@ export function createInitialState({
         perGroupLimit: config.qqMemoryLimit,
         groupRecentLimit: config.qqGroupMemoryLimit,
         entries: createRecord(),
+        deliveryFailures: createRecord(),
         recentMessages: createRecord(),
         shortTermNotes: createRecord()
       },

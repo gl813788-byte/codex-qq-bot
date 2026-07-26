@@ -5,9 +5,19 @@ export async function plugin_init(ctx) {
       ok: true,
       status: "ok",
       plugin: ctx.pluginName,
-      version: 4,
-      capabilities: ["friend-verification", "friend-preflight", "friend-api-signature-adapter", "group-join-verification"],
+      version: 7,
+      capabilities: [
+        "friend-verification",
+        "friend-preflight",
+        "friend-modern-api",
+        "friend-api-signature-adapter",
+        "group-join-verification",
+        "group-api-signature-adapter"
+      ],
       native: {
+        getAddBuddyServiceAvailable: typeof ctx.core.context.session.getAddBuddyService === "function",
+        getBuddySettingArity: methodArity(getAddBuddyService(ctx), "getBuddySetting"),
+        addBuddyArity: methodArity(getAddBuddyService(ctx), "addBuddy"),
         reqToAddFriendsArity: methodArity(ctx.core.context.session.getBuddyService(), "reqToAddFriends"),
         reqToJoinGroupArity: methodArity(ctx.core.context.session.getGroupService(), "reqToJoinGroup"),
         joinGroupArity: methodArity(ctx.core.context.session.getGroupService(), "joinGroup")
@@ -22,15 +32,18 @@ export async function plugin_init(ctx) {
 
     try {
       const buddyService = ctx.core.context.session.getBuddyService();
-      if (!buddyService || typeof buddyService.reqToAddFriends !== "function") {
-        return res.status(501).json({ ok: false, error: "reqToAddFriends_unavailable" });
+      const addBuddyService = getAddBuddyService(ctx);
+      if (typeof addBuddyService?.addBuddy !== "function"
+        && typeof buddyService?.reqToAddFriends !== "function") {
+        return res.status(501).json({ ok: false, error: "add_friend_unavailable" });
       }
-      const inspection = await inspectFriendTarget(ctx, buddyService, targetId);
+      const inspection = await inspectFriendTarget(ctx, buddyService, targetId, addBuddyService);
       return res.json({
         ok: true,
         status: inspection.alreadyFriend ? "already_friend" : "ready",
         target_id: targetId,
         uid_available: Boolean(inspection.uid),
+        inspection_api: inspection.requirements.api,
         verification_setting: inspection.requirements.setting ?? null,
         verification_mode: inspection.requirements.setting == null
           ? "未知（提交时由 QQ 决定）"
@@ -55,10 +68,12 @@ export async function plugin_init(ctx) {
 
     try {
       const buddyService = ctx.core.context.session.getBuddyService();
-      if (!buddyService || typeof buddyService.reqToAddFriends !== "function") {
-        return res.status(501).json({ ok: false, error: "reqToAddFriends_unavailable" });
+      const addBuddyService = getAddBuddyService(ctx);
+      if (typeof addBuddyService?.addBuddy !== "function"
+        && typeof buddyService?.reqToAddFriends !== "function") {
+        return res.status(501).json({ ok: false, error: "add_friend_unavailable" });
       }
-      const inspection = await inspectFriendTarget(ctx, buddyService, targetId);
+      const inspection = await inspectFriendTarget(ctx, buddyService, targetId, addBuddyService);
       if (inspection.alreadyFriend) {
         return res.json({ ok: true, status: "already_friend", target_id: targetId });
       }
@@ -104,7 +119,7 @@ export async function plugin_init(ctx) {
         randStr: "",
         friendPermissionList: []
       };
-      const submission = await submitFriendRequest(buddyService, request);
+      const submission = await submitFriendRequest(addBuddyService, buddyService, request);
       const failure = nativeFailure(submission.result);
       if (failure) return sendNativeFailure(res, failure);
       const pendingApproval = addFriendSetting === 1 || addFriendSetting === 3;
@@ -181,11 +196,17 @@ export async function plugin_init(ctx) {
         token: "",
         noVerifyAuth: ""
       };
-      const result = await invokeGroupJoin(groupService, joinRequest, { requiresApproval: groupOption === 2 || groupOption === 5 });
-      const failure = nativeFailure(result);
+      const submission = await invokeGroupJoin(groupService, joinRequest, { requiresApproval: groupOption === 2 || groupOption === 5 });
+      const failure = nativeFailure(submission.result);
       if (failure) return sendNativeFailure(res, failure);
       const pendingApproval = groupOption === 2 || groupOption === 5;
-      ctx.logger.info("Submitted QQ group join request", { targetId, groupOption, pendingApproval });
+      ctx.logger.info("Submitted QQ group join request", {
+        targetId,
+        groupOption,
+        pendingApproval,
+        nativeApiShape: submission.apiShape,
+        nativeApiArity: submission.apiArity
+      });
       return res.json({
         ok: true,
         status: pendingApproval ? "pending_approval" : "submitted",
@@ -193,7 +214,8 @@ export async function plugin_init(ctx) {
         group_name: String(groupInfo.groupName || ""),
         group_option: groupOption,
         question,
-        verification_mode: groupVerificationMode(groupOption)
+        verification_mode: groupVerificationMode(groupOption),
+        native_api_shape: submission.apiShape
       });
     } catch (error) {
       ctx.logger.error("Unable to submit QQ group join request", error);
@@ -243,7 +265,7 @@ async function readFriendRequirements(buddyService, targetId, ctx) {
   return { setting: undefined, questions: [] };
 }
 
-async function inspectFriendTarget(ctx, buddyService, targetId) {
+async function inspectFriendTarget(ctx, buddyService, targetId, addBuddyService) {
   let uid = "";
   try {
     uid = String(await ctx.core.apis.UserApi.getUidByUinV2(targetId) || "");
@@ -271,8 +293,87 @@ async function inspectFriendTarget(ctx, buddyService, targetId) {
   return {
     uid,
     alreadyFriend,
-    requirements: await readFriendRequirements(buddyService, targetId, ctx)
+    requirements: await readFriendRequirementsWithModernFallback(
+      addBuddyService,
+      buddyService,
+      targetId,
+      uid,
+      ctx
+    )
   };
+}
+
+function getAddBuddyService(ctx) {
+  if (typeof ctx?.core?.context?.session?.getAddBuddyService !== "function") return null;
+  try {
+    return ctx.core.context.session.getAddBuddyService();
+  } catch {
+    return null;
+  }
+}
+
+async function readFriendRequirementsWithModernFallback(addBuddyService, buddyService, targetId, uid, ctx) {
+  if (typeof addBuddyService?.getBuddySetting === "function") {
+    try {
+      const targetInfo = friendAccountInfo(targetId, uid);
+      const result = await Promise.resolve(addBuddyService.getBuddySetting(
+        "CodexRemoteContact",
+        {
+          targetInfo,
+          sourceSubId: 0
+        },
+        []
+      ));
+      const candidate = unwrapModernFriendPayload(result);
+      const failure = nativeFailure(result?.result) || nativeFailure(candidate);
+      if (failure) throw new Error(`modern_friend_preflight_failed:${failure.code}:${failure.message}`);
+      const setting = normalizeOptionalInteger(
+        candidate?.querySetting ?? candidate?.addFriendSetting ?? candidate?.setting,
+        0,
+        99
+      );
+      return {
+        api: "add-buddy-service",
+        setting,
+        questions: normalizeStringList(
+          candidate?.question ?? candidate?.questions,
+          5,
+          120
+        )
+      };
+    } catch (error) {
+      ctx.logger.info("Unable to inspect QQ friend setting through AddBuddyService; falling back", {
+        targetId,
+        error: String(error?.message || error)
+      });
+    }
+  }
+  return {
+    api: "buddy-service",
+    ...await readFriendRequirements(buddyService, targetId, ctx)
+  };
+}
+
+function friendAccountInfo(targetId, uid) {
+  return {
+    uid: String(uid || ""),
+    uin: Number(targetId),
+    phoneNum: ""
+  };
+}
+
+function unwrapModernFriendPayload(value) {
+  const candidates = [
+    value?.[1],
+    value?.[0]?.rsp,
+    value?.rsp,
+    value?.response,
+    value?.data?.rsp,
+    value?.data,
+    value?.setting,
+    value
+  ];
+  return candidates.find((item) => item && typeof item === "object") || {};
 }
 
 function unwrapGroupInfo(value, targetId) {
@@ -290,16 +391,44 @@ function unwrapGroupInfo(value, targetId) {
 
 async function invokeGroupJoin(groupService, request, { requiresApproval }) {
   if (typeof groupService.reqToJoinGroup === "function") {
-    return groupService.reqToJoinGroup.length >= 2
-      ? Promise.resolve(groupService.reqToJoinGroup(String(request.groupCode), request))
-      : Promise.resolve(groupService.reqToJoinGroup(request));
+    const apiArity = methodArity(groupService, "reqToJoinGroup");
+    if (apiArity < 2) {
+      try {
+        return {
+          result: await Promise.resolve(groupService.reqToJoinGroup(request)),
+          apiShape: "request-object",
+          apiArity
+        };
+      } catch (error) {
+        if (!isNativeArgumentCountError(error, 2)) throw error;
+      }
+    }
+    return {
+      result: await Promise.resolve(groupService.reqToJoinGroup(String(request.groupCode), request)),
+      apiShape: "group-code-request",
+      apiArity
+    };
   }
   if (!requiresApproval && typeof groupService.joinGroup === "function") {
-    return Promise.resolve(groupService.joinGroup(request));
+    return {
+      result: await Promise.resolve(groupService.joinGroup(request)),
+      apiShape: "join-request-object",
+      apiArity: methodArity(groupService, "joinGroup")
+    };
   }
   const error = new Error("reqToJoinGroup_unavailable");
   error.code = "unsupported";
   throw error;
+}
+
+function isNativeArgumentCountError(error, expectedCount) {
+  const message = String(error?.message || error || "");
+  const expected = Number(expectedCount);
+  if (!Number.isInteger(expected) || expected < 0) return false;
+  const needsMatch = message.match(/\bneeds?\s+([0-9]+)\s+arguments?\b/i);
+  if (needsMatch && Number(needsMatch[1]) === expected) return true;
+  const assertionMatch = message.match(/\bargc\s*==\s*([0-9]+)\b/i);
+  return Boolean(assertionMatch && Number(assertionMatch[1]) === expected);
 }
 
 function nativeFailure(result) {
@@ -380,19 +509,53 @@ function methodArity(target, method) {
   return typeof target?.[method] === "function" ? target[method].length : null;
 }
 
-async function submitFriendRequest(buddyService, request) {
-  const apiArity = methodArity(buddyService, "reqToAddFriends");
-  if (apiArity === 1) {
+async function submitFriendRequest(addBuddyService, buddyService, request) {
+  if (typeof addBuddyService?.addBuddy === "function") {
+    const verificationText = request.addFriendSetting === 2 || request.addFriendSetting === 3
+      ? request.answer
+      : request.verifyInfo;
+    const modernRequest = {
+      targetInfo: friendAccountInfo(request.buddyUin, request.buddyUid),
+      sourceId: request.sourceID,
+      sourceSubId: request.sourceSubID,
+      name1: verificationText,
+      addFriendSetting: request.addFriendSetting,
+      srcFlag: 0,
+      srcDescription: "",
+      friendSrcDesc: "",
+      isContactFriend: false,
+      bSupportSecureTips: true,
+      bSupportAddRelief: true,
+      permissionInfo: 0,
+      myFriendGroupId: request.defaultCatgory
+    };
     return {
-      result: await Promise.resolve(buddyService.reqToAddFriends(request)),
-      apiShape: "request-object",
-      apiArity
+      result: await Promise.resolve(addBuddyService.addBuddy(
+        "CodexRemoteContact",
+        modernRequest,
+        []
+      )),
+      apiShape: "add-buddy-service",
+      apiArity: methodArity(addBuddyService, "addBuddy")
     };
   }
 
-  // NapCat v4.18.9 exposes reqToAddFriends(uin, message). Native bindings may
-  // report an arity of 0, so only an explicit one-argument method selects the
-  // newer request-object shape.
+  const apiArity = methodArity(buddyService, "reqToAddFriends");
+  if (apiArity < 2) {
+    try {
+      return {
+        result: await Promise.resolve(buddyService.reqToAddFriends(request)),
+        apiShape: "request-object",
+        apiArity
+      };
+    } catch (error) {
+      if (!isNativeArgumentCountError(error, 2)) throw error;
+    }
+  }
+
+  // Native wrappers may hide their arity as 0. NapCat 4.18.13 currently
+  // requires one request object; retry the older two-argument adapter only when
+  // the native layer explicitly asserts that it needs two arguments.
   const verificationText = request.addFriendSetting === 2 || request.addFriendSetting === 3
     ? request.answer
     : request.verifyInfo;

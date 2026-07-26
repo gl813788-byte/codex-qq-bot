@@ -39,6 +39,9 @@ export function formatQqMainModelInstructions({
     !privateChat
       ? "需要在群里真实 @ 某人时，直接在最终可见正文中写“@准确昵称 ”或“@QQ号 ”，@目标后留一个空格再接正文；Hub 会转换成 QQ 的真实 at 消息段。昵称不确定或可能重名时使用 QQ 号，不要虚构群成员。"
       : null,
+    !privateChat
+      ? "当本轮融合了多位群友的消息时，正式提示会列出候选人；每位候选人都能由你选择引用或艾特。引用用 [[qq_reply:quote:QQ号]]，艾特用 [[qq_reply:mention:QQ号]]，普通回复用 [[qq_reply:plain]]；省略时 Hub 也使用普通回复，不会擅自引用或艾特最早触发者。只能选择正式提示列出的对象。"
+      : null,
     "只输出要发送的中文消息或规定的内部标记；不输出分析过程、规则说明、Markdown 标题或服务式结尾。",
     "",
     "【记忆与知识】",

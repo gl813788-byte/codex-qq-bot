@@ -191,6 +191,17 @@ import {
   chooseQqReplyAddressing,
   getQqRelationshipInterestPlan
 } from "./qq-relationship-interest.js";
+import {
+  collectQqReplyTargetCandidates,
+  extractQqReplyTargetDirective,
+  formatQqReplyTargetInstruction,
+  resolveQqReplyTarget
+} from "./qq-reply-targeting.js";
+import {
+  buildQqDeliveryReceipt,
+  createQqDeliveryFailureMemoryEntry,
+  formatQqDeliveryFailureContext
+} from "./qq-delivery-receipt.js";
 import { createRuntimePaths } from "./runtime-paths.js";
 import { createScopedReplyScheduler } from "./scoped-reply-scheduler.js";
 import {
@@ -243,6 +254,7 @@ import { createCoalescingWriter } from "./coalescing-writer.js";
 import {
   collectQqContextImages,
   getQqGroupRecentContextLimit,
+  qqContextImageMaxAgeMs,
   snapshotQqContextImages
 } from "./qq-enhancer/context-images.js";
 import {
@@ -746,6 +758,9 @@ async function loadQqMemory() {
     if (body && typeof body === "object" && body.entries && typeof body.entries === "object") {
       state.qq.memory.entries = createSafeRecord(body.entries);
     }
+    if (body && typeof body === "object" && body.deliveryFailures && typeof body.deliveryFailures === "object") {
+      state.qq.memory.deliveryFailures = createSafeRecord(body.deliveryFailures);
+    }
     if (body && typeof body === "object" && body.recentMessages && typeof body.recentMessages === "object") {
       state.qq.memory.recentMessages = createSafeRecord(body.recentMessages);
     }
@@ -756,7 +771,7 @@ async function loadQqMemory() {
       });
     }
     state.qq.periodicRuntime = normalizeQqPeriodicRuntime(body?.periodicRuntime);
-    const shouldPersistMigration = Number(body.version || 0) < 4 || !body.periodicRuntime;
+    const shouldPersistMigration = Number(body.version || 0) < 5 || !body.periodicRuntime;
     logger.info("QQ short-term memory loaded", {
       source: "startup",
       outcome: "loaded",
@@ -1560,13 +1575,16 @@ function consumeQqPendingReplyEvents(scopeId, entries, generation) {
 
 function getSteerableQqGeneration(scopeId) {
   const generation = state.qq.activeGenerations[String(scopeId || "")];
-  return generation && typeof generation.steer === "function" ? generation : null;
+  return generation && typeof generation.restart === "function" ? generation : null;
 }
 
 async function buildQqPendingSteeringInput(entries, generation) {
   const aggregate = buildAggregatedQqEvent(entries);
   if (!aggregate) return [];
   const parentEvent = generation?.qqEvent;
+  const replyTargetCandidates = collectQqReplyTargetCandidates(parentEvent || aggregate, entries);
+  const replyTargetInstruction = formatQqReplyTargetInstruction(replyTargetCandidates);
+  if (parentEvent) parentEvent.qqReplyTargetCandidates = replyTargetCandidates;
   const interleavedContext = parentEvent
     ? buildQqPersistentContextDelta(aggregate, {
       after: parentEvent.qqCodexContextAt,
@@ -1596,7 +1614,8 @@ async function buildQqPendingSteeringInput(entries, generation) {
     type: "text",
     text: [
       `你处理当前 QQ 回复期间又收到了 ${aggregate.queuedMessageCount || entries.length} 条新消息。Hub 已沿用连续消息合并规则，把相邻重复内容压成一条并标出总次数。`,
-      "这些是当前用户输入的追加上下文，不是新的独立任务。优先把它们补进当前思考；如果 Hub 因无法补入而截断了上一段生成，就从这里作为新的输入段继续，并放弃未发送的旧草稿。最终只给出一份统一的 QQ 回复，不要先发旧答案，也不要逐条机械回复“消息一/消息二”。",
+      "5 秒静默窗口已经结束，Hub 会截断上一段生成并从这里开启替代轮次。放弃未发送的旧草稿，把这些追加消息融合成一份新的统一 QQ 回复；不要先发旧答案，也不要逐条机械回复“消息一/消息二”。",
+      replyTargetInstruction || null,
       "",
       aggregate.text,
       interleavedContext.text ? "" : null,
@@ -1636,7 +1655,7 @@ function logQqReplySteeringResult(result) {
     }
     const restarted = result.deliveryMode === "restarted";
     logger.info(restarted
-      ? "Queued QQ messages restarted after steering was unavailable"
+      ? "Queued QQ messages restarted after follow-up quiet window"
       : "Queued QQ messages steered into active turn", {
       outcome: restarted ? "restarted" : "steered",
       action: restarted ? "fuse-and-restart" : "fuse-and-steer",
@@ -1646,7 +1665,6 @@ function logQqReplySteeringResult(result) {
       threadId: result.threadId,
       turnId: result.turnId,
       interruptedTurnId: result.interruptedTurnId || null,
-      steerError: restarted ? result.steerError || null : null,
       queuedCount: result.queuedCount,
       consumedCount: result.consumedCount,
       triggerMessageCount: generation?.qqLastSteeringFusion?.triggerMessageCount || result.queuedCount,
@@ -1659,10 +1677,10 @@ function logQqReplySteeringResult(result) {
     }, "qq", generation?.qqEvent ? qqLogContext(generation.qqEvent, { spanId: result.generationId }) : {});
     return;
   }
-  if (["no_steerable_generation", "no_pending_entries", "closed"].includes(result?.reason)) return;
-  logger.debug("Queued QQ messages kept for follow-up after steering was unavailable", {
+  if (["no_restartable_generation", "no_pending_entries", "closed"].includes(result?.reason)) return;
+  logger.debug("Queued QQ messages kept after replacement restart failed", {
     outcome: "kept",
-    action: "fuse-and-steer",
+    action: "fuse-and-restart",
     source: "qq-follow-up",
     scopeId: result?.scopeId || null,
     generationId: result?.generationId || null,
@@ -1771,6 +1789,7 @@ function recordQqEvent(record) {
 function pruneQqStateScopes() {
   const scopeIds = new Set([
     ...Object.keys(state.qq.memory.entries),
+    ...Object.keys(state.qq.memory.deliveryFailures),
     ...Object.keys(state.qq.memory.recentMessages),
     ...Object.keys(state.qq.memory.shortTermNotes),
     ...Object.keys(state.qq.personas.groups),
@@ -1792,6 +1811,7 @@ function pruneQqStateScopes() {
     const { scopeId } = candidates.shift();
     scopeIds.delete(scopeId);
     delete state.qq.memory.entries[scopeId];
+    delete state.qq.memory.deliveryFailures[scopeId];
     delete state.qq.memory.recentMessages[scopeId];
     delete state.qq.memory.shortTermNotes[scopeId];
     delete state.qq.pendingReplies[scopeId];
@@ -1814,12 +1834,13 @@ function pruneQqStateScopes() {
 function getQqScopeUpdatedAt(scopeId) {
   const recentAt = state.qq.memory.recentMessages[scopeId]?.at(-1)?.at;
   const exchangeAt = state.qq.memory.entries[scopeId]?.at(-1)?.at;
+  const deliveryFailureAt = state.qq.memory.deliveryFailures[scopeId]?.at(-1)?.at;
   const shortTermAt = state.qq.memory.shortTermNotes[scopeId]?.at(-1)?.updatedAt;
   const memoryRecord = scopeId.startsWith("private:")
     ? state.qq.conversationMemory.privateChats?.[scopeId.slice("private:".length)]
     : state.qq.conversationMemory.groups?.[scopeId];
   const persona = state.qq.personas.groups[scopeId];
-  const values = [recentAt, exchangeAt, shortTermAt, memoryRecord?.updatedAt, persona?.updatedAt]
+  const values = [recentAt, exchangeAt, deliveryFailureAt, shortTermAt, memoryRecord?.updatedAt, persona?.updatedAt]
     .map((value) => Date.parse(value || ""))
     .filter(Number.isFinite);
   return values.length > 0 ? Math.max(...values) : 0;
@@ -1883,11 +1904,12 @@ const qqMemoryWriter = createCoalescingWriter(async () => {
   try {
     await serializeFileOperation(qqMemoryPath, async () => {
       await writeJsonAtomically(qqMemoryPath, {
-        version: 4,
+        version: 5,
         updatedAt: new Date().toISOString(),
         perGroupLimit: state.qq.memory.perGroupLimit,
         groupRecentLimit: state.qq.memory.groupRecentLimit,
         entries: state.qq.memory.entries,
+        deliveryFailures: state.qq.memory.deliveryFailures,
         recentMessages: state.qq.memory.recentMessages,
         shortTermNotes: state.qq.memory.shortTermNotes,
         periodicRuntime: normalizeQqPeriodicRuntime(state.qq.periodicRuntime)
@@ -4462,7 +4484,7 @@ function logQqColdGroupInterestOutcome(record) {
     sendStatus: record.send?.status || record.send?.results?.[0]?.status || null,
     addressingMode: event.qqAddressing?.mode || null,
     addressingProbability: event.qqAddressing?.probability ?? null,
-    error: record.error || record.send?.error || null,
+    error: record.error || record.send?.error || record.deliveryReceipt?.error || null,
     generationDurationMs: record.timings?.generationDurationMs || 0,
     sendDurationMs: record.timings?.sendDurationMs || 0,
     totalDurationMs: Object.values(record.timings || {}).reduce((sum, value) => sum + (Number(value) || 0), 0)
@@ -5272,6 +5294,7 @@ function clearQqContextForEvent(event, { silent = false, source = "new-dialog", 
     qqReplySteering.cancel(scopeId);
     delete state.qq.pendingReplies[scopeId];
     delete state.qq.memory.entries[scopeId];
+    delete state.qq.memory.deliveryFailures[scopeId];
     delete state.qq.memory.recentMessages[scopeId];
     delete state.qq.memory.shortTermNotes[scopeId];
     if (state.qq.codexSession.store.threads?.[scopeId]) {
@@ -5294,6 +5317,7 @@ function clearQqContextForEvent(event, { silent = false, source = "new-dialog", 
     return silent ? "" : "已开启新对话。";
   }
   state.qq.memory.entries = createSafeRecord();
+  state.qq.memory.deliveryFailures = createSafeRecord();
   state.qq.memory.recentMessages = createSafeRecord();
   state.qq.memory.shortTermNotes = createSafeRecord();
   state.qq.pendingReplies = createSafeRecord();
@@ -5914,6 +5938,15 @@ async function handleQqRequest(entry, { approve, note = "", handledBy = "bot", a
   if (entry.requestType === "friend" && entry.subType === "doubt" && !approve) {
     const error = "QQ 当前只提供同意可疑好友申请的动作，无法可靠拒绝；申请仍保持待处理。";
     const updated = await qqRequestStore.update(entry.id, { lastError: error, handledBy, autoHandled });
+    logger.warn("QQ request action rejected locally", {
+      requestId: entry.id,
+      requestType: entry.requestType,
+      subType: entry.subType,
+      approve,
+      autoHandled,
+      handledBy,
+      error
+    }, "onebot");
     return { ok: false, entry: updated || entry, error, reply: error };
   }
   const endpoint = entry.requestType === "friend"
@@ -5928,6 +5961,19 @@ async function handleQqRequest(entry, { approve, note = "", handledBy = "bot", a
   if (!result.ok) {
     const error = result.error || result.body?.message || result.body?.wording || "未知错误";
     const updated = await qqRequestStore.update(entry.id, { lastError: error, handledBy, autoHandled });
+    logger.warn("QQ request action failed", {
+      requestId: entry.id,
+      requestType: entry.requestType,
+      subType: entry.subType,
+      endpoint,
+      approve,
+      autoHandled,
+      handledBy,
+      httpStatus: result.status ?? null,
+      oneBotStatus: result.body?.status ?? null,
+      oneBotRetCode: result.body?.retcode ?? null,
+      error
+    }, "onebot");
     return { ok: false, entry: updated || entry, error, reply: formatOneBotActionFailure(approve ? "同意申请" : "拒绝申请", result) };
   }
   const status = approve ? "approved" : "rejected";
@@ -5938,6 +5984,18 @@ async function handleQqRequest(entry, { approve, note = "", handledBy = "bot", a
     autoHandled,
     lastError: ""
   });
+  logger.success("QQ request action completed", {
+    requestId: entry.id,
+    requestType: entry.requestType,
+    subType: entry.subType,
+    endpoint,
+    approve,
+    autoHandled,
+    handledBy,
+    httpStatus: result.status ?? null,
+    oneBotStatus: result.body?.status ?? null,
+    oneBotRetCode: result.body?.retcode ?? null
+  }, "onebot");
   return {
     ok: true,
     entry: updated || { ...entry, status },
@@ -5955,11 +6013,17 @@ async function executeQqActiveAddCommand(command, event) {
     return {
       ok: false,
       command,
-      reply: `NapCat 4.18.9 的公开 OneBot 接口没有“主动加${kind === "friend" ? "好友" : "群"}”动作；当前不会伪报成功。配置 CODEX_REMOTE_CONTACT_QQ_SOCIAL_API_BASE 扩展桥后即可由 Bot 调用。`
+      reply: `NapCat 的公开 OneBot 接口没有“主动加${kind === "friend" ? "好友" : "群"}”动作；当前不会伪报成功。配置 CODEX_REMOTE_CONTACT_QQ_SOCIAL_API_BASE 扩展桥后即可由 Bot 调用。`
     };
   }
+  const endpoint = kind === "friend" ? "add-friend" : "join-group";
+  logger.info("QQ active social request started", {
+    kind,
+    targetId,
+    endpoint
+  }, "qq", qqLogContext(event));
   try {
-    const response = await fetch(`${qqSocialExtensionBase}/${kind === "friend" ? "add-friend" : "join-group"}`, {
+    const response = await fetch(`${qqSocialExtensionBase}/${endpoint}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(buildQqActiveAddPayload(parsed))
@@ -5969,6 +6033,23 @@ async function executeQqActiveAddCommand(command, event) {
     const alreadyFriend = kind === "friend" && result.status === "already_friend";
     const alreadyMember = kind === "group" && result.status === "already_member";
     const pendingApproval = result.status === "pending_approval";
+    const logDetails = {
+      kind,
+      targetId,
+      endpoint,
+      httpStatus: response.status,
+      status: result.status ?? null,
+      error: result.error ?? null,
+      nativeCode: result.native_code ?? null,
+      nativeMessage: result.native_message ?? null,
+      nativeApiShape: result.native_api_shape ?? null,
+      verificationMode: result.verification_mode ?? null
+    };
+    if (ok) {
+      logger.success("QQ active social request completed", logDetails, "qq", qqLogContext(event));
+    } else {
+      logger.warn("QQ active social request failed", logDetails, "qq", qqLogContext(event));
+    }
     return {
       ok,
       command,
@@ -5983,6 +6064,12 @@ async function executeQqActiveAddCommand(command, event) {
         : formatQqActiveAddFailure(kind, targetId, result, response.status)
     };
   } catch (error) {
+    logger.warn("QQ active social request failed", {
+      kind,
+      targetId,
+      endpoint,
+      error: error.message
+    }, "qq", qqLogContext(event));
     return { ok: false, command, reply: `发起申请失败：${error.message}` };
   }
 }
@@ -7595,6 +7682,10 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     ? 1
     : getQqMessageConsecutiveRepeatCount(state.qq.memory.recentMessages[scopeId] || [], currentMessageId);
   const currentMessageText = appendQqConsecutiveRepeatSuffix(text, currentMessageRepeatCount);
+  event.qqReplyTargetCandidates = collectQqReplyTargetCandidates(event);
+  const qqReplyTargetInstruction = isQqPrivateEvent(event)
+    ? ""
+    : formatQqReplyTargetInstruction(event.qqReplyTargetCandidates);
   const id = crypto.randomUUID();
   const quotedContext = formatQuotedContext(event);
   let memoryContext = formatMemoryContext(event, { expandLevel: 0 });
@@ -7767,6 +7858,8 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       "",
       intentContext,
       intentContext ? "" : null,
+      (!persistentResume || includeCurrentBatch) ? qqReplyTargetInstruction : null,
+      (!persistentResume || includeCurrentBatch) && qqReplyTargetInstruction ? "" : null,
       !persistentResume ? humanBehaviorContext : null,
       !persistentResume && humanBehaviorContext ? "" : null,
       proactiveExecutionContext,
@@ -8922,7 +9015,10 @@ function getQqModelImageInputs(event, text, { contextImages = [] } = {}) {
 function getQqRecentContextImageInputs(event) {
   if (!event.groupId) return [];
   if (event.proactiveDecision?.replyContext?.length) {
-    return collectQqContextImages(event.proactiveDecision.replyContext, { limit: 4 });
+    return collectQqContextImages(event.proactiveDecision.replyContext, {
+      limit: 4,
+      maxAgeMs: qqContextImageMaxAgeMs
+    });
   }
   if (!isExplicitQqAtEvent(event) && !event.isReplyToSelf && !event.replyContext?.isSelf) return [];
   const currentMessageId = event.raw?.message_id == null ? "" : String(event.raw.message_id);
@@ -8930,7 +9026,8 @@ function getQqRecentContextImageInputs(event) {
     .filter((entry) => entry.contextLayer !== "related");
   return collectQqContextImages(recentEntries, {
     limit: 4,
-    excludeMessageId: currentMessageId
+    excludeMessageId: currentMessageId,
+    maxAgeMs: qqContextImageMaxAgeMs
   });
 }
 
@@ -9019,8 +9116,9 @@ function formatMemoryContext(event, { expandLevel = 0 } = {}) {
   if (!state.qq.memory.enabled || !scopeId) return "";
   const participationEntries = state.qq.memory.entries[scopeId] || [];
   const recentParticipation = participationEntries.slice(-Math.min(expandLevel > 0 ? 5 : 3, state.qq.memory.perGroupLimit));
+  const recentDeliveryFailures = state.qq.memory.deliveryFailures[scopeId] || [];
   const conversationMessages = selectConversationMessagesForContext(event, { expandLevel });
-  if (recentParticipation.length === 0 && conversationMessages.length === 0) return "";
+  if (recentParticipation.length === 0 && conversationMessages.length === 0 && recentDeliveryFailures.length === 0) return "";
   const scopeLabel = getQqMemoryScopeLabel(event);
   const parts = [
     isQqPrivateEvent(event) ? "QQ 私聊对话上下文：" : "QQ 群聊对话上下文：",
@@ -9053,6 +9151,11 @@ function formatMemoryContext(event, { expandLevel = 0 } = {}) {
       );
     }
   }
+  const deliveryFailureContext = formatQqDeliveryFailureContext(
+    recentDeliveryFailures,
+    { assistantName }
+  );
+  if (deliveryFailureContext) parts.push("", deliveryFailureContext);
   const usefulParticipation = recentParticipation.filter((entry) => !isTemplatePollutedQqReply(entry.reply || ""));
   if (usefulParticipation.length > 0) {
     parts.push(
@@ -9244,6 +9347,27 @@ async function rememberQqExchange(event, reply) {
     adaptiveChanged ? saveQqPersonas() : Promise.resolve()
   ]);
   maybeScheduleQqSelfPersonaRefresh();
+}
+
+async function rememberQqDeliveryFailure(event, receipt) {
+  const scopeId = getQqMemoryScopeId(event);
+  if (!state.qq.memory.enabled || !scopeId) return false;
+  const entry = createQqDeliveryFailureMemoryEntry(event, receipt);
+  if (!entry) return false;
+  const current = state.qq.memory.deliveryFailures[scopeId] || [];
+  state.qq.memory.deliveryFailures[scopeId] = [...current, entry].slice(-3);
+  await saveQqMemory();
+  logger.warn("QQ reply delivery failure remembered for the next model turn", {
+    outcome: "remembered",
+    scopeId,
+    groupId: event.groupId || null,
+    senderId: event.senderId || null,
+    attemptedBubbleCount: entry.attemptedBubbleCount,
+    deliveredBubbleCount: entry.deliveredBubbleCount,
+    failedBubbleCount: entry.failedBubbleCount,
+    error: entry.deliveryError || null
+  }, "qq", qqLogContext(event));
+  return true;
 }
 
 function rememberQqConversationAssistantMessage(scopeId, reply, {
@@ -9478,7 +9602,12 @@ async function processQqReplyEvent(event, options = {}) {
           assertQqReplyScopeActive(replyScope);
         }
       }
-      if (reply) reply = normalizeVisibleQqReply(reply, event);
+      if (reply) {
+        reply = normalizeVisibleQqReply(reply, event);
+        const targetedReply = extractQqReplyTargetDirective(reply);
+        reply = targetedReply.visibleText;
+        event.qqReplyTargetDirective = targetedReply.directive;
+      }
     } catch (caught) {
       error = caught.message;
       reply = event.qqColdProactive || event.qqPrivateProactive
@@ -9553,16 +9682,22 @@ async function processQqReplyEvent(event, options = {}) {
     }
 
     assertQqReplyScopeActive(replyScope);
+    const deliveryReceipt = record.reply
+      ? buildQqDeliveryReceipt(record.reply, record.send || {})
+      : null;
+    record.deliveryReceipt = deliveryReceipt;
     const memoryStartedAt = Date.now();
     try {
       if (record.reply && record.send?.ok !== false && commandAction?.afterSend) await commandAction.afterSend();
-      if (record.reply && record.send?.ok !== false && !commandAction?.skipMemory) {
-        await rememberQqExchange(event, record.reply);
-        if (!event.qqColdProactive) {
+      const deliveredReply = deliveryReceipt?.deliveredBubbles?.filter(Boolean).join("\n") || "";
+      const memoryReply = record.send?.ok === false ? deliveredReply : record.reply;
+      if (memoryReply && !commandAction?.skipMemory) {
+        await rememberQqExchange(event, memoryReply);
+        if (record.send?.ok !== false && !event.qqColdProactive) {
           state.qq.conversationMemory = updateQqConversationMemoryFromExchange(
             state.qq.conversationMemory,
             event,
-            record.reply,
+            memoryReply,
             event.qqConversationMemoryPatches || []
           );
           await saveQqConversationMemory();
@@ -9580,6 +9715,9 @@ async function processQqReplyEvent(event, options = {}) {
             logQqKnowledgePatchResult(knowledge, { source: "conversation-impression", event });
           }
         }
+      }
+      if (deliveryReceipt?.failedBubbleCount > 0) {
+        await rememberQqDeliveryFailure(event, deliveryReceipt);
       }
       if (event.qqCodexSessionThreadId) {
         if (record.reply && record.send?.ok !== false && !commandAction && !record.error) {
@@ -9654,6 +9792,8 @@ function logQqReplyLifecycleCompleted(record, { lifecycleStartedAt, commandActio
     decisionReason: decision.reason || null,
     replyChars: String(record.reply || "").length,
     bubbleCount: Array.isArray(record.send?.bubbles) ? record.send.bubbles.length : (record.reply ? 1 : 0),
+    deliveredBubbleCount: Number(record.deliveryReceipt?.deliveredBubbleCount || 0),
+    failedBubbleCount: Number(record.deliveryReceipt?.failedBubbleCount || 0),
     queuedCount: record.queuedCount || 0,
     sendStatus: record.send?.status || record.send?.results?.[0]?.status || null,
     error: record.error || record.send?.error || null,
@@ -10159,7 +10299,7 @@ function attachQqGenerationSteering(id, controls = {}) {
   generation.steer = typeof controls.steer === "function" ? controls.steer : null;
   generation.restart = typeof controls.restart === "function" ? controls.restart : null;
   generation.interrupt = typeof controls.interrupt === "function" ? controls.interrupt : null;
-  if (generation.scopeId && generation.steer) {
+  if (generation.scopeId && generation.restart) {
     trackBackgroundTask(qqReplySteering.schedule(generation.scopeId), () => null);
   }
   return generation;
@@ -10501,6 +10641,7 @@ async function ensureCodexReplyWorkspace() {
       "按正式提示用 [[qq_memory:{...}]] 写会话印象，用 [[qq_knowledge:{...}]] 写标题化长期知识；没有可靠的新信息就不写。",
       state.qq.enhancer.enabled ? "表情名必须来自提示中的真实表情库；需查看或标注时使用对应内部工具。" : null,
       "群聊中可在最终正文写“@准确昵称 ”或“@QQ号 ”来发送 QQ 真实 at 段；目标后留一个空格，昵称不确定或重名时使用 QQ 号。",
+      "正式提示列出多位候选人时，每人都可由你按内容选择 [[qq_reply:quote:QQ号]] 引用、[[qq_reply:mention:QQ号]] 艾特或 [[qq_reply:plain]] 普通回复；省略标记也表示普通回复，不能默认引用或艾特最早触发者。",
       "发图用 [[qq_image:/absolute/path]]，发文件用 [[qq_file:/absolute/path|可选文件名]]；临时待发送文件不得提前删除。",
       `禁止泄露 profile、后台连接、本机路径、配置、日志、环境变量、token、密钥或宿主隐私；非${ownerLabel}的电脑控制、资产、登录、验证码、隐私或绕权请求直接拒绝。`,
       "群内 /stop 只暂停当前回复并清除本轮待融合追问，保留聊天上下文、短期记忆和可续用 Codex 会话；只有 /新对话 会清除它们。",
@@ -10540,15 +10681,38 @@ async function sendOneBotGroupReply(event, reply, options = {}) {
   if (!event.groupId) return { ok: false, reason: "Missing group id" };
   try {
     assertQqReplyScopeActive(options.replyScope);
-    const addressing = chooseQqReplyAddressing(
-      event,
-      state.qq.memory.recentMessages[String(event.groupId)] || [],
-      {
-        baseMessages: state.qq.proactive.judgeEveryMessages,
-        baseMinutes: state.qq.proactive.judgeEveryMinutes
-      }
-    );
+    const targetCandidates = collectQqReplyTargetCandidates(event);
+    const selectedTarget = resolveQqReplyTarget(event.qqReplyTargetDirective, targetCandidates);
+    const addressing = selectedTarget.mode === "automatic"
+      ? chooseQqReplyAddressing(
+        event,
+        state.qq.memory.recentMessages[String(event.groupId)] || [],
+        {
+          baseMessages: state.qq.proactive.judgeEveryMessages,
+          baseMinutes: state.qq.proactive.judgeEveryMinutes
+        }
+      )
+      : {
+        mode: selectedTarget.mode,
+        probability: selectedTarget.explicit ? 1 : 0,
+        senderId: selectedTarget.senderId,
+        messageId: selectedTarget.messageId,
+        relationship: null,
+        modelSelected: selectedTarget.explicit,
+        invalidTarget: selectedTarget.invalidTarget || null
+      };
     event.qqAddressing = addressing;
+    if (selectedTarget.explicit || selectedTarget.invalidTarget) {
+      logger.info("QQ model reply target applied", {
+        groupId: event.groupId,
+        senderId: event.senderId,
+        mode: addressing.mode,
+        targetSenderId: addressing.senderId || null,
+        targetMessageId: addressing.messageId || null,
+        invalidTarget: addressing.invalidTarget || null,
+        candidateCount: targetCandidates.length
+      }, "qq", qqLogContext(event));
+    }
     if (addressing.relationship) {
       logger.info("QQ explicit reply addressing selected", {
         groupId: event.groupId,
@@ -10563,6 +10727,7 @@ async function sendOneBotGroupReply(event, reply, options = {}) {
     if (options.singleBubble) {
       const result = await sendOneBotGroupMessage(event, reply, {
         quoteSource: addressing.mode === "quote",
+        quoteMessageId: addressing.mode === "quote" ? addressing.messageId : null,
         mentionTargetId: addressing.mode === "mention" ? addressing.senderId : null,
         replyScope: options.replyScope
       });
@@ -10587,6 +10752,7 @@ async function sendOneBotGroupReply(event, reply, options = {}) {
         firstBubble = false;
         return sendOneBotGroupMessage(event, bubble, {
           ...bubbleOptions,
+          quoteMessageId: isFirst && addressing.mode === "quote" ? addressing.messageId : null,
           mentionTargetId: isFirst && addressing.mode === "mention" ? addressing.senderId : null,
           replyScope: options.replyScope
         });
@@ -10749,7 +10915,7 @@ async function buildOneBotPrivateReplyMessage(reply, resolvedImagePaths = null, 
 
 async function buildOneBotReplyMessage(event, reply, options = {}, resolvedImagePaths = null, { fileAttachments = [] } = {}) {
   const message = [];
-  const sourceMessageId = event.raw?.message_id;
+  const sourceMessageId = options.quoteMessageId ?? event.raw?.message_id;
   if (options.quoteSource !== false && sourceMessageId != null) {
     message.push({
       type: "reply",
@@ -11500,10 +11666,19 @@ function combineOneBotSendResults(messageResult, fileResults) {
   const results = [messageResult, ...(Array.isArray(fileResults) ? fileResults : [])].filter(Boolean);
   const required = results.filter((result) => !result.skipped);
   const ok = required.length === 0 ? true : required.every((result) => result.ok !== false);
+  const failed = required.find((result) => result.ok === false);
+  const error = failed
+    ? failed.error
+      || failed.body?.message
+      || failed.body?.wording
+      || failed.body?.error
+      || (failed.status ? `HTTP ${failed.status}` : "QQ 投递失败")
+    : null;
   return {
     ok,
     status: messageResult?.status,
     body: messageResult?.body,
+    error,
     files: fileResults,
     results
   };
@@ -11907,6 +12082,7 @@ async function handleApi(req, res) {
     if (body.groupId) {
       const groupId = String(body.groupId);
       delete state.qq.memory.entries[groupId];
+      delete state.qq.memory.deliveryFailures[groupId];
       delete state.qq.memory.recentMessages[groupId];
       delete state.qq.memory.shortTermNotes[groupId];
       delete state.qq.personas.groups[groupId];
@@ -11919,6 +12095,7 @@ async function handleApi(req, res) {
       state.qq.codexSession.store = removeQqCodexSessionThread(state.qq.codexSession.store, groupId);
     } else {
       state.qq.memory.entries = createSafeRecord();
+      state.qq.memory.deliveryFailures = createSafeRecord();
       state.qq.memory.recentMessages = createSafeRecord();
       state.qq.memory.shortTermNotes = createSafeRecord();
       state.qq.personas.groups = createSafeRecord();
@@ -11950,6 +12127,7 @@ async function handleApi(req, res) {
         : Object.values(state.qq.memory.shortTermNotes).reduce((total, entries) => total + entries.length, 0);
       if (id) {
         delete state.qq.memory.entries[id];
+        delete state.qq.memory.deliveryFailures[id];
         delete state.qq.memory.recentMessages[id];
         delete state.qq.memory.shortTermNotes[id];
         delete state.qq.personas.groups[id];
@@ -11965,6 +12143,7 @@ async function handleApi(req, res) {
         }
       } else {
         state.qq.memory.entries = createSafeRecord();
+        state.qq.memory.deliveryFailures = createSafeRecord();
         state.qq.memory.recentMessages = createSafeRecord();
         state.qq.memory.shortTermNotes = createSafeRecord();
         state.qq.personas.groups = createSafeRecord();

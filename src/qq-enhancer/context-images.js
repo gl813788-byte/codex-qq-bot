@@ -4,6 +4,7 @@ const defaultImageLimit = 4;
 const maxFileLength = 512;
 const maxUrlLength = 4096;
 const maxSummaryLength = 240;
+export const qqContextImageMaxAgeMs = 2 * 60 * 60 * 1000;
 
 export function snapshotQqContextImages(images = [], { limit = defaultImageLimit } = {}) {
   const safeLimit = normalizeLimit(limit);
@@ -23,10 +24,13 @@ export function snapshotQqContextImages(images = [], { limit = defaultImageLimit
 
 export function collectQqContextImages(entries = [], {
   limit = defaultImageLimit,
-  excludeMessageId = ""
+  excludeMessageId = "",
+  maxAgeMs = Number.POSITIVE_INFINITY,
+  now = Date.now()
 } = {}) {
   const safeLimit = normalizeLimit(limit);
   const excludedId = String(excludeMessageId || "");
+  const cutoff = normalizeImageCutoff(maxAgeMs, now);
   const selected = [];
   const seen = new Set();
   const list = Array.isArray(entries) ? entries : [];
@@ -34,6 +38,7 @@ export function collectQqContextImages(entries = [], {
   for (let entryIndex = list.length - 1; entryIndex >= 0 && selected.length < safeLimit; entryIndex -= 1) {
     const entry = list[entryIndex] || {};
     if (excludedId && String(entry.messageId || "") === excludedId) continue;
+    if (cutoff != null && !isFreshContextEntry(entry, cutoff)) continue;
     const images = snapshotQqContextImages(entry.images, { limit: safeLimit });
     for (let imageIndex = images.length - 1; imageIndex >= 0 && selected.length < safeLimit; imageIndex -= 1) {
       const image = images[imageIndex];
@@ -53,6 +58,18 @@ export function collectQqContextImages(entries = [], {
   }
 
   return selected.reverse();
+}
+
+function normalizeImageCutoff(maxAgeMs, now) {
+  const age = Number(maxAgeMs);
+  const current = Number(now);
+  if (!Number.isFinite(age) || age < 0) return null;
+  return (Number.isFinite(current) ? current : Date.now()) - age;
+}
+
+function isFreshContextEntry(entry, cutoff) {
+  const at = Date.parse(String(entry?.at || ""));
+  return Number.isFinite(at) && at >= cutoff;
 }
 
 export function getQqGroupRecentContextLimit({ expandLevel = 0, explicitBotTrigger = false } = {}) {
