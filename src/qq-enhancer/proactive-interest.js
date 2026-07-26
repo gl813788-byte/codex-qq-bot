@@ -15,6 +15,13 @@ import {
   getDefaultInterestModelBaseUrl,
   normalizeInterestModelProvider
 } from "../interest-model-provider.js";
+import {
+  completeQqProactiveJudgeCycle,
+  ensureQqProactiveCycleState,
+  getQqProactiveCycleVersion,
+  getQqProactiveMessageCount,
+  incrementQqProactiveMessageCount
+} from "../qq-proactive-cycle-state.js";
 
 const botNamePattern = /\b(?:bot|gpt|assistant|codex|chatgpt)\b|机器人|助手|小助手|这个ai|这ai|这个 AI|这 AI/i;
 const directInvitePattern = /(?:你怎么看|你觉得|你会|你能|你来|出来说|出来看看|评价一下|锐评一下|帮忙看|帮我看|查一下|搜一下|联网查|总结一下|看记录|查记录|解释一下|分析一下)/i;
@@ -106,10 +113,11 @@ export async function shouldProactivelyReplyToQq(event = {}, state = {}, helpers
     helpers.judgeEveryMinutes ?? state.proactive?.judgeEveryMinutes
   );
   ensureProactiveCycleState(proactiveState);
+  const startedCycleVersion = getQqProactiveCycleVersion(proactiveState, groupId);
 
-  const previousCount = getProactiveMessageCount(proactiveState, groupId);
+  const previousCount = getQqProactiveMessageCount(proactiveState, groupId);
   const currentCount = triggerMode === "message" && helpers.countMessage !== false
-    ? incrementProactiveMessageCount(proactiveState, groupId)
+    ? incrementQqProactiveMessageCount(proactiveState, groupId)
     : previousCount;
   if (previousCount === 0 && currentCount > 0) {
     proactiveState.lastJudgeAtByGroupId[groupId] = now();
@@ -247,13 +255,22 @@ export async function shouldProactivelyReplyToQq(event = {}, state = {}, helpers
       consumedMessageCount
     };
   } finally {
-    const countAfterJudge = getProactiveMessageCount(proactiveState, groupId);
-    proactiveState.messageCountByGroupId[groupId] = Math.max(0, countAfterJudge - consumedMessageCount);
-    proactiveState.lastJudgeAtByGroupId[groupId] = now();
-    delete proactiveState.judgeInFlightByGroupId[groupId];
+    const completion = completeQqProactiveJudgeCycle(proactiveState, groupId, {
+      consumedMessageCount,
+      startedCycleVersion,
+      completedAt: now()
+    });
+    if (completion.resetAfterStart) {
+      result = {
+        ...result,
+        ok: false,
+        reason: "bot delivery reset proactive cycle",
+        superseded: true
+      };
+    }
+    result.messageCountRemaining = completion.messageCountRemaining;
+    result.cycleCompletedAt = completion.cycleCompletedAt;
   }
-  result.messageCountRemaining = getProactiveMessageCount(proactiveState, groupId);
-  result.cycleCompletedAt = proactiveState.lastJudgeAtByGroupId[groupId];
   return result;
 }
 
@@ -1097,29 +1114,7 @@ function normalizeJudgeEveryMinutes(value) {
 }
 
 function ensureProactiveCycleState(proactiveState = {}) {
-  if (!proactiveState.messageCountByGroupId || typeof proactiveState.messageCountByGroupId !== "object") {
-    proactiveState.messageCountByGroupId = {};
-  }
-  if (!proactiveState.lastJudgeAtByGroupId || typeof proactiveState.lastJudgeAtByGroupId !== "object") {
-    proactiveState.lastJudgeAtByGroupId = {};
-  }
-  if (!proactiveState.judgeInFlightByGroupId || typeof proactiveState.judgeInFlightByGroupId !== "object") {
-    proactiveState.judgeInFlightByGroupId = {};
-  }
-}
-
-function getProactiveMessageCount(proactiveState = {}, groupId) {
-  const count = Number(proactiveState.messageCountByGroupId?.[String(groupId)] || 0);
-  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
-}
-
-function incrementProactiveMessageCount(proactiveState = {}, groupId) {
-  if (!groupId) return 0;
-  ensureProactiveCycleState(proactiveState);
-  const key = String(groupId);
-  const next = getProactiveMessageCount(proactiveState, key) + 1;
-  proactiveState.messageCountByGroupId[key] = next;
-  return next;
+  return ensureQqProactiveCycleState(proactiveState);
 }
 
 function isProactiveEventStale(event = {}, nowMs, judgeEveryMinutes) {

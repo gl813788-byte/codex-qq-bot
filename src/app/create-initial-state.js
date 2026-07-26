@@ -48,6 +48,7 @@ export function createInitialState({
         messageCountByGroupId: createRecord(),
         lastJudgeAtByGroupId: createRecord(),
         judgeInFlightByGroupId: createRecord(),
+        cycleVersionByGroupId: createRecord(),
         pendingImageRequests: createRecord(),
         judge: {
           enabled: config.qqProactiveJudgeEnabled,

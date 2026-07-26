@@ -228,6 +228,7 @@ import {
   summarizeQqPeriodicRuntime,
   updateQqOrdinaryInterestCycle
 } from "./qq-periodic-runtime.js";
+import { resetQqProactiveCycleAfterBotReply } from "./qq-proactive-cycle-state.js";
 import { serializeFileOperation, writeJsonAtomically } from "./file-store.js";
 import {
   buildImpressionSemanticItems,
@@ -799,6 +800,7 @@ function restoreQqPeriodicRuntimeCycles() {
   state.qq.proactive.messageCountByGroupId = createSafeRecord();
   state.qq.proactive.lastJudgeAtByGroupId = createSafeRecord();
   state.qq.proactive.judgeInFlightByGroupId = createSafeRecord();
+  state.qq.proactive.cycleVersionByGroupId = createSafeRecord();
   qqProactiveLatestEventByGroupId.clear();
   let changed = false;
   for (const cycle of restoreQqOrdinaryInterestCycles(state.qq.periodicRuntime)) {
@@ -824,6 +826,7 @@ function pruneQqPeriodicRuntimeToAllowedGroups() {
     delete state.qq.proactive.messageCountByGroupId[cycle.groupId];
     delete state.qq.proactive.lastJudgeAtByGroupId[cycle.groupId];
     delete state.qq.proactive.judgeInFlightByGroupId[cycle.groupId];
+    delete state.qq.proactive.cycleVersionByGroupId[cycle.groupId];
     qqProactiveLatestEventByGroupId.delete(cycle.groupId);
     changed = true;
   }
@@ -1824,6 +1827,7 @@ function pruneQqStateScopes() {
       delete state.qq.conversationMemory.groups[scopeId];
       delete state.qq.proactive.messageCountByGroupId[scopeId];
       delete state.qq.proactive.lastJudgeAtByGroupId[scopeId];
+      delete state.qq.proactive.cycleVersionByGroupId[scopeId];
       state.qq.periodicRuntime = clearQqOrdinaryInterestCycle(state.qq.periodicRuntime, scopeId);
       qqProactiveLatestEventByGroupId.delete(scopeId);
     }
@@ -3688,6 +3692,7 @@ function resetQqProactiveRuntimeCycles({ clearPersistedCycles = true } = {}) {
   state.qq.proactive.messageCountByGroupId = createSafeRecord();
   state.qq.proactive.lastJudgeAtByGroupId = createSafeRecord();
   state.qq.proactive.judgeInFlightByGroupId = createSafeRecord();
+  state.qq.proactive.cycleVersionByGroupId = createSafeRecord();
   if (clearPersistedCycles) state.qq.periodicRuntime = createEmptyQqPeriodicRuntime();
   qqProactiveLatestEventByGroupId.clear();
   qqColdInterestStatusByGroupId.clear();
@@ -5308,6 +5313,7 @@ function clearQqContextForEvent(event, { silent = false, source = "new-dialog", 
     delete state.qq.proactive.messageCountByGroupId[event.groupId];
     delete state.qq.proactive.lastJudgeAtByGroupId[event.groupId];
     delete state.qq.proactive.judgeInFlightByGroupId[event.groupId];
+    delete state.qq.proactive.cycleVersionByGroupId[event.groupId];
     state.qq.periodicRuntime = clearQqOrdinaryInterestCycle(state.qq.periodicRuntime, event.groupId);
     qqProactiveLatestEventByGroupId.delete(String(event.groupId));
     logClear();
@@ -9350,6 +9356,30 @@ async function rememberQqExchange(event, reply) {
   maybeScheduleQqSelfPersonaRefresh();
 }
 
+async function resetQqOrdinaryInterestAfterDeliveredBotReply(event, deliveryReceipt) {
+  if (!event?.groupId || Number(deliveryReceipt?.deliveredBubbleCount || 0) <= 0) return false;
+  const groupId = String(event.groupId);
+  const persistedCycleCleared = Boolean(
+    state.qq.periodicRuntime?.ordinaryInterestByGroupId?.[groupId]
+  );
+  const cachedEventCleared = qqProactiveLatestEventByGroupId.delete(groupId);
+  const reset = resetQqProactiveCycleAfterBotReply(state.qq.proactive, groupId);
+  state.qq.periodicRuntime = clearQqOrdinaryInterestCycle(state.qq.periodicRuntime, groupId);
+  const changed = reset.changed || persistedCycleCleared || cachedEventCleared;
+  if (!changed) return false;
+  logger.debug("QQ ordinary interest cycle reset after bot delivery", {
+    groupId,
+    deliveredBubbleCount: Number(deliveryReceipt.deliveredBubbleCount || 0),
+    clearedMessageCount: reset.clearedMessageCount,
+    judgeInFlightSuperseded: reset.judgeInFlight,
+    cachedEventCleared,
+    persistedCycleCleared,
+    nextCycleBasis: "messages_after_delivered_bot_reply"
+  }, "interest", qqLogContext(event));
+  await saveQqMemory();
+  return true;
+}
+
 async function rememberQqDeliveryFailure(event, receipt) {
   const scopeId = getQqMemoryScopeId(event);
   if (!state.qq.memory.enabled || !scopeId) return false;
@@ -9692,6 +9722,9 @@ async function processQqReplyEvent(event, options = {}) {
       if (record.reply && record.send?.ok !== false && commandAction?.afterSend) await commandAction.afterSend();
       const deliveredReply = deliveryReceipt?.deliveredBubbles?.filter(Boolean).join("\n") || "";
       const memoryReply = record.send?.ok === false ? deliveredReply : record.reply;
+      if (source === "onebot" && event.groupId && deliveryReceipt?.deliveredBubbleCount > 0) {
+        await resetQqOrdinaryInterestAfterDeliveredBotReply(event, deliveryReceipt);
+      }
       if (memoryReply && !commandAction?.skipMemory) {
         await rememberQqExchange(event, memoryReply);
         if (record.send?.ok !== false && !event.qqColdProactive) {
@@ -12093,6 +12126,7 @@ async function handleApi(req, res) {
       delete state.qq.pendingReplies[groupId];
       delete state.qq.proactive.messageCountByGroupId[groupId];
       delete state.qq.proactive.lastJudgeAtByGroupId[groupId];
+      delete state.qq.proactive.cycleVersionByGroupId[groupId];
       state.qq.periodicRuntime = clearQqOrdinaryInterestCycle(state.qq.periodicRuntime, groupId);
       qqProactiveLatestEventByGroupId.delete(groupId);
       state.qq.codexSession.store = removeQqCodexSessionThread(state.qq.codexSession.store, groupId);
@@ -12141,6 +12175,7 @@ async function handleApi(req, res) {
         if (!id.startsWith("private:")) {
           delete state.qq.proactive.messageCountByGroupId[id];
           delete state.qq.proactive.lastJudgeAtByGroupId[id];
+          delete state.qq.proactive.cycleVersionByGroupId[id];
           state.qq.periodicRuntime = clearQqOrdinaryInterestCycle(state.qq.periodicRuntime, id);
           qqProactiveLatestEventByGroupId.delete(id);
         }

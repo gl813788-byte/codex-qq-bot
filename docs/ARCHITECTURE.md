@@ -33,6 +33,7 @@ environment + runtime paths
 | `src/qq-enhancer/` | Optional QQ reply behavior | changing context images, proactive interest or reply style |
 | `src/qq-main-prompt.js` | Main-model prompt boundary | changing role, execution order, approved proactive tasks or the need-based tool directory |
 | `src/qq-proactive-pipeline.js` | Two-model proactive-chat contract | interest approvals and mandatory main-model validation for ordinary interjections, cold topic/chatter, and private outreach |
+| `src/qq-proactive-cycle-state.js` | In-memory ordinary-interest cycle state | counting pending messages, resetting at confirmed Bot delivery, and superseding an in-flight pre-delivery judge without consuming later messages |
 | `src/qq-message-run-compaction.js` | Model-context repeat-run compaction | semantic identity, count merging, and Chinese count annotations for adjacent duplicate messages |
 | `src/codex-app-server-turn.js` | One-turn Codex app-server client | `thread/start`/`thread/resume`, `turn/start`, in-flight control, direct interrupt-and-restart, inactive-turn race recovery, timeout, and interruption |
 | `src/qq-reply-steering.js` | QQ follow-up fusion scheduler | a five-second quiet window reset by every new follow-up, snapshot consumption, direct replacement-turn start, completed-draft replacement, failure retention, and active-turn identity checks |

@@ -17,9 +17,11 @@ test("log presentation uses consistent Chinese event names and concise error cha
   assert.equal(formatLogMessage("QQ cold-group topic-start judge completed"), "QQ 冷群新话题启动判定完成");
   assert.equal(formatLogMessage("QQ private proactive start judge completed"), "QQ 私聊主动联系启动判定完成");
   assert.equal(formatLogMessage("QQ autonomous proactive two-model contract verified"), "QQ 主动聊天双模型链路校验通过");
+  assert.equal(formatLogMessage("QQ ordinary interest cycle reset after bot delivery"), "Bot 消息送达后已重置 QQ 普通兴趣周期");
   assert.equal(formatLogMessage("QQ active social request failed"), "QQ 主动好友/入群申请失败");
   assert.equal(formatLogMessage("QQ request action completed"), "QQ 申请操作完成");
   assert.equal(formatLogDetailText("Mention-only mode ignored this message"), "群消息未 @ 或回复机器人，已按仅提及模式忽略");
+  assert.equal(formatLogDetailText("bot delivery reset proactive cycle"), "Bot 消息已送达，旧兴趣周期作废");
   assert.equal(formatLogDetailText("model judge failed: OpenRouter judge did not return valid FINAL_JSON"), "判定模型失败：OpenRouter 判定模型未返回有效结构化结果");
   assert.equal(formatLogError({
     name: "TypeError",

@@ -6,6 +6,7 @@ import {
   runQqInterestModelStructuredTask,
   shouldProactivelyReplyToQq
 } from "../src/qq-enhancer/proactive-interest.js";
+import { resetQqProactiveCycleAfterBotReply } from "../src/qq-proactive-cycle-state.js";
 
 test("cold-group interest model decides only whether to start before the main model researches", async () => {
   let requestBody = null;
@@ -770,4 +771,68 @@ test("messages arriving during a judge stay in the next cycle", async () => {
   assert.equal(first.ok, true);
   assert.equal(first.messageCountRemaining, 1);
   assert.equal(state.proactive.messageCountByGroupId[event.groupId], 1);
+});
+
+test("a delivered bot reply clears pre-reply messages before cadence is evaluated again", async () => {
+  const state = proactiveState(1500, { judgeEveryMessages: 2, judgeEveryMinutes: 5 });
+  state.proactive.messageCountByGroupId[event.groupId] = 2;
+  state.proactive.lastJudgeAtByGroupId = { [event.groupId]: 1_000_000 };
+  const reset = resetQqProactiveCycleAfterBotReply(state.proactive, event.groupId);
+  assert.equal(reset.changed, true);
+  assert.equal(reset.clearedMessageCount, 2);
+  assert.equal(state.proactive.messageCountByGroupId[event.groupId], undefined);
+  assert.equal(state.proactive.lastJudgeAtByGroupId[event.groupId], undefined);
+
+  let fetchCount = 0;
+  const afterReply = await shouldProactivelyReplyToQq(
+    { ...event, text: "Bot 发言后的第一条消息" },
+    state,
+    {
+      judgeEveryMessages: 2,
+      openRouterApiKey: "configured-for-test",
+      fetch: async () => {
+        fetchCount += 1;
+        return jsonJudgeResponse();
+      }
+    }
+  );
+  assert.equal(afterReply.reason, "waiting for proactive judge message interval");
+  assert.equal(afterReply.messageCount, 1);
+  assert.equal(fetchCount, 0);
+});
+
+test("a bot delivery supersedes an in-flight old judge without consuming newer messages", async () => {
+  const state = proactiveState(1500, { judgeEveryMessages: 1, judgeEveryMinutes: 5 });
+  let nowMs = 1_000_000;
+  let releaseJudge;
+  const fetch = async () => {
+    await new Promise((resolve) => { releaseJudge = resolve; });
+    return jsonJudgeResponse();
+  };
+  const oldJudgePromise = shouldProactivelyReplyToQq(
+    { ...event, text: "Bot 发言前的旧消息" },
+    state,
+    { now: () => nowMs, openRouterApiKey: "configured-for-test", fetch }
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const reset = resetQqProactiveCycleAfterBotReply(state.proactive, event.groupId);
+  assert.equal(reset.judgeInFlight, true);
+  nowMs = 2_000_000;
+  const afterReply = await shouldProactivelyReplyToQq(
+    { ...event, text: "Bot 发言后的新消息" },
+    state,
+    { now: () => nowMs, openRouterApiKey: "configured-for-test", fetch }
+  );
+  assert.equal(afterReply.reason, "proactive judge already in flight");
+  assert.equal(afterReply.messageCount, 1);
+
+  releaseJudge();
+  const oldJudge = await oldJudgePromise;
+  assert.equal(oldJudge.ok, false);
+  assert.equal(oldJudge.superseded, true);
+  assert.equal(oldJudge.reason, "bot delivery reset proactive cycle");
+  assert.equal(oldJudge.messageCountRemaining, 1);
+  assert.equal(state.proactive.messageCountByGroupId[event.groupId], 1);
+  assert.equal(state.proactive.lastJudgeAtByGroupId[event.groupId], 2_000_000);
 });
