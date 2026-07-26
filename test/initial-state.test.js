@@ -31,6 +31,7 @@ test("creates isolated application state from normalized configuration", () => {
   assert.equal(Object.getPrototypeOf(first.qq.codexSession.store.threads), null);
   assert.equal(Object.getPrototypeOf(first.qq.memory.deliveryFailures), null);
   assert.equal(Object.getPrototypeOf(first.qq.memory.shortTermNotes), null);
+  assert.equal(Object.getPrototypeOf(first.qq.proactive.cycleVersionByGroupId), null);
   assert.equal(first.qq.knowledgeBase.version, 1);
   assert.deepEqual(first.qq.knowledgeBase.entries, []);
   assert.deepEqual(first.channels, { qq: false });
