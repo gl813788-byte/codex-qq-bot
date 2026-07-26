@@ -109,12 +109,12 @@ QQ / NapCat / OneBot
 
 Core capabilities:
 
-- QQ group and private chat with incoming mentions, real outgoing `@exact-name ` / `@QQ-number ` segments, replies, pokes, images, files, forwarded messages, cards, and multi-bubble output.
+- QQ group and private chat with incoming mentions, real outgoing `@exact-name ` / `@QQ-number ` segments, model-selected quote/mention/plain addressing for multi-person fused replies, pokes, images, files, forwarded messages, cards, and receipt-aware multi-bubble output.
 - Agent-style Codex replies that can use bounded chat-history, search, memory, and management tools over multiple rounds.
-- Fused follow-ups and session modes: mentions, replies, interest approvals, and other triggers arriving during generation are compacted with selected in-between context and added to the active answer once; each group/private scope can use temporary, persistent, or automatic Codex threads, with persistent turns receiving only incremental context.
+- Fused follow-ups and session modes: mentions, replies, interest approvals, and other triggers arriving during generation are compacted with selected in-between context; after five quiet seconds the stale turn is cut and one replacement answer starts. Each group/private scope can use temporary, persistent, or automatic Codex threads, with persistent turns receiving only incremental context.
 - Adaptive social behavior for message length, group rhythm, stickers, and voluntary replies. A separate main-model style review precisely compares human and Bot tone and stores a brief, full diagnosis, and replacement guidance. The interest model stays limited to bounded lightweight decisions, classification and triage; complex background review uses interest triage followed by main-model final review.
 - Layered memory: short-term notes, long-term knowledge, group/person impressions and cross-channel memory share a local SQLite + FTS + 1024-dimensional semantic-vector hybrid recall plane. Vectors weight titles, briefs and details separately, recognize Chinese phrases, synonym concepts, entities, time and state, and automatically rebuild old index versions. `/记忆` supports similar candidates, overwrite and stale lifecycle; impressions keep brief/detail fields and auto-inject only relevant briefs.
-- QQ administration for model/reasoning choice, allowlists, permissions, bans, moderation, resilient friend/group requests, and text, image-only, or mixed QQ Space moods.
+- QQ administration for model/reasoning choice, allowlists, permissions, bans, moderation, resilient friend/group requests with persisted upstream/native diagnostics, and text, image-only, or mixed QQ Space moods.
 - Selectable interest-model providers: OpenRouter, DeepSeek, or a custom OpenAI-compatible service, with credentials kept environment-only.
 - Seven-view local dashboard for runtime, channels, behavior, short-term memory, an editable long-term Knowledge workspace, structured logs, themes, and optional LAN access.
 - macOS client and browser dashboard use the same QQ/OneBot Hub and require no Messages database or iMessage automation permissions.

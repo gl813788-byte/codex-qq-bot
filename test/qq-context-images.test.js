@@ -59,6 +59,38 @@ test("QQ context image mapping retains the compressed repeat count", () => {
   assert.equal(images[0].context.text, "同一张图（连续重复 3 条）");
 });
 
+test("QQ context image collection skips expired persisted URLs", () => {
+  const now = Date.parse("2026-07-27T00:00:00.000Z");
+  const images = collectQqContextImages([
+    {
+      messageId: "old",
+      at: "2026-07-26T20:00:00.000Z",
+      images: [{ file: "expired.jpg", url: "https://multimedia.nt.qq.com.cn/expired" }]
+    },
+    {
+      messageId: "fresh",
+      at: "2026-07-26T23:30:00.000Z",
+      images: [{ file: "fresh.jpg", url: "https://multimedia.nt.qq.com.cn/fresh" }]
+    }
+  ], {
+    maxAgeMs: 2 * 60 * 60 * 1000,
+    now
+  });
+
+  assert.deepEqual(images.map((image) => image.file), ["fresh.jpg"]);
+});
+
+test("QQ context image freshness rejects undated persisted references", () => {
+  const images = collectQqContextImages([
+    { messageId: "unknown", images: [{ file: "unknown.jpg" }] }
+  ], {
+    maxAgeMs: 2 * 60 * 60 * 1000,
+    now: Date.parse("2026-07-27T00:00:00.000Z")
+  });
+
+  assert.deepEqual(images, []);
+});
+
 test("explicit bot triggers use a larger complete recent-group window", () => {
   assert.equal(getQqGroupRecentContextLimit(), 12);
   assert.equal(getQqGroupRecentContextLimit({ explicitBotTrigger: true }), 18);

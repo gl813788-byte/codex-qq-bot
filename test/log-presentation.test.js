@@ -17,6 +17,8 @@ test("log presentation uses consistent Chinese event names and concise error cha
   assert.equal(formatLogMessage("QQ cold-group topic-start judge completed"), "QQ 冷群新话题启动判定完成");
   assert.equal(formatLogMessage("QQ private proactive start judge completed"), "QQ 私聊主动联系启动判定完成");
   assert.equal(formatLogMessage("QQ autonomous proactive two-model contract verified"), "QQ 主动聊天双模型链路校验通过");
+  assert.equal(formatLogMessage("QQ active social request failed"), "QQ 主动好友/入群申请失败");
+  assert.equal(formatLogMessage("QQ request action completed"), "QQ 申请操作完成");
   assert.equal(formatLogDetailText("Mention-only mode ignored this message"), "群消息未 @ 或回复机器人，已按仅提及模式忽略");
   assert.equal(formatLogDetailText("model judge failed: OpenRouter judge did not return valid FINAL_JSON"), "判定模型失败：OpenRouter 判定模型未返回有效结构化结果");
   assert.equal(formatLogError({
@@ -25,6 +27,40 @@ test("log presentation uses consistent Chinese event names and concise error cha
     code: null,
     cause: { message: "connect ECONNREFUSED 127.0.0.1:3000", code: "ECONNREFUSED", address: "127.0.0.1", port: 3000 }
   }), "网络请求失败；连接 127.0.0.1:3000 被拒绝；ECONNREFUSED");
+});
+
+test("QQ social action logs expose safe diagnostic fields in Chinese", () => {
+  assert.deepEqual(localizeLogDetails({
+    requestId: "abc123",
+    requestType: "friend",
+    subType: "add",
+    targetId: "1148645252",
+    endpoint: "add-friend",
+    httpStatus: 502,
+    oneBotRetCode: 1200,
+    nativeCode: 40,
+    nativeMessage: "risk control",
+    nativeApiShape: "uin-message",
+    verificationMode: "验证信息后审核",
+    approve: true,
+    autoHandled: false,
+    handledBy: "3784642920"
+  }), {
+    "申请 ID": "abc123",
+    申请类型: "friend",
+    申请子类型: "add",
+    "目标 QQ/群": "1148645252",
+    接口: "add-friend",
+    "HTTP 状态码": 502,
+    "OneBot 返回码": 1200,
+    "QQ 原生返回码": 40,
+    "QQ 原生错误": "risk control",
+    "QQ 原生接口形式": "uin-message",
+    验证方式: "验证信息后审核",
+    是否同意: true,
+    是否自动处理: false,
+    处理者: "3784642920"
+  });
 });
 
 test("two-model proactive and complex review details are fully localized", () => {
@@ -117,8 +153,8 @@ test("follow-up fusion logs use the existing Chinese detail style", () => {
   assert.equal(formatLogMessage("QQ follow-up trigger entered fusion buffer"), "QQ 追问触发已进入融合缓冲");
   assert.equal(formatLogMessage("Queued QQ messages steered into active turn"), "QQ 融合追问已一次性补充进当前回复");
   assert.equal(
-    formatLogMessage("Queued QQ messages restarted after steering was unavailable"),
-    "当前回复无法接收融合追问，已截断并用新输入续答"
+    formatLogMessage("Queued QQ messages restarted after follow-up quiet window"),
+    "QQ 追问静默满 5 秒，已截断旧回复并开始统一重答"
   );
   assert.equal(
     formatLogMessage("QQ pending follow-ups fused before send"),

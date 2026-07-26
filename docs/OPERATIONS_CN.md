@@ -141,7 +141,7 @@ curl -fsS 'http://127.0.0.1:3789/api/logs?limit=100&level=error,warn' | jq .
 curl -fsS 'http://127.0.0.1:3789/api/logs?category=interest&group=群号' | jq .
 ```
 
-常用分类：`system`、`web`、`onebot`、`qq`、`codex`、`search`、`interest`、`learning`、`memory` 和 `lifecycle`。优先按 trace 追踪一条完整回复，再看各阶段耗时和上游错误。融合追问使用 `qq` 分类，中文彩色标题依次显示进入可重置的 5 秒缓冲、成功补充活动轮次、steer 失败后的截断续答，以及旧草稿完成后在发送前直接开启替代轮次；详细字段包含触发来源、原始/压缩条数、补充语境数、图片数、被截断/替代轮次和限长预览，可用 `--group`、`--trace` 或 `--search 融合` 定位。
+常用分类：`system`、`web`、`onebot`、`qq`、`codex`、`search`、`interest`、`learning`、`memory` 和 `lifecycle`。优先按 trace 追踪一条完整回复，再看各阶段耗时和上游错误。融合追问使用 `qq` 分类，中文彩色标题依次显示进入可重置的 5 秒缓冲、直接截断旧 turn 并开始替代回答，以及旧草稿完成后在发送前直接开启替代轮次；详细字段包含触发来源、原始/压缩条数、补充语境数、图片数、被截断/替代轮次和限长预览。生命周期还会显示成功/失败气泡数；失败回执为下一轮主模型保留时会另记一条 QQ 警告。可用 `--group`、`--trace` 或 `--search 融合` 定位。
 
 仪表盘不再把所有功能堆在同一页，而是分成总览、通道、智能行为、记忆、实时日志和设置六个视图。通道页只处理连接、白名单和联系人；智能行为页显示并持久化 Bot 增强、联网、主动兴趣、模型厂商与判定参数，同时提供当前厂商 key、搜索 provider、安全下载模式、活动生成和待回复数量等安全诊断信息。行为状态采用独立双列流，较长的人设卡不会在另一列制造大片空白；窄屏恢复为自然单列顺序。
 
@@ -201,6 +201,8 @@ npm run verify
 | Codex 回复失败 | 未登录、CLI 路径/模型不可用、队列满 | `codex --version`、登录状态、maintenance、`codex` 日志 |
 | 主动兴趣不回复 | 周期为空、judge 关闭/失败、兴趣不足、结果过时 | `interest` 日志、当前厂商对应 key、模型参数和群活跃状态 |
 | QQ 图片提示 `URL_PRIVATE_ADDRESS` 且解析到 `198.18/15` | 代理软件使用 Fake-IP DNS，严格下载模式按保留地址拦截 | 保持私网保护，设置 `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE=proxy-compatible` 后只重启 Hub；字面私网 IP 和其他保留地址仍会拒绝 |
+| 无关文字回复出现 `image download returned HTTP 400` | 持久化的附带上下文图片保留了已过期的腾讯下载地址 | 当前/明确引用图片仍可用；附带上下文图片会排除超过两小时或无时间戳的引用，确认运行中的 Hub 已加载当前源码 |
+| 主动加好友出现参数断言或原生 `code=20` | 当前 QQ 已把好友预检/提交迁到 `AddBuddyService`，NapCat 类型声明仍描述旧 BuddyService 调用 | 确认好友/群桥健康版本不低于 v7，且 `/inspect-friend` 返回 `inspection_api: add-buddy-service`；若返回 `verification_message_required`，请带 `验证=...` 重试命令 |
 | 联网失败 | key、provider、网络或超时 | `/api/maintenance` 的 provider attempts，`search` 日志 |
 | `ncc` 命令不认识参数 | 调用了另一套同名控制器 | `command -v ncc`、`readlink -f`、`ncc help`；仓库命令改用 `npm run ncc --` |
 | dead screen session | 异常退出留下 socket | 确认没有活进程后 `screen -wipe`，再启动 |

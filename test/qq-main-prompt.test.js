@@ -25,6 +25,8 @@ test("main-model core prompt presents one execution path and one dynamic style a
   assert.match(prompt, /重复骚扰.*已经觉得烦/);
   assert.match(prompt, /\[\[qq_silent\]\]/);
   assert.match(prompt, /@准确昵称.*@QQ号.*真实 at 消息段/);
+  assert.match(prompt, /\[\[qq_reply:quote:QQ号\]\].*\[\[qq_reply:mention:QQ号\]\].*\[\[qq_reply:plain\]\]/);
+  assert.match(prompt, /不会擅自引用或艾特最早触发者/);
   assert.match(prompt, /qq_memory 格式/);
   assert.match(prompt, /当前日期.*2026-07-21/);
   assert.match(prompt, /长期群聊归纳本群实际的主要话题/);

@@ -107,6 +107,60 @@ test("NapCat social bridge keeps compatibility with one-object friend APIs", asy
   assert.equal(submitted[0].defaultCatgory, 3);
 });
 
+test("NapCat social bridge treats hidden native friend arity as one request object", async () => {
+  const routes = new Map();
+  const submitted = [];
+  await plugin_init(createContext(routes, {
+    buddyService: {
+      reqToAddFriends(...args) {
+        submitted.push(args);
+        return { result: 0 };
+      }
+    }
+  }));
+
+  const response = responseRecorder();
+  await routes.get("POST /add-friend")(localRequest({
+    target_id: "3596291931",
+    message: "群里认识的"
+  }), response);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.native_api_shape, "request-object");
+  assert.equal(submitted.length, 1);
+  assert.equal(submitted[0].length, 1);
+  assert.equal(submitted[0][0].buddyUin, 3596291931);
+  assert.equal(submitted[0][0].verifyInfo, "群里认识的");
+});
+
+test("NapCat social bridge retries the legacy two-argument friend API only after an argument assertion", async () => {
+  const routes = new Map();
+  const submitted = [];
+  await plugin_init(createContext(routes, {
+    buddyService: {
+      reqToAddFriends(...args) {
+        submitted.push(args);
+        if (args.length === 1) {
+          throw new Error("assertion (argc == 2) failed: reqToAddFriends needs 2 arguments");
+        }
+        return { result: 0 };
+      }
+    }
+  }));
+
+  const response = responseRecorder();
+  await routes.get("POST /add-friend")(localRequest({
+    target_id: "3596291931",
+    message: "群里认识的"
+  }), response);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.native_api_shape, "uin-message");
+  assert.equal(submitted.length, 2);
+  assert.equal(submitted[0].length, 1);
+  assert.deepEqual(submitted[1], [3596291931, "群里认识的"]);
+});
+
 test("NapCat social bridge submits by UIN when stranger UID lookup fails", async () => {
   const routes = new Map();
   const submitted = [];
@@ -151,6 +205,109 @@ test("NapCat social bridge friend preflight never submits a request", async () =
   assert.equal(response.body.verification_setting, 3);
   assert.deepEqual(response.body.questions, ["从哪里认识的？"]);
   assert.equal(submitted, 0);
+});
+
+test("NapCat social bridge prefers the modern AddBuddyService for read-only friend preflight", async () => {
+  const routes = new Map();
+  const inspected = [];
+  await plugin_init(createContext(routes, {
+    addBuddyService: {
+      getBuddySetting(callFrom, request, context) {
+        inspected.push([callFrom, request, context]);
+        return {
+          result: { errorCode: 0 },
+          rsp: {
+            addFriendSetting: 3,
+            questions: ["请填写认识方式"]
+          }
+        };
+      },
+      addBuddy() {
+        throw new Error("preflight must not submit");
+      }
+    },
+    buddyService: {
+      getTargetBuddySetting() {
+        throw new Error("legacy preflight should not be used");
+      },
+      reqToAddFriends() {
+        throw new Error("preflight must not submit");
+      }
+    }
+  }));
+
+  const response = responseRecorder();
+  await routes.get("POST /inspect-friend")(localRequest({ target_id: "3596291931" }), response);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.inspection_api, "add-buddy-service");
+  assert.equal(response.body.verification_setting, 3);
+  assert.deepEqual(response.body.questions, ["请填写认识方式"]);
+  assert.equal(inspected.length, 1);
+  assert.equal(inspected[0][0], "CodexRemoteContact");
+  assert.deepEqual(inspected[0][1].targetInfo, {
+    uid: "uid:3596291931",
+    uin: 3596291931,
+    phoneNum: ""
+  });
+  assert.equal(inspected[0][1].sourceSubId, 0);
+  assert.deepEqual(inspected[0][2], []);
+});
+
+test("NapCat social bridge submits through the modern AddBuddyService when available", async () => {
+  const routes = new Map();
+  const submitted = [];
+  await plugin_init(createContext(routes, {
+    addBuddyService: {
+      getBuddySetting() {
+        return {
+          result: 0,
+          rsp: {
+            querySetting: 1,
+            question: []
+          }
+        };
+      },
+      addBuddy(callFrom, request, context) {
+        submitted.push([callFrom, request, context]);
+        return { result: 0, errorString: "" };
+      }
+    },
+    buddyService: {
+      reqToAddFriends() {
+        throw new Error("legacy API should not be used");
+      }
+    }
+  }));
+
+  const missing = responseRecorder();
+  await routes.get("POST /add-friend")(localRequest({
+    target_id: "3596291931"
+  }), missing);
+  assert.equal(missing.statusCode, 409);
+  assert.equal(missing.body.error, "verification_message_required");
+  assert.equal(submitted.length, 0);
+
+  const response = responseRecorder();
+  await routes.get("POST /add-friend")(localRequest({
+    target_id: "3596291931",
+    message: "群里认识的",
+    category_id: 3
+  }), response);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.native_api_shape, "add-buddy-service");
+  assert.equal(submitted.length, 1);
+  assert.equal(submitted[0][0], "CodexRemoteContact");
+  assert.deepEqual(submitted[0][1].targetInfo, {
+    uid: "uid:3596291931",
+    uin: 3596291931,
+    phoneNum: ""
+  });
+  assert.equal(submitted[0][1].name1, "群里认识的");
+  assert.equal(submitted[0][1].addFriendSetting, 1);
+  assert.equal(submitted[0][1].myFriendGroupId, 3);
+  assert.deepEqual(submitted[0][2], []);
 });
 
 test("NapCat social bridge handles group questions, approval and membership states", async () => {
@@ -200,6 +357,82 @@ test("NapCat social bridge handles group questions, approval and membership stat
   });
 });
 
+test("NapCat social bridge treats hidden native group arity as one request object", async () => {
+  const routes = new Map();
+  const submitted = [];
+  await plugin_init(createContext(routes, {
+    groupApi: {
+      async getGroups() { return []; },
+      async searchGroup() {
+        return {
+          searchGroupInfo: {
+            groupCode: "987654",
+            groupName: "测试群",
+            groupOption: 2,
+            joinGroupAuth: "auth-token"
+          }
+        };
+      }
+    },
+    groupService: {
+      reqToJoinGroup(...args) {
+        submitted.push(args);
+        return { result: 0 };
+      }
+    }
+  }));
+
+  const response = responseRecorder();
+  await routes.get("POST /join-group")(localRequest({ target_id: "987654" }), response);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.status, "pending_approval");
+  assert.equal(response.body.native_api_shape, "request-object");
+  assert.deepEqual(submitted, [[{
+      groupCode: 987654,
+      sourceId: 3,
+      sourceSubId: 0,
+      applyMsg: "",
+      auth: "auth-token",
+      token: "",
+      noVerifyAuth: ""
+  }]]);
+});
+
+test("NapCat social bridge keeps compatibility with explicit two-argument group APIs", async () => {
+  const routes = new Map();
+  const submitted = [];
+  await plugin_init(createContext(routes, {
+    groupApi: {
+      async getGroups() { return []; },
+      async searchGroup() {
+        return {
+          searchGroupInfo: {
+            groupCode: "987654",
+            groupName: "测试群",
+            groupOption: 2,
+            joinGroupAuth: "auth-token"
+          }
+        };
+      }
+    },
+    groupService: {
+      reqToJoinGroup(groupCode, request) {
+        submitted.push([groupCode, request]);
+        return { result: 0 };
+      }
+    }
+  }));
+
+  const response = responseRecorder();
+  await routes.get("POST /join-group")(localRequest({ target_id: "987654" }), response);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.native_api_shape, "group-code-request");
+  assert.equal(submitted[0][0], "987654");
+  assert.equal(submitted[0][1].groupCode, 987654);
+});
+
 test("NapCat social bridge refuses disabled and full group joins", async () => {
   for (const [info, expected] of [
     [{ groupCode: "987654", groupOption: 3 }, "group_join_disabled"],
@@ -219,7 +452,7 @@ test("NapCat social bridge refuses disabled and full group joins", async () => {
   }
 });
 
-function createContext(routes, { buddyService, groupApi, groupService, userApi } = {}) {
+function createContext(routes, { addBuddyService, buddyService, groupApi, groupService, userApi } = {}) {
   return {
     pluginName: "napcat-plugin-builtin",
     router: {
@@ -234,6 +467,7 @@ function createContext(routes, { buddyService, groupApi, groupService, userApi }
       },
       context: {
         session: {
+          getAddBuddyService() { return addBuddyService; },
           getBuddyService() { return buddyService; },
           getGroupService() { return groupService; }
         }

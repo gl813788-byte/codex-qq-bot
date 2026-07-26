@@ -18,19 +18,19 @@ test("uses a resettable five-second follow-up quiet window without a fixed maxim
   coordinator.close();
 });
 
-test("coalesces pending entries into one steer and consumes only the accepted snapshot", async () => {
+test("coalesces pending entries into one replacement and consumes only the accepted snapshot", async () => {
   const pending = {
     group: [
       { id: "one", text: "first" },
       { id: "two", text: "second" }
     ]
   };
-  const steered = [];
+  const restarted = [];
   const generation = {
     id: "generation-1",
-    steer: async (input) => {
-      steered.push(input);
-      pending.group.push({ id: "three", text: "arrived during steer" });
+    restart: async (input) => {
+      restarted.push(input);
+      pending.group.push({ id: "three", text: "arrived during restart" });
       return { threadId: "thread-1", turnId: "turn-1" };
     }
   };
@@ -50,19 +50,20 @@ test("coalesces pending entries into one steer and consumes only the accepted sn
   const result = await coordinator.schedule("group");
   assert.equal(result.ok, true);
   assert.equal(result.consumedCount, 2);
-  assert.equal(steered[0], "first\nsecond");
+  assert.equal(result.deliveryMode, "restarted");
+  assert.equal(restarted[0], "first\nsecond");
 
-  await waitFor(() => steered.length === 2);
-  assert.equal(steered[1], "arrived during steer");
+  await waitFor(() => restarted.length === 2);
+  assert.equal(restarted[1], "arrived during restart");
   assert.deepEqual(pending.group, []);
   coordinator.close();
 });
 
-test("keeps pending entries when the active turn cannot accept steering", async () => {
+test("keeps pending entries when the active turn cannot restart", async () => {
   const pending = { group: [{ id: "one", text: "first" }] };
   const generation = {
     id: "generation-1",
-    steer: async () => {
+    restart: async () => {
       const error = new Error("too late");
       error.code = "CODEX_TURN_NOT_ACTIVE";
       throw error;
@@ -74,7 +75,7 @@ test("keeps pending entries when the active turn cannot accept steering", async 
     getPendingEntries: (scopeId) => pending[scopeId] || [],
     buildSteeringInput: (entries) => entries.map((entry) => entry.text).join("\n"),
     consumeEntries: () => {
-      throw new Error("must not consume failed steering");
+      throw new Error("must not consume failed restart");
     }
   });
 
@@ -85,7 +86,7 @@ test("keeps pending entries when the active turn cannot accept steering", async 
   coordinator.close();
 });
 
-test("cuts the active turn and retries the fused input when steering fails", async () => {
+test("cuts the active turn directly after the quiet window and starts a replacement answer", async () => {
   const pending = {
     group: [
       { id: "one", text: "first" },
@@ -95,11 +96,6 @@ test("cuts the active turn and retries the fused input when steering fails", asy
   const restarted = [];
   const generation = {
     id: "generation-1",
-    steer: async () => {
-      const error = new Error("steering unavailable");
-      error.code = "CODEX_STEER_UNAVAILABLE";
-      throw error;
-    },
     restart: async (input) => {
       restarted.push(input);
       if (restarted.length === 1) {
@@ -138,13 +134,13 @@ test("cuts the active turn and retries the fused input when steering fails", asy
   coordinator.close();
 });
 
-test("resets the fusion window so bursty triggers reach the model as one steer", async () => {
+test("resets the fusion window so bursty triggers reach the model as one replacement", async () => {
   const pending = { group: [{ id: "one", text: "first" }] };
-  const steered = [];
+  const restarted = [];
   const generation = {
     id: "generation-1",
-    steer: async (input) => {
-      steered.push(input);
+    restart: async (input) => {
+      restarted.push(input);
       return { threadId: "thread-1", turnId: "turn-1" };
     }
   };
@@ -171,7 +167,7 @@ test("resets the fusion window so bursty triggers reach the model as one steer",
 
   const result = await scheduled;
   assert.equal(result.ok, true);
-  assert.deepEqual(steered, ["first\nsecond\nthird"]);
+  assert.deepEqual(restarted, ["first\nsecond\nthird"]);
   assert.deepEqual(pending.group, []);
   coordinator.close();
 });
@@ -191,7 +187,7 @@ test("waits for the resettable fusion window when scheduled work is explicitly d
   coordinator.schedule("group");
   const result = await coordinator.waitForIdle("group");
 
-  assert.equal(result.reason, "no_steerable_generation");
+  assert.equal(result.reason, "no_restartable_generation");
   assert.ok(Date.now() - startedAt >= 30);
   assert.equal(pending.group.length, 2);
   coordinator.close();
