@@ -87,6 +87,7 @@ export function createQqReplySteeringCoordinator({
         threadId: accepted?.threadId || generation.threadId || null,
         turnId: accepted?.turnId || generation.turnId || null,
         interruptedTurnId: accepted?.interruptedTurnId || null,
+        deadlineRenewalCount: Number(accepted?.deadlineRenewalCount || 0),
         deliveryMode: "restarted",
         queuedCount: entries.length,
         consumedCount

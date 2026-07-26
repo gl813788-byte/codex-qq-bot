@@ -17,6 +17,7 @@ test("log API exposes full diagnostics by default and supports compact mode expl
     durationMs: 42,
     taskType: "qq-image-generation",
     timeoutMs: 600_000,
+    deadlineRenewalCount: 2,
     stderr: "internal detail"
   }, "codex");
   logger.debug("Codex model output captured", {
@@ -35,7 +36,8 @@ test("log API exposes full diagnostics by default and supports compact mode expl
   assert.deepEqual(compact.entries[0].details, {
     durationMs: 42,
     taskType: "qq-image-generation",
-    timeoutMs: 600_000
+    timeoutMs: 600_000,
+    deadlineRenewalCount: 2
   });
 
   const verbose = await buildLogsResponse(filePath, new URLSearchParams());

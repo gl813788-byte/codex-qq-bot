@@ -41,7 +41,7 @@ When one fused answer contains Bot-triggering messages from multiple people, the
 
 Delivery is receipt-aware. Successful bubbles alone enter the Bot's sent-message memory. Any failed bubble is stored separately as a bounded QQ delivery receipt, and the next model turn is told that the content did not reach QQ and must not be treated as something the other person already saw. Partial multi-bubble delivery records both the delivered and failed counts.
 
-Codex deadlines are selected by task type instead of sharing one constant. Defaults are two minutes for ordinary replies, three minutes for vision replies, 90 seconds for context summaries, 90 seconds for self-persona work, five minutes for owner file tasks, and ten minutes for image generation. Each class has an independent environment override. Runtime state and logs report the selected task type and deadline, while `/stop` can still terminate work early.
+Codex deadlines are selected by task type instead of sharing one constant. Defaults are three minutes for ordinary replies, four minutes for vision replies, 90 seconds for context summaries, 90 seconds for self-persona work, five minutes for owner file tasks, and ten minutes for image generation. Each class has an independent environment override. Every accepted steered follow-up or fused replacement turn renews the full task-specific window, so a newly started answer does not inherit only the previous turn's remaining time. Runtime state and logs report the selected task type, deadline, and renewal count, while `/stop` can still terminate work early.
 
 ## Context and memory
 

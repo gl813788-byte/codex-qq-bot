@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_MAX_PROTOCOL_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_STDERR_BYTES = 32 * 1024;
 const DEFAULT_KILL_GRACE_MS = 1_000;
@@ -57,6 +57,9 @@ export function runCodexAppServerTurn({
     let restartInProgress = false;
     let pendingRestart = null;
     let forceKillTimer = null;
+    let timeoutTimer = null;
+    let deadlineRenewalCount = 0;
+    const normalizedTimeoutMs = normalizePositiveInteger(timeoutMs, DEFAULT_TIMEOUT_MS);
     const pendingRequests = new Map();
     const agentMessages = [];
     const supersededTurnIds = new Set();
@@ -102,13 +105,20 @@ export function runCodexAppServerTurn({
         pendingRestart.reject(error || createTurnInactiveError());
         pendingRestart = null;
       }
-      clearTimeout(timeoutTimer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
       signal?.removeEventListener("abort", abortTurn);
       const terminalError = error || null;
+      if (terminalError && terminalError.deadlineRenewalCount == null) {
+        try {
+          terminalError.deadlineRenewalCount = deadlineRenewalCount;
+        } catch {
+          // Some externally supplied abort errors may be non-extensible.
+        }
+      }
       rejectPendingRequests(terminalError || createTurnInactiveError());
       terminateChild();
       if (terminalError) reject(terminalError);
-      else resolve({ ...result, stderr });
+      else resolve({ ...result, stderr, deadlineRenewalCount });
     };
 
     const send = (message) => {
@@ -236,6 +246,23 @@ export function runCodexAppServerTurn({
       }
     };
 
+    const armDeadline = ({ renewal = false } = {}) => {
+      if (settled) return false;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (renewal) deadlineRenewalCount += 1;
+      timeoutTimer = setTimeout(() => {
+        const error = new Error(`Codex app-server turn timed out after ${normalizedTimeoutMs}ms`);
+        error.code = "CODEX_TURN_TIMEOUT";
+        error.deadlineRenewalCount = deadlineRenewalCount;
+        if (turnActive && threadId && turnId) {
+          void request("turn/interrupt", { threadId, turnId }).catch(() => undefined);
+        }
+        finish(error);
+      }, normalizedTimeoutMs);
+      timeoutTimer.unref?.();
+      return true;
+    };
+
     const steer = async (input) => {
       if (!turnActive || !threadId || !turnId) throw createTurnInactiveError();
       const result = await request("turn/steer", {
@@ -243,9 +270,11 @@ export function runCodexAppServerTurn({
         expectedTurnId: turnId,
         input: normalizeUserInput(input)
       });
+      armDeadline({ renewal: true });
       return {
         threadId,
-        turnId: result?.turnId || turnId
+        turnId: result?.turnId || turnId,
+        deadlineRenewalCount
       };
     };
 
@@ -254,6 +283,7 @@ export function runCodexAppServerTurn({
       if (restartInProgress || pendingRestart) throw createTurnRestartingError();
       const interruptedTurnId = turnId;
       restartInProgress = true;
+      armDeadline({ renewal: true });
       const completion = new Promise((restartResolve, restartReject) => {
         pendingRestart = {
           turnId: interruptedTurnId,
@@ -288,7 +318,8 @@ export function runCodexAppServerTurn({
         return {
           threadId,
           turnId,
-          interruptedTurnId
+          interruptedTurnId,
+          deadlineRenewalCount
         };
       } catch (error) {
         if (pendingRestart?.turnId === interruptedTurnId) {
@@ -317,15 +348,7 @@ export function runCodexAppServerTurn({
       finish(error);
     };
 
-    const timeoutTimer = setTimeout(() => {
-      const error = new Error(`Codex app-server turn timed out after ${timeoutMs}ms`);
-      error.code = "CODEX_TURN_TIMEOUT";
-      if (turnActive && threadId && turnId) {
-        void request("turn/interrupt", { threadId, turnId }).catch(() => undefined);
-      }
-      finish(error);
-    }, normalizePositiveInteger(timeoutMs, DEFAULT_TIMEOUT_MS));
-    timeoutTimer.unref?.();
+    armDeadline();
 
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");

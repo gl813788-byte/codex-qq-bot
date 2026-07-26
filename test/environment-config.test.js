@@ -41,8 +41,8 @@ test("uses stable defaults and rejects invalid listener ports", () => {
   assert.equal(defaults.qqProactiveJudgeMinInterest, 20);
   assert.equal(defaults.qqProactiveJudgeProvider, "openrouter");
   assert.equal(defaults.qqProactiveJudgeModel, "openrouter/free");
-  assert.equal(defaults.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_REPLY], 120_000);
-  assert.equal(defaults.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_VISION_REPLY], 180_000);
+  assert.equal(defaults.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_REPLY], 180_000);
+  assert.equal(defaults.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_VISION_REPLY], 240_000);
   assert.equal(defaults.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_CONTEXT_SUMMARY], 90_000);
   assert.equal(defaults.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_SELF_PERSONA], 90_000);
   assert.equal(defaults.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_FILE_TASK], 300_000);

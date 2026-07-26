@@ -85,7 +85,7 @@
 
 - **HTTP：**仪表盘和管理 API 提供公开状态、维护信息和日志；没有显式开启远程绑定与认证时拒绝非回环访问。
 - **OneBot：**Webhook 先经过认证或回环限制、大小限制、归一化和去重，再进入 QQ 策略。
-- **Codex：**普通 QQ 回复通过 app-server 的可控 turn 运行；一批追问静默满 5 秒后，Hub 直接 `turn/interrupt`，再在同一 thread 中 `turn/start` 一段替代输入。app-server 若报告旧 turn 已经 inactive，Hub 会把它视为可以直接开始替代 turn 的边界竞态，而不是继续保留批次。如果 turn 完成时仍有一批追问等待处理，未发送草稿会被丢弃，这批追问立即开启替代轮次，不继续等待也不投递过时文本。长期 scope 通过独立 app-server 进程 `thread/resume` 同一本地线程；每个子进程仍使用受控环境、并发限制和当前 QQ 模型配置。
+- **Codex：**普通 QQ 回复通过 app-server 的可控 turn 运行；一批追问静默满 5 秒后，Hub 直接 `turn/interrupt`，再在同一 thread 中 `turn/start` 一段替代输入。app-server 若报告旧 turn 已经 inactive，Hub 会把它视为可以直接开始替代 turn 的边界竞态，而不是继续保留批次。每次追问引导被接受或替代 turn 开始时，任务截止时间都会按当前任务类型续成完整窗口，而不是沿用旧 turn 的剩余时间。如果 turn 完成时仍有一批追问等待处理，未发送草稿会被丢弃，这批追问立即开启替代轮次，不继续等待也不投递过时文本。长期 scope 通过独立 app-server 进程 `thread/resume` 同一本地线程；每个子进程仍使用受控环境、并发限制和当前 QQ 模型配置。
 - **QQ 投递：**多人融合轮把有界参与者交给主模型，每位候选人都能被选择引用或艾特；缺少或无效标记时安全回退为普通回复。单人轮仍沿用基于关系距离的引用/艾特/普通回复策略。OneBot 每个气泡结果都会形成投递回执，只有成功文本进入“已发送”记忆，失败项单独保留给下一轮主模型。
 - **模型职责：**已配置的 OpenRouter、DeepSeek 或自定义 OpenAI 兼容兴趣模型是后台轻量判定与杂项初筛面，厂商适配集中在 `src/interest-model-provider.js`；密钥只在环境配置中，厂商/模型选择可持久化。兴趣模型只处理有界触发、分类、风险标注和简单审核；Codex 主模型负责聊天、总结、工具检索、选题、知识提取、复杂推理和最终回复。
 - **存储：**设置、记忆和社交状态保存在本地文件；QQ scope 到 Codex thread 的映射单独原子写入 `data/qq-codex-sessions.json`，不复制 Codex 线程正文。`qq-knowledge-base` 已通过 repository 进行安全加载与原子写入；格式错误会保留原文件并切换只读保护，其他存储后续按小步继续抽取。
