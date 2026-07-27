@@ -168,6 +168,39 @@ test("starts the replacement when app-server reports that the old turn already b
   assert.equal((await resultPromise).finalResponse, "replacement after inactive race");
 });
 
+test("fails a silent replacement early and exposes its accepted input for fresh-process recovery", async () => {
+  const server = createFakeAppServer();
+  let ready;
+  let restarted;
+  const readyPromise = new Promise((resolve) => { ready = resolve; });
+  const resultPromise = runCodexAppServerTurn({
+    prompt: "first",
+    timeoutMs: 500,
+    replacementIdleTimeoutMs: 30,
+    spawnProcess: server.spawn,
+    onReady: ready,
+    onRestarted: (details) => { restarted = details; }
+  });
+  const controls = await readyPromise;
+  await controls.restart([
+    { type: "text", text: "fused follow-up" },
+    { type: "localImage", path: "/tmp/fused.png" }
+  ]);
+
+  const keepEventLoopAlive = delay(60);
+  await assert.rejects(resultPromise, (error) => {
+    assert.equal(error.code, "CODEX_REPLACEMENT_STALLED");
+    assert.equal(error.deadlineRenewalCount, 1);
+    return true;
+  });
+  await keepEventLoopAlive;
+  assert.equal(restarted.turnId, "turn-2");
+  assert.deepEqual(restarted.input, [
+    { type: "text", text: "fused follow-up" },
+    { type: "localImage", path: "/tmp/fused.png", detail: null }
+  ]);
+});
+
 test("resumes a persistent thread and falls back to a new one when it is stale", async () => {
   const resumedServer = createFakeAppServer({ resume: "ok" });
   let resumedReady;

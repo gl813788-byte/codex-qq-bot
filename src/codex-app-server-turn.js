@@ -4,6 +4,7 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_MAX_PROTOCOL_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_STDERR_BYTES = 32 * 1024;
 const DEFAULT_KILL_GRACE_MS = 1_000;
+const DEFAULT_REPLACEMENT_IDLE_TIMEOUT_MS = 60_000;
 
 export function runCodexAppServerTurn({
   codexPath = "codex",
@@ -20,10 +21,12 @@ export function runCodexAppServerTurn({
   maxProtocolBytes = DEFAULT_MAX_PROTOCOL_BYTES,
   maxStderrBytes = DEFAULT_MAX_STDERR_BYTES,
   killGraceMs = DEFAULT_KILL_GRACE_MS,
+  replacementIdleTimeoutMs = DEFAULT_REPLACEMENT_IDLE_TIMEOUT_MS,
   signal,
   spawnProcess = spawn,
   onSpawn,
   onReady,
+  onRestarted,
   onExit
 } = {}) {
   return new Promise((resolve, reject) => {
@@ -58,6 +61,7 @@ export function runCodexAppServerTurn({
     let pendingRestart = null;
     let forceKillTimer = null;
     let timeoutTimer = null;
+    let replacementIdleTimer = null;
     let deadlineRenewalCount = 0;
     const normalizedTimeoutMs = normalizePositiveInteger(timeoutMs, DEFAULT_TIMEOUT_MS);
     const pendingRequests = new Map();
@@ -106,6 +110,7 @@ export function runCodexAppServerTurn({
         pendingRestart = null;
       }
       if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (replacementIdleTimer) clearTimeout(replacementIdleTimer);
       signal?.removeEventListener("abort", abortTurn);
       const terminalError = error || null;
       if (terminalError && terminalError.deadlineRenewalCount == null) {
@@ -113,6 +118,13 @@ export function runCodexAppServerTurn({
           terminalError.deadlineRenewalCount = deadlineRenewalCount;
         } catch {
           // Some externally supplied abort errors may be non-extensible.
+        }
+      }
+      if (terminalError && terminalError.stderr == null) {
+        try {
+          terminalError.stderr = stderr;
+        } catch {
+          // Some externally supplied errors may be non-extensible.
         }
       }
       rejectPendingRequests(terminalError || createTurnInactiveError());
@@ -220,6 +232,9 @@ export function runCodexAppServerTurn({
 
     const consumeProtocolChunk = (chunk) => {
       const text = String(chunk || "");
+      if (replacementIdleTimer && turnActive && deadlineRenewalCount > 0) {
+        armReplacementIdleDeadline();
+      }
       protocolBytes += Buffer.byteLength(text);
       if (protocolBytes > normalizePositiveInteger(maxProtocolBytes, DEFAULT_MAX_PROTOCOL_BYTES)) {
         const error = createProtocolError("Codex app-server protocol output exceeded its limit");
@@ -260,6 +275,31 @@ export function runCodexAppServerTurn({
         finish(error);
       }, normalizedTimeoutMs);
       timeoutTimer.unref?.();
+      return true;
+    };
+
+    const armReplacementIdleDeadline = () => {
+      if (replacementIdleTimer) clearTimeout(replacementIdleTimer);
+      if (settled || !turnActive || deadlineRenewalCount < 1) return false;
+      const idleTimeoutMs = Math.min(
+        normalizedTimeoutMs,
+        normalizePositiveInteger(
+          replacementIdleTimeoutMs,
+          DEFAULT_REPLACEMENT_IDLE_TIMEOUT_MS
+        )
+      );
+      replacementIdleTimer = setTimeout(() => {
+        const error = new Error(
+          `Codex replacement turn produced no protocol activity for ${idleTimeoutMs}ms`
+        );
+        error.code = "CODEX_REPLACEMENT_STALLED";
+        error.deadlineRenewalCount = deadlineRenewalCount;
+        if (turnActive && threadId && turnId) {
+          void request("turn/interrupt", { threadId, turnId }).catch(() => undefined);
+        }
+        finish(error);
+      }, idleTimeoutMs);
+      replacementIdleTimer.unref?.();
       return true;
     };
 
@@ -315,11 +355,24 @@ export function runCodexAppServerTurn({
         turnId = nextTurn?.turn?.id || null;
         if (!turnId) throw createProtocolError("Codex app-server did not return a replacement turn id");
         turnActive = true;
-        return {
+        const restarted = {
           threadId,
           turnId,
           interruptedTurnId,
-          deadlineRenewalCount
+          deadlineRenewalCount,
+          input: normalizeUserInput(input)
+        };
+        armReplacementIdleDeadline();
+        try {
+          onRestarted?.(restarted);
+        } catch {
+          // Lifecycle observers must not change the replacement outcome.
+        }
+        return {
+          threadId: restarted.threadId,
+          turnId: restarted.turnId,
+          interruptedTurnId: restarted.interruptedTurnId,
+          deadlineRenewalCount: restarted.deadlineRenewalCount
         };
       } catch (error) {
         if (pendingRestart?.turnId === interruptedTurnId) {

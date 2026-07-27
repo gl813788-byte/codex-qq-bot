@@ -92,7 +92,7 @@ test("QQ context image freshness rejects undated persisted references", () => {
 });
 
 test("explicit bot triggers use a larger complete recent-group window", () => {
-  assert.equal(getQqGroupRecentContextLimit(), 12);
-  assert.equal(getQqGroupRecentContextLimit({ explicitBotTrigger: true }), 18);
-  assert.equal(getQqGroupRecentContextLimit({ explicitBotTrigger: true, expandLevel: 1 }), 28);
+  assert.equal(getQqGroupRecentContextLimit(), 20);
+  assert.equal(getQqGroupRecentContextLimit({ explicitBotTrigger: true }), 30);
+  assert.equal(getQqGroupRecentContextLimit({ explicitBotTrigger: true, expandLevel: 1 }), 48);
 });

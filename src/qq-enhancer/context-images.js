@@ -73,8 +73,8 @@ function isFreshContextEntry(entry, cutoff) {
 }
 
 export function getQqGroupRecentContextLimit({ expandLevel = 0, explicitBotTrigger = false } = {}) {
-  if (Number(expandLevel) > 0) return 28;
-  return explicitBotTrigger ? 18 : 12;
+  if (Number(expandLevel) > 0) return 48;
+  return explicitBotTrigger ? 30 : 20;
 }
 
 function snapshotQqContextImage(image) {
