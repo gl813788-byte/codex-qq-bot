@@ -36,7 +36,9 @@
 | `src/qq-proactive-cycle-state.js` | 普通兴趣内存周期状态 | pending 消息计数、Bot 确认送达后的重置，以及作废送达前执行中 judge 且保留后续消息 |
 | `src/qq-message-run-compaction.js` | 模型上下文连续复读压缩 | 相邻同文消息的语义签名、计数合并和中文条数标注 |
 | `src/codex-app-server-turn.js` | Codex app-server 单轮客户端 | `thread/start`/`thread/resume`、`turn/start`、运行中控制、直接截断续开、inactive turn 竞态恢复、超时和中断 |
+| `src/qq-codex-turn-recovery.js` | 融合 turn 故障隔离 | 识别无进展的替代 turn，并用原始 prompt 与已接收融合输入重建一次全新线程尝试 |
 | `src/qq-reply-steering.js` | QQ 追问融合调度 | 每条新追问重置的 5 秒静默窗口、单批快照消费、直接开始替代 turn、已完成草稿替换、失败保留和活动轮次校验 |
+| `src/qq-context-relevance.js` | 远聊天语义评分 | 缓存本地语义画像并为较早的人类/Bot 聊天片段计算相关性 |
 | `src/qq-reply-targeting.js` | 融合回复寻址策略 | 有界参与者候选、模型隐藏引用/艾特/普通回复标记和安全的普通回复回退 |
 | `src/qq-delivery-receipt.js` | QQ 投递事实边界 | 成功/失败气泡回执和下一轮可见的有界失败上下文 |
 | `src/qq-codex-session.js` | QQ Codex 会话策略 | 临时/长期/自动模式、频率判断、线程映射归一化和淘汰 |
@@ -47,7 +49,7 @@
 | `src/qq-history-retrieval.js` | QQ 复盘历史边界 | NapCat 分页、消息归一化、本地合并和去重 |
 | `src/qq-short-term-memory.js` | QQ 短期记忆领域 | 旧数据迁移、简述/详述、覆盖和过时生命周期 |
 | `src/qq-style-review.js` | 真人/Bot 风格复盘边界 | 灵活主模型提示、结构解析和安全压缩 |
-| `src/unified-memory/` | 跨通道统一记忆 | SQLite/FTS/语义向量混合召回、范围过滤和单次摘要注入 |
+| `src/unified-memory/` | 跨通道统一记忆 | SQLite/FTS/语义向量混合召回、统一 QQ 聊天查询构造、范围过滤和单次摘要注入 |
 | `src/*.js` | 现有领域与基础设施模块 | 修改对应能力并渐进迁移 |
 | `modules/` | 平台客户端和可选集成 | 共享界面、启动器、QQ 社交桥接 |
 | `scripts/` | 部署与运维命令 | 检查、部署、日志和仓库 `ncc` |
@@ -86,7 +88,8 @@
 
 - **HTTP：**仪表盘和管理 API 提供公开状态、维护信息和日志；没有显式开启远程绑定与认证时拒绝非回环访问。
 - **OneBot：**Webhook 先经过认证或回环限制、大小限制、归一化和去重，再进入 QQ 策略。
-- **Codex：**普通 QQ 回复通过 app-server 的可控 turn 运行；一批追问静默满 5 秒后，Hub 直接 `turn/interrupt`，再在同一 thread 中 `turn/start` 一段替代输入。app-server 若报告旧 turn 已经 inactive，Hub 会把它视为可以直接开始替代 turn 的边界竞态，而不是继续保留批次。每次追问引导被接受或替代 turn 开始时，任务截止时间都会按当前任务类型续成完整窗口，而不是沿用旧 turn 的剩余时间。如果 turn 完成时仍有一批追问等待处理，未发送草稿会被丢弃，这批追问立即开启替代轮次，不继续等待也不投递过时文本。长期 scope 通过独立 app-server 进程 `thread/resume` 同一本地线程；每个子进程仍使用受控环境、并发限制和当前 QQ 模型配置。
+- **Codex：**普通 QQ 回复通过 app-server 的可控 turn 运行；一批追问静默满 5 秒后，Hub 直接 `turn/interrupt`，再在同一 thread 中 `turn/start` 一段替代输入。app-server 若报告旧 turn 已经 inactive，Hub 会把它视为可以直接开始替代 turn 的边界竞态，而不是继续保留批次。每次追问引导被接受或替代 turn 开始时，任务截止时间都会按当前任务类型续成完整窗口，而不是沿用旧 turn 的剩余时间。替代 turn 连续 60 秒没有协议活动时会被隔离，并在全新 app-server 线程中用原始完整 prompt 与已接收融合输入重试一次；普通非融合超时不会重试。如果 turn 完成时仍有一批追问等待处理，未发送草稿会被丢弃，这批追问立即开启替代轮次，不继续等待也不投递过时文本。长期 scope 通过独立 app-server 进程 `thread/resume` 同一本地线程；每个子进程仍使用受控环境、并发限制和当前 QQ 模型配置。
+- **QQ 上下文：**连续复读压缩后，总会完整发送一段连续的近期窗口（群普通 20 条、群明确触发 30 条、群扩展 48 条；私聊 30 条、扩展 60 条）。语义筛选只处理保留记录中更早的部分，并同时覆盖人类与 Bot 消息。当前正文、引用和融合追问组成同一查询，也供短期记忆、知识、印象和统一记忆召回复用。
 - **QQ 投递：**多人融合轮把有界参与者交给主模型，每位候选人都能被选择引用或艾特；缺少或无效标记时安全回退为普通回复。单人轮仍沿用基于关系距离的引用/艾特/普通回复策略。OneBot 每个气泡结果都会形成投递回执，只有成功文本进入“已发送”记忆，失败项单独保留给下一轮主模型。
 - **模型职责：**已配置的 OpenRouter、DeepSeek 或自定义 OpenAI 兼容兴趣模型是后台轻量判定与杂项初筛面，厂商适配集中在 `src/interest-model-provider.js`；密钥只在环境配置中，厂商/模型选择可持久化。兴趣模型只处理有界触发、分类、风险标注和简单审核；Codex 主模型负责聊天、总结、工具检索、选题、知识提取、复杂推理和最终回复。
 - **存储：**设置、记忆和社交状态保存在本地文件；QQ scope 到 Codex thread 的映射单独原子写入 `data/qq-codex-sessions.json`，不复制 Codex 线程正文。`qq-knowledge-base` 已通过 repository 进行安全加载与原子写入；格式错误会保留原文件并切换只读保护，其他存储后续按小步继续抽取。

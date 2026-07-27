@@ -211,6 +211,8 @@ import {
 } from "./qq-reply-steering.js";
 import { createQqOutgoingMentionResolver } from "./qq-outgoing-mentions.js";
 import { runCodexAppServerTurn } from "./codex-app-server-turn.js";
+import { runQqCodexTurnWithFusionRecovery } from "./qq-codex-turn-recovery.js";
+import { createQqContextSemanticScorer } from "./qq-context-relevance.js";
 import {
   normalizeQqCodexSessionMode,
   normalizeQqCodexSessionSettings,
@@ -237,6 +239,11 @@ import {
   buildShortTermSemanticItems,
   formatSemanticMemoryPrompt
 } from "./unified-memory/qq-memory-items.js";
+import {
+  buildQqSemanticRecallQuery,
+  recallQqSemanticMemory,
+  summarizeQqSemanticRecall
+} from "./unified-memory/qq-semantic-recall.js";
 import { createWebSearch, formatWebSearchProviderName } from "./web-search.js";
 import { isSupportedImageContentType, readResponseJson, writeResponseBodyToFile } from "./bounded-stream.js";
 import { runJsonProcess } from "./process-runner.js";
@@ -1562,12 +1569,21 @@ function consumeQqPendingReplyEvents(scopeId, entries, generation) {
       ...(generation.qqEvent.qqCodexInjectedMessageIds || []),
       ...(candidate.messageIds || [])
     ];
+    generation.qqEvent.qqSemanticMemoryItemIds = [
+      ...new Set([
+        ...(generation.qqEvent.qqSemanticMemoryItemIds || []),
+        ...(candidate.semanticRecallItemIds || [])
+      ])
+    ];
     generation.qqLastSteeringFusion = {
       triggerMessageCount: Number(candidate.triggerMessageCount || 0),
       compactedTriggerCount: Number(candidate.compactedTriggerCount || 0),
       contextMessageCount: Number(candidate.contextMessageCount || 0),
+      distantSemanticMessageCount: Number(candidate.distantSemanticMessageCount || 0),
+      distantSemanticSeedCount: Number(candidate.distantSemanticSeedCount || 0),
       inputBatchCount: 1,
       inputImageCount: Number(candidate.inputImageCount || 0),
+      semanticRecallCount: Number(candidate.semanticRecallCount || 0),
       triggerKinds: candidate.triggerKinds || [],
       fusionPreview: candidate.fusionPreview || ""
     };
@@ -1594,22 +1610,41 @@ async function buildQqPendingSteeringInput(entries, generation) {
       followUp: true
     })
     : { text: "", messageIds: [], latestAt: null };
+  const distantSemanticContext = parentEvent
+    ? buildQqDistantSemanticContext(aggregate, {
+      excludeMessageIds: [
+        ...(parentEvent.qqCodexInjectedMessageIds || []),
+        ...interleavedContext.messageIds
+      ]
+    })
+    : { text: "", messageIds: [], messageCount: 0, semanticSeedCount: 0 };
+  const semanticRecall = await recallQqChatSemantics(aggregate, {
+    includeImpressions: false,
+    excludeItemIds: parentEvent?.qqSemanticMemoryItemIds || [],
+    source: "fused-follow-up"
+  });
   if (generation) {
     const inputImages = Array.isArray(aggregate.images) ? aggregate.images.slice(0, 4) : [];
     generation.qqSteeringContextCandidate = {
       latestAt: interleavedContext.latestAt,
       triggerMessageCount: entries.length,
       compactedTriggerCount: Number(aggregate.queuedDisplayMessageCount || entries.length),
-      contextMessageCount: interleavedContext.messageIds.length,
+      contextMessageCount: interleavedContext.messageIds.length + distantSemanticContext.messageCount,
+      distantSemanticMessageCount: distantSemanticContext.messageCount,
+      distantSemanticSeedCount: distantSemanticContext.semanticSeedCount,
       inputImageCount: inputImages.length,
+      semanticRecallCount: semanticRecall.items.length,
+      semanticRecallItemIds: semanticRecall.itemIds,
       triggerKinds: [...new Set(entries.map(getQqFusionTriggerKind))],
       fusionPreview: [
         aggregate.text,
-        interleavedContext.text
+        interleavedContext.text,
+        distantSemanticContext.text
       ].filter(Boolean).join("\n\n").slice(0, 2400),
       messageIds: [
         ...getQqTriggerMessageIds(aggregate),
-        ...interleavedContext.messageIds
+        ...interleavedContext.messageIds,
+        ...distantSemanticContext.messageIds
       ]
     };
   }
@@ -1619,10 +1654,14 @@ async function buildQqPendingSteeringInput(entries, generation) {
       `你处理当前 QQ 回复期间又收到了 ${aggregate.queuedMessageCount || entries.length} 条新消息。Hub 已沿用连续消息合并规则，把相邻重复内容压成一条并标出总次数。`,
       "5 秒静默窗口已经结束，Hub 会截断上一段生成并从这里开启替代轮次。放弃未发送的旧草稿，把这些追加消息融合成一份新的统一 QQ 回复；不要先发旧答案，也不要逐条机械回复“消息一/消息二”。",
       replyTargetInstruction || null,
+      semanticRecall.context || null,
+      semanticRecall.context ? "" : null,
       "",
       aggregate.text,
       interleavedContext.text ? "" : null,
-      interleavedContext.text || null
+      interleavedContext.text || null,
+      distantSemanticContext.text ? "" : null,
+      distantSemanticContext.text || null
     ].filter((part) => part != null).join("\n")
   }];
   const images = Array.isArray(aggregate.images) ? aggregate.images.slice(0, 4) : [];
@@ -1674,8 +1713,11 @@ function logQqReplySteeringResult(result) {
       triggerMessageCount: generation?.qqLastSteeringFusion?.triggerMessageCount || result.queuedCount,
       compactedTriggerCount: generation?.qqLastSteeringFusion?.compactedTriggerCount || result.queuedCount,
       contextMessageCount: generation?.qqLastSteeringFusion?.contextMessageCount || 0,
+      distantSemanticMessageCount: generation?.qqLastSteeringFusion?.distantSemanticMessageCount || 0,
+      distantSemanticSeedCount: generation?.qqLastSteeringFusion?.distantSemanticSeedCount || 0,
       inputBatchCount: generation?.qqLastSteeringFusion?.inputBatchCount || 1,
       inputImageCount: generation?.qqLastSteeringFusion?.inputImageCount || 0,
+      semanticRecallCount: generation?.qqLastSteeringFusion?.semanticRecallCount || 0,
       triggerKinds: generation?.qqLastSteeringFusion?.triggerKinds || [],
       fusionPreview: generation?.qqLastSteeringFusion?.fusionPreview || null
     }, "qq", generation?.qqEvent ? qqLogContext(generation.qqEvent, { spanId: result.generationId }) : {});
@@ -1903,6 +1945,33 @@ async function syncAllSemanticMemoryLayers() {
     unifiedMemory.syncSemanticMemory?.()
   ]);
   return results;
+}
+
+async function recallQqChatSemantics(event, {
+  includeImpressions = true,
+  excludeItemIds = [],
+  source = "initial"
+} = {}) {
+  const query = buildQqSemanticRecallQuery(event);
+  const recall = await recallQqSemanticMemory({
+    semanticSearch: (options) => unifiedMemory.semanticSearch(options),
+    event,
+    query,
+    includeImpressions,
+    excludeItemIds
+  });
+  const details = {
+    source,
+    groupId: event?.groupId || null,
+    senderId: event?.senderId || null,
+    ...summarizeQqSemanticRecall(recall)
+  };
+  if (recall.errors.length > 0) {
+    logger.warn("QQ chat semantic recall completed with unavailable layers", details, "memory", qqLogContext(event));
+  } else {
+    logger.debug("QQ chat semantic recall completed", details, "memory", qqLogContext(event));
+  }
+  return recall;
 }
 
 const qqMemoryWriter = createCoalescingWriter(async () => {
@@ -7696,12 +7765,27 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   const id = crypto.randomUUID();
   const quotedContext = formatQuotedContext(event);
   let memoryContext = formatMemoryContext(event, { expandLevel: 0 });
+  logger.debug("QQ distant chat semantic context selected", {
+    groupId: event.groupId || null,
+    senderId: event.senderId || null,
+    recentMode: "complete-window",
+    distantMode: "semantic-recall",
+    ...(event.qqDistantContextRecall || {
+      expandLevel: 0,
+      recentCount: 0,
+      relatedCount: 0,
+      semanticSeedCount: 0,
+      matches: []
+    })
+  }, "memory", qqLogContext(event));
   const persistentContextDelta = buildQqPersistentContextDelta(event, {
     after: qqCodexSessionPlan.existingThread?.lastContextAt || null
   });
   event.qqCodexInjectedMessageIds = [
     ...getQqTriggerMessageIds(event),
-    ...persistentContextDelta.messageIds
+    ...(qqCodexSessionPlan.existingThread
+      ? persistentContextDelta.messageIds
+      : event.qqModelContextMessageIds || [])
   ];
   event.qqCodexContextAt = persistentContextDelta.latestAt || new Date().toISOString();
   const conversationIntent = analyzeQqConversationIntent(event);
@@ -7740,45 +7824,14 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   event.qqKnowledgeMatches = knowledgeMatches;
   const selfPersonaContext = formatQqSelfPersonaContext(state.qq.selfPersona);
   const scopeTopicContext = formatQqSelfPersonaScopeTopicContext(state.qq.selfPersona, scopeId);
-  const semanticScope = buildQqSemanticScope(event);
-  const publicSemanticScope = { ...semanticScope, includeGlobal: true };
-  const ownerSemanticScope = { ...semanticScope, includeGlobal: Boolean(event.isOwner) };
-  const [semanticImpressions, semanticScopedMemory, semanticKnowledge, semanticUnified] = await Promise.all([
-    unifiedMemory.semanticSearch({
-      query: "",
-      layers: ["impression"],
-      scope: semanticScope,
-      limit: 8,
-      minScore: 0
-    }).catch(() => []),
-    unifiedMemory.semanticSearch({
-      query: text,
-      layers: ["short-term"],
-      scope: semanticScope,
-      limit: 6
-    }).catch(() => []),
-    unifiedMemory.semanticSearch({
-      query: text,
-      layers: ["knowledge"],
-      scope: publicSemanticScope,
-      limit: 6
-    }).catch(() => []),
-    event.isOwner
-      ? unifiedMemory.semanticSearch({
-        query: text,
-        layers: ["unified"],
-        scope: ownerSemanticScope,
-        limit: 4
-      }).catch(() => [])
-      : Promise.resolve([])
-  ]);
-  const semanticMemoryItems = [
-    ...semanticImpressions,
-    ...semanticScopedMemory,
-    ...semanticKnowledge,
-    ...semanticUnified
-  ];
-  const semanticMemoryContext = formatSemanticMemoryPrompt(semanticMemoryItems);
+  const semanticRecall = await recallQqChatSemantics(event, {
+    includeImpressions: true,
+    source: "initial"
+  });
+  const semanticMemoryItems = semanticRecall.items;
+  const semanticKnowledge = semanticMemoryItems.filter((item) => item.layer === "knowledge");
+  const semanticMemoryContext = semanticRecall.context;
+  event.qqSemanticMemoryItemIds = [...semanticRecall.itemIds];
   const personaContext = formatQqPersonaContext(event);
   const repetitionGuard = state.qq.enhancer.enabled ? buildQqRepetitionGuard(event) : "";
   const webContext = await buildWebLookupContext(event);
@@ -8014,6 +8067,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       };
       const previousContextAt = event.qqCodexContextAt;
       const previousInjectedIds = [...(event.qqCodexInjectedMessageIds || [])];
+      const previousSemanticItemIds = [...(event.qqSemanticMemoryItemIds || [])];
       try {
         const fusionInput = await buildQqPendingSteeringInput(entries, fusionGeneration);
         const fusionText = fusionInput
@@ -8026,6 +8080,12 @@ async function buildModelReply(event, { replyScope = null } = {}) {
         event.qqCodexInjectedMessageIds = [
           ...(event.qqCodexInjectedMessageIds || []),
           ...(candidate?.messageIds || [])
+        ];
+        event.qqSemanticMemoryItemIds = [
+          ...new Set([
+            ...(event.qqSemanticMemoryItemIds || []),
+            ...(candidate?.semanticRecallItemIds || [])
+          ])
         ];
         const fullBase = await buildReplyPrompt(memoryContext, 1, false, "", draft, 0);
         const fullPrompt = [
@@ -8053,8 +8113,11 @@ async function buildModelReply(event, { replyScope = null } = {}) {
           triggerMessageCount: entries.length,
           compactedTriggerCount: candidate?.compactedTriggerCount || entries.length,
           contextMessageCount: candidate?.contextMessageCount || 0,
+          distantSemanticMessageCount: candidate?.distantSemanticMessageCount || 0,
+          distantSemanticSeedCount: candidate?.distantSemanticSeedCount || 0,
           inputBatchCount: 1,
           inputImageCount: candidate?.inputImageCount || 0,
+          semanticRecallCount: candidate?.semanticRecallCount || 0,
           triggerKinds: candidate?.triggerKinds || [],
           fusionPreview: candidate?.fusionPreview || null
         }, "qq", qqLogContext(event));
@@ -8070,8 +8133,11 @@ async function buildModelReply(event, { replyScope = null } = {}) {
           triggerMessageCount: entries.length,
           compactedTriggerCount: candidate?.compactedTriggerCount || entries.length,
           contextMessageCount: candidate?.contextMessageCount || 0,
+          distantSemanticMessageCount: candidate?.distantSemanticMessageCount || 0,
+          distantSemanticSeedCount: candidate?.distantSemanticSeedCount || 0,
           inputBatchCount: 1,
           inputImageCount: candidate?.inputImageCount || 0,
+          semanticRecallCount: candidate?.semanticRecallCount || 0,
           triggerKinds: candidate?.triggerKinds || [],
           fusionPreview: candidate?.fusionPreview || null
         }, "qq", qqLogContext(event));
@@ -8079,6 +8145,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       } catch (error) {
         event.qqCodexContextAt = previousContextAt;
         event.qqCodexInjectedMessageIds = previousInjectedIds;
+        event.qqSemanticMemoryItemIds = previousSemanticItemIds;
         const failure = ["QQ_REPLY_STOPPED", "HUB_SHUTTING_DOWN"].includes(error?.code)
           ? error
           : Object.assign(new Error(error?.message || "QQ follow-up replacement turn failed", { cause: error }), {
@@ -9125,6 +9192,9 @@ function formatMemoryContext(event, { expandLevel = 0 } = {}) {
   const recentParticipation = participationEntries.slice(-Math.min(expandLevel > 0 ? 5 : 3, state.qq.memory.perGroupLimit));
   const recentDeliveryFailures = state.qq.memory.deliveryFailures[scopeId] || [];
   const conversationMessages = selectConversationMessagesForContext(event, { expandLevel });
+  event.qqModelContextMessageIds = conversationMessages
+    .map((entry) => entry?.messageId == null ? "" : String(entry.messageId))
+    .filter(Boolean);
   if (recentParticipation.length === 0 && conversationMessages.length === 0 && recentDeliveryFailures.length === 0) return "";
   const scopeLabel = getQqMemoryScopeLabel(event);
   const parts = [
@@ -9143,6 +9213,20 @@ function formatMemoryContext(event, { expandLevel = 0 } = {}) {
   if (conversationMessages.length > 0) {
     const relatedMessages = conversationMessages.filter((entry) => entry.contextLayer === "related" && !entry.isTrigger);
     const recentMessages = conversationMessages.filter((entry) => entry.contextLayer !== "related" && !entry.isTrigger);
+    event.qqDistantContextRecall = {
+      expandLevel,
+      recentCount: recentMessages.length,
+      relatedCount: relatedMessages.length,
+      semanticSeedCount: relatedMessages.filter((entry) => Number(entry.qqContextSemanticSimilarity || 0) >= 0.12).length,
+      matches: relatedMessages
+        .filter((entry) => Number(entry.qqContextSemanticSimilarity || 0) >= 0.12)
+        .slice(-12)
+        .map((entry) => ({
+          messageId: entry.messageId == null ? null : String(entry.messageId).slice(0, 120),
+          role: entry.isAssistant ? "assistant" : "user",
+          score: Number(Number(entry.qqContextSemanticSimilarity || 0).toFixed(4))
+        }))
+    };
     if (recentMessages.length > 0) {
       parts.push(
         "",
@@ -9237,6 +9321,40 @@ function buildQqPersistentContextDelta(event, {
   };
 }
 
+function buildQqDistantSemanticContext(event, {
+  excludeMessageIds = [],
+  expandLevel = 0
+} = {}) {
+  const excludedIds = new Set((Array.isArray(excludeMessageIds) ? excludeMessageIds : [])
+    .map(String)
+    .filter(Boolean));
+  const selected = selectConversationMessagesForContext(event, { expandLevel })
+    .filter((entry) => entry.contextLayer === "related" && !entry.isTrigger)
+    .filter((entry) => {
+      const messageId = entry?.messageId == null ? "" : String(entry.messageId);
+      return !messageId || !excludedIds.has(messageId);
+    });
+  const compacted = compactConsecutiveQqMessages(selected, {
+    isConsecutive: (previous, current) => (
+      current.qqContextOriginalIndex === previous.qqContextOriginalIndex + 1
+    )
+  });
+  const messageIds = selected
+    .map((entry) => entry?.messageId == null ? "" : String(entry.messageId))
+    .filter(Boolean);
+  return {
+    text: compacted.length > 0
+      ? [
+        "按本批新问题从较远聊天记录中重新语义召回的相关片段（最近完整窗口已在原线程中，不在这里重复）：",
+        ...compacted.map(formatQqConversationContextLine)
+      ].join("\n")
+      : "",
+    messageIds,
+    messageCount: compacted.length,
+    semanticSeedCount: selected.filter((entry) => Number(entry.qqContextSemanticSimilarity || 0) >= 0.12).length
+  };
+}
+
 function selectConversationMessagesForContext(event, { expandLevel = 0 } = {}) {
   const scopeId = getQqMemoryScopeId(event);
   if (!scopeId) return [];
@@ -9249,7 +9367,7 @@ function selectConversationMessagesForContext(event, { expandLevel = 0 } = {}) {
     isTrigger: entry.messageId != null && triggerMessageIds.has(String(entry.messageId))
   })));
   if (isQqPrivateEvent(event)) {
-    const recentLimit = expandLevel > 0 ? 48 : 18;
+    const recentLimit = expandLevel > 0 ? 60 : 30;
     const recent = compactedEntries.slice(-recentLimit).map((entry) => ({
       ...entry,
       contextLayer: "recent"
@@ -9850,6 +9968,11 @@ function selectRelevantGroupMessages(event, { expandLevel = 0, entriesOverride =
   const targetNames = extractPossibleTargetNames(stripMentionText(event.text));
   const previousContextWindow = needsBroaderContextWindow(event) ? (expandLevel > 0 ? 12 : 6) : (expandLevel > 0 ? 6 : 3);
   const currentHosts = new Set((event.contentContext?.links || []).map(getQqUrlHost).filter(Boolean));
+  const semanticQuery = buildQqSemanticRecallQuery({
+    ...event,
+    text: stripMentionText(event.text)
+  });
+  const scoreSemanticRelevance = createQqContextSemanticScorer(semanticQuery);
   const scored = entries.map((entry, index) => {
     let score = index / 1000;
     if (entry.messageId != null && triggerMessageIds.has(String(entry.messageId))) score += 100;
@@ -9857,13 +9980,21 @@ function selectRelevantGroupMessages(event, { expandLevel = 0, entriesOverride =
     if (entry.senderLabel && targetNames.some((name) => namesLookRelated(entry.senderLabel, name))) score += 45;
     if (event.replyContext?.senderId && entry.senderId === String(event.replyContext.senderId)) score += 70;
     if (event.replyContext?.messageId && entry.messageId === String(event.replyContext.messageId)) score += 75;
-    if (event.groupId && event.senderId && entry.senderId === String(event.senderId)) score += 6;
-    const similarity = replySimilarity(stripMentionText(event.text), entry.text || "");
-    score += similarity * 50;
+    const surfaceSimilarity = replySimilarity(stripMentionText(event.text), entry.text || "");
+    const semanticRelevance = scoreSemanticRelevance(entry.text || "");
+    const semanticSimilarity = semanticRelevance.score >= 0.12 ? semanticRelevance.score : 0;
+    score += Math.max(surfaceSimilarity, semanticSimilarity) * 50;
     if (currentHosts.size > 0 && extractQqUrls(entry.text || "").some((url) => currentHosts.has(getQqUrlHost(url)))) score += 60;
-    return { entry, score, index };
+    return {
+      entry,
+      score,
+      index,
+      surfaceSimilarity,
+      semanticSimilarity,
+      semanticVectorScore: semanticRelevance.vectorScore
+    };
   });
-  const threshold = mentionedIds.length > 0 || targetNames.length > 0 || event.replyContext ? 20 : 5;
+  const threshold = 5;
   const selected = scored
     .filter((item) => item.score >= threshold)
     .sort((a, b) => b.score - a.score)
@@ -9875,6 +10006,10 @@ function selectRelevantGroupMessages(event, { expandLevel = 0, entriesOverride =
     .map((item) => ({
       ...item.entry,
       qqContextOriginalIndex: item.index,
+      qqContextSelectionScore: item.score,
+      qqContextSurfaceSimilarity: item.surfaceSimilarity,
+      qqContextSemanticSimilarity: item.semanticSimilarity,
+      qqContextSemanticVectorScore: item.semanticVectorScore,
       isTrigger: item.entry.messageId != null && triggerMessageIds.has(String(item.entry.messageId))
     }));
   return selected;
@@ -10389,30 +10524,67 @@ function runSteerableQqCodexTurn(input, options = {}) {
     const startedAt = Date.now();
     const previousQuota = state.maintenance.codex.quota;
     let qqGenerationId = null;
+    const generationIds = new WeakMap();
     try {
-      const result = await runCodexAppServerTurn({
+      const runAttempt = (attempt = {}) => runCodexAppServerTurn({
         codexPath: codexCliPath,
         cwd: options.cwd,
         env: buildCodexChildEnv({ overrides: options.env }),
         model: state.ai.model,
         reasoningEffort: state.ai.reasoningEffort,
-        prompt: input,
-        resumePrompt: options.resumePrompt,
-        imagePaths: options.imagePaths || [],
-        threadId: options.threadId || null,
-        ephemeral: options.ephemeral !== false,
+        prompt: Object.hasOwn(attempt, "prompt") ? attempt.prompt : input,
+        resumePrompt: Object.hasOwn(attempt, "resumePrompt")
+          ? attempt.resumePrompt
+          : options.resumePrompt,
+        imagePaths: Object.hasOwn(attempt, "imagePaths")
+          ? attempt.imagePaths
+          : options.imagePaths || [],
+        threadId: Object.hasOwn(attempt, "threadId")
+          ? attempt.threadId
+          : options.threadId || null,
+        ephemeral: Object.hasOwn(attempt, "ephemeral")
+          ? attempt.ephemeral
+          : options.ephemeral !== false,
         timeoutMs: options.timeout,
         signal: replyScope?.signal,
+        onRestarted: attempt.onRestarted,
         onSpawn: (child) => {
           activeCodexChildren.add(child);
-          qqGenerationId = trackQqGeneration(child, options);
+          const generationId = trackQqGeneration(child, options);
+          generationIds.set(child, generationId);
+          qqGenerationId = generationId;
         },
         onReady: (controls) => {
-          attachQqGenerationSteering(qqGenerationId, controls);
+          attachQqGenerationSteering(generationIds.get(controls.child), controls);
         },
         onExit: (child) => {
           activeCodexChildren.delete(child);
-          clearTrackedQqGeneration(qqGenerationId);
+          clearTrackedQqGeneration(generationIds.get(child));
+          generationIds.delete(child);
+        }
+      });
+      const result = await runQqCodexTurnWithFusionRecovery({
+        prompt: input,
+        imagePaths: options.imagePaths || [],
+        runAttempt,
+        onRecovery: ({
+          error,
+          replacementTextChars,
+          replacementImageCount
+        }) => {
+          logger.warn("Codex fused replacement stalled; starting one fresh app-server recovery", {
+            cwd: options.cwd,
+            taskType: options.taskType || null,
+            timeoutMs: options.timeout,
+            qqGenerationId,
+            recoveryAttempt: 1,
+            recoveryReason: error?.code || "CODEX_FUSION_TIMEOUT",
+            deadlineRenewalCount: Number(error?.deadlineRenewalCount || 0),
+            replacementTextChars,
+            replacementImageCount,
+            groupId: options.qqEvent?.groupId || null,
+            senderId: options.qqEvent?.senderId || null
+          }, "codex", options.qqEvent ? qqLogContext(options.qqEvent, { spanId: qqGenerationId }) : {});
         }
       });
       const finishedAt = Date.now();
@@ -10430,6 +10602,8 @@ function runSteerableQqCodexTurn(input, options = {}) {
         threadId: result.threadId,
         turnId: result.turnId,
         deadlineRenewalCount: Number(result.deadlineRenewalCount || 0),
+        fusionRecoveryCount: Number(result.fusionRecoveryCount || 0),
+        fusionRecoveryReason: result.fusionRecoveryReason || null,
         groupId: options.qqEvent?.groupId || null,
         senderId: options.qqEvent?.senderId || null,
         ...(diagnostics.lines.length > 0 ? {
@@ -10467,6 +10641,10 @@ function runSteerableQqCodexTurn(input, options = {}) {
       }
       state.maintenance.codex.lastOk = false;
       state.maintenance.codex.lastError = caught.message;
+      const diagnostics = summarizeProcessDiagnostics({
+        stderr: caught?.stderr || "",
+        stdout: ""
+      });
       logger.error("Codex app-server turn failed", {
         cwd: options.cwd,
         durationMs: state.maintenance.codex.lastDurationMs,
@@ -10474,8 +10652,15 @@ function runSteerableQqCodexTurn(input, options = {}) {
         timeoutMs: options.timeout,
         qqGenerationId,
         deadlineRenewalCount: Number(caught?.deadlineRenewalCount || 0),
+        fusionRecoveryAttempted: Boolean(caught?.fusionRecoveryAttempted),
+        fusionRecoveryReason: caught?.fusionRecoveryReason || null,
         groupId: options.qqEvent?.groupId || null,
         senderId: options.qqEvent?.senderId || null,
+        ...(diagnostics.lines.length > 0 ? {
+          diagnostic: diagnostics.summary,
+          diagnosticLines: diagnostics.lines,
+          diagnosticOmittedLines: diagnostics.omittedLineCount
+        } : {}),
         error: caught
       }, "codex", options.qqEvent ? qqLogContext(options.qqEvent, { spanId: qqGenerationId }) : {});
       throw caught;

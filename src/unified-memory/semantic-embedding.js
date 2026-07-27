@@ -72,6 +72,10 @@ export function cosineSimilarity(left, right) {
 export function lexicalSimilarity(left, right) {
   const leftFeatures = semanticLexicalWeights(left);
   const rightFeatures = semanticLexicalWeights(right);
+  return lexicalFeatureSimilarity(leftFeatures, rightFeatures);
+}
+
+export function lexicalFeatureSimilarity(leftFeatures, rightFeatures) {
   if (!leftFeatures.size || !rightFeatures.size) return 0;
   let intersection = 0;
   let leftTotal = 0;
@@ -87,6 +91,10 @@ export function lexicalSimilarity(left, right) {
 export function semanticQueryCoverage(query, candidate) {
   const queryFeatures = semanticLexicalWeights(query);
   const candidateFeatures = semanticLexicalWeights(candidate);
+  return semanticFeatureCoverage(queryFeatures, candidateFeatures);
+}
+
+export function semanticFeatureCoverage(queryFeatures, candidateFeatures) {
   if (!queryFeatures.size || !candidateFeatures.size) return 0;
   let matched = 0;
   let total = 0;
@@ -166,7 +174,7 @@ function semanticFeatureWeights(text) {
   return applySublinearFrequency(weights);
 }
 
-function semanticLexicalWeights(text) {
+export function semanticLexicalWeights(text) {
   const features = semanticFeatureWeights(text);
   const output = new Map();
   for (const [feature, weight] of features) {
