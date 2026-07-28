@@ -81,6 +81,24 @@ npm run ncc -- session-mode inherit 群号
 
 支持该功能的全局控制器使用 `ncc session` / `ncc session-mode ...`。省略 scope 修改默认模式；指定群号或 `private:QQ号` 修改覆盖。运行中的 Hub 通过 `/api/qq/session-mode` 立即持久化，Hub 停止时则安全修改 `data/settings.json`，下次启动生效。
 
+## AI 手动任务中心
+
+QQ 菜单中的 `/AI任务` 和两套 NCC 都读取同一个任务目录，并通过本机回环管理 API 执行：
+
+```bash
+npm run ncc -- ai-tasks
+npm run ncc -- ai-run chat-summary 群号
+npm run ncc -- ai-run scope-summary private:QQ号
+npm run ncc -- ai-run style-review 群号 --force
+npm run ncc -- ai-run global-persona
+npm run ncc -- ai-run knowledge-review --force
+npm run ncc -- ai-run all 群号 --full
+```
+
+支持 `chat-summary`（聊天总结与知识提取）、`scope-summary`（当前范围的人设证据/记忆总结）、`style-review`（群风格复盘）、`global-persona`（全局人设刷新）、`knowledge-review`（到期低频黑话的双模型审核）和 `all`。QQ 中使用 `/AI任务 任务名`；`/AI任务 强制 任务名` 显式开启强制执行。
+
+普通手动运行会跳过自动周期的“尚未到期”，但仍遵守任务本身的常规数据门槛。`--force` / “强制”还会跳过冷却与常规样本门槛；它不会绕过 QQ 主人/菜单权限、群白名单、本机回环 API 限制、并发锁、OneBot 身份或完全没有数据的保护。知识强制审核只扩大候选范围，仍严格执行“兴趣模型初筛 → 主模型终审 → 活动/内容变更保护”，绝不直接删除。任务真实调用当前 QQ 模型并使用既有任务超时；Hub 必须正在运行。
+
 ## 周期行为的重启补做
 
 周期性 QQ 业务按本地状态中持久化的时间戳判断，不依赖 Node.js 进程连续运行多久。Hub 启动时会立即检查自适应风格复盘和自我人格摘要/生成；QQ 通道启用时会立即检查恢复的普通兴趣周期、冷群兴趣与私聊兴趣，之后的普通轮询只负责唤醒这些墙上时间判断。

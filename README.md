@@ -113,6 +113,7 @@ Core capabilities:
 - Agent-style Codex replies that can use bounded chat-history, search, memory, and management tools over multiple rounds.
 - Fused follow-ups and session modes: mentions, replies, interest approvals, and other triggers arriving during generation are compacted with selected in-between context; after five quiet seconds the stale turn is cut and one replacement answer starts. A silent replacement is isolated after 60 seconds and retried once in a fresh app-server thread with the original context plus the fused input. Each group/private scope can use temporary, persistent, or automatic Codex threads, with persistent turns receiving only incremental context.
 - Adaptive social behavior for message length, group rhythm, stickers, and voluntary replies. A separate main-model style review precisely compares human and Bot tone and stores a brief, full diagnosis, and replacement guidance. The interest model stays limited to bounded lightweight decisions, classification and triage; complex background review uses interest triage followed by main-model final review.
+- A manual AI task center shared by QQ `/AI任务` and NCC can run chat summaries, scope-memory summaries, group style reviews, global-persona refreshes, knowledge reviews, or every applicable task for one scope. Explicit force mode skips due-time, cooldown, and normal sample thresholds without bypassing permissions, group allowlists, concurrency locks, OneBot identity, or empty-data safeguards.
 - Layered memory and chat recall: normal and fused replies send a contiguous recent window in full, then select only older human/Bot transcript fragments by semantic relevance to the current message, quote and fused follow-ups. The same local SQLite + FTS hybrid plane recalls short-term notes, long-term knowledge, impressions, and unified memory with deterministic phrase/concept features rather than BERT. QQ number is the stable person key across group cards, private names, and Bot-managed aliases. When the main AI judges a non-sensitive profile mature, the Hub promotes it to unified memory; later recognition in another group or private chat expands recall to that person's per-session AI profiles. Automatic context contains briefs only, while a turn-scoped person tool retrieves full detail.
 - QQ administration for model/reasoning choice, allowlists, permissions, bans, moderation, resilient friend/group requests with persisted upstream/native diagnostics, and text, image-only, or mixed QQ Space moods.
 - Selectable interest-model providers: OpenRouter, DeepSeek, or a custom OpenAI-compatible service, with credentials kept environment-only.
@@ -131,6 +132,8 @@ npm run ncc -- setup
 npm run ncc -- start
 npm run ncc -- session
 npm run ncc -- session-mode persistent GROUP_ID
+npm run ncc -- ai-tasks
+npm run ncc -- ai-run style-review GROUP_ID --force
 npm run ncc -- logs --errors --since 30m --summary
 ```
 
