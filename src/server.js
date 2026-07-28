@@ -24,6 +24,13 @@ import { buildLogsResponse } from "./log-api.js";
 import { summarizeProcessDiagnostics } from "./process-diagnostics.js";
 import { importOptionalModule } from "./optional-modules.js";
 import { defaultQqPublicCommands, qqCommandCatalog } from "./qq-command-catalog.js";
+import {
+  formatQqManualAiTaskCenter,
+  parseQqManualAiTaskCommand,
+  qqManualAiTaskCatalog,
+  validateQqManualAiTaskRequest
+} from "./qq-manual-ai-task.js";
+import { formatQqVisualMenu } from "./qq-menu.js";
 import { createConcurrencyLimiter } from "./concurrency-limiter.js";
 import { createCodexModelCatalog, findCodexModel } from "./codex-model-catalog.js";
 import { buildCodexChildEnv } from "./codex-child-env.js";
@@ -741,6 +748,7 @@ const qqPersonaMemberLimit = Math.max(50, Math.min(2_000, Number(process.env.COD
 let qqPeriodicScheduler = null;
 let qqSelfPersonaRefreshPromise = null;
 let qqKnowledgeDeletionReviewPromise = null;
+const qqManualAiTaskPromises = new Map();
 let shuttingDown = false;
 
 function trackBackgroundTask(task, onError = null) {
@@ -2153,69 +2161,11 @@ async function refreshQqSelfPersona() {
     limit: 2
   });
   for (const scope of dueScopes) {
-    const localEntries = state.qq.memory.recentMessages[scope.scopeId] || [];
     try {
-      const scopeEvent = scope.kind === "group"
-        ? {
-          groupId: scope.scopeId,
-          groupName: getQqKnowledgeGroupName(state.qq.knowledgeBase, scope.scopeId),
-          selfId: oneBotHealth.selfId
-        }
-        : {
-          senderId: scope.scopeId.slice("private:".length),
-          senderName: localEntries.find((entry) => !entry?.isAssistant)?.senderName
-            || localEntries.find((entry) => !entry?.isAssistant)?.senderLabel
-            || "",
-          selfId: oneBotHealth.selfId
-        };
-      const historySnapshot = await getQqReviewHistorySnapshot(scopeEvent, { maxMessages: 300 });
-      const entries = historySnapshot.messages;
-      if (entries.length === 0) continue;
-      const prompt = buildQqSelfPersonaScopeSummaryPrompt(scope.scopeId, entries, {
-        botName: state.qq.selfPersona.account.nickname || assistantName,
-        groupName: scopeEvent.groupName || "",
-        existingKnowledge: formatQqKnowledgeSummaryReference(scopeEvent),
-        previousSummary: scope.summary,
-        previousTopics: scope.topics,
-        reviewId: historySnapshot.snapshotId
+      await runQqSelfPersonaScopeSummary(scope, {
+        oneBotHealth,
+        sourceType: "periodic-scope-summary"
       });
-      const output = await runQqSelfPersonaModelPrompt(prompt, `scope-${scope.kind}`);
-      const summary = parseQqSelfPersonaJson(output);
-      if (!summary) throw new Error("scope summarizer did not return valid FINAL_JSON");
-      state.qq.selfPersona = applyQqSelfPersonaScopeSummary(state.qq.selfPersona, scope.scopeId, summary);
-      let knowledgeChanged = false;
-      let knowledgeResult = null;
-      if (Array.isArray(summary.knowledge) && qqKnowledgeBaseRepository.writable) {
-        const knowledge = applyQqKnowledgePatches(
-          state.qq.knowledgeBase,
-          summary.knowledge,
-          buildQqKnowledgeContext(scopeEvent, entries),
-          { allowGlobal: false, sourceType: "periodic-scope-summary" }
-        );
-        state.qq.knowledgeBase = knowledge.store;
-        knowledgeChanged = knowledge.changed;
-        knowledgeResult = knowledge;
-      }
-      await Promise.all([
-        saveQqSelfPersona(),
-        knowledgeChanged ? saveQqKnowledgeBase() : Promise.resolve()
-      ]);
-      if (knowledgeResult && (knowledgeResult.applied.length || knowledgeResult.rejected.length)) {
-        logQqKnowledgePatchResult(knowledgeResult, {
-          source: "periodic-scope-summary",
-          context: scopeEvent
-        });
-      }
-      logger.info("QQ self persona scope summarized", {
-        scopeType: scope.kind,
-        historySnapshotId: historySnapshot.snapshotId,
-        historySnapshotShared: historySnapshot.shared,
-        historySource: historySnapshot.history.source,
-        historyMessageCount: entries.length,
-        humanMessages: scope.humanMessages,
-        botReplies: scope.botReplies,
-        summaryRevision: Number(state.qq.selfPersona.scopes[scope.scopeId]?.summaryRevision || 0)
-      }, "learning");
     } catch (error) {
       state.qq.selfPersona = noteQqSelfPersonaGenerationFailure(state.qq.selfPersona, error);
       await saveQqSelfPersona();
@@ -2223,6 +2173,95 @@ async function refreshQqSelfPersona() {
     }
   }
 
+  const generation = await runQqGlobalSelfPersonaGeneration({ source: "periodic" });
+  if (!generation.ok) {
+    if (accountUpdate.changed) await saveQqSelfPersona();
+    return false;
+  }
+  return true;
+}
+
+async function runQqSelfPersonaScopeSummary(scope, {
+  oneBotHealth,
+  sourceType = "periodic-scope-summary"
+} = {}) {
+  const scopeId = String(scope?.scopeId || "");
+  const currentScope = state.qq.selfPersona.scopes[scopeId];
+  if (!scopeId || !currentScope) {
+    return { ok: false, skipped: true, reason: "当前范围还没有可总结的人设活动记录。" };
+  }
+  const localEntries = state.qq.memory.recentMessages[scopeId] || [];
+  const scopeEvent = currentScope.kind === "group"
+    ? {
+      groupId: scopeId,
+      groupName: getQqKnowledgeGroupName(state.qq.knowledgeBase, scopeId),
+      selfId: oneBotHealth?.selfId
+    }
+    : {
+      senderId: scopeId.slice("private:".length),
+      senderName: localEntries.find((entry) => !entry?.isAssistant)?.senderName
+        || localEntries.find((entry) => !entry?.isAssistant)?.senderLabel
+        || "",
+      selfId: oneBotHealth?.selfId
+    };
+  const historySnapshot = await getQqReviewHistorySnapshot(scopeEvent, { maxMessages: 300 });
+  const entries = historySnapshot.messages;
+  if (entries.length === 0) {
+    return { ok: false, skipped: true, reason: "当前范围没有可用于范围总结的聊天记录。" };
+  }
+  const prompt = buildQqSelfPersonaScopeSummaryPrompt(scopeId, entries, {
+    botName: state.qq.selfPersona.account.nickname || assistantName,
+    groupName: scopeEvent.groupName || "",
+    existingKnowledge: formatQqKnowledgeSummaryReference(scopeEvent),
+    previousSummary: currentScope.summary,
+    previousTopics: currentScope.topics,
+    reviewId: historySnapshot.snapshotId
+  });
+  const output = await runQqSelfPersonaModelPrompt(prompt, `scope-${currentScope.kind}`);
+  const summary = parseQqSelfPersonaJson(output);
+  if (!summary) throw new Error("scope summarizer did not return valid FINAL_JSON");
+  state.qq.selfPersona = applyQqSelfPersonaScopeSummary(state.qq.selfPersona, scopeId, summary);
+  let knowledgeResult = null;
+  if (Array.isArray(summary.knowledge) && qqKnowledgeBaseRepository.writable) {
+    knowledgeResult = applyQqKnowledgePatches(
+      state.qq.knowledgeBase,
+      summary.knowledge,
+      buildQqKnowledgeContext(scopeEvent, entries),
+      { allowGlobal: false, sourceType }
+    );
+    state.qq.knowledgeBase = knowledgeResult.store;
+  }
+  await Promise.all([
+    saveQqSelfPersona(),
+    knowledgeResult?.changed ? saveQqKnowledgeBase() : Promise.resolve()
+  ]);
+  if (knowledgeResult && (knowledgeResult.applied.length || knowledgeResult.rejected.length)) {
+    logQqKnowledgePatchResult(knowledgeResult, {
+      source: sourceType,
+      context: scopeEvent
+    });
+  }
+  const result = {
+    ok: true,
+    scopeId,
+    scopeType: currentScope.kind,
+    historySnapshotId: historySnapshot.snapshotId,
+    historySource: historySnapshot.history.source,
+    historyMessageCount: entries.length,
+    summaryRevision: Number(state.qq.selfPersona.scopes[scopeId]?.summaryRevision || 0),
+    knowledgePatchCount: Number(knowledgeResult?.applied?.length || 0)
+  };
+  logger.info("QQ self persona scope summarized", {
+    ...result,
+    source: sourceType,
+    historySnapshotShared: historySnapshot.shared,
+    humanMessages: currentScope.humanMessages,
+    botReplies: currentScope.botReplies
+  }, "learning");
+  return result;
+}
+
+async function runQqGlobalSelfPersonaGeneration({ force = false, source = "periodic" } = {}) {
   const generationPlan = shouldRegenerateQqSelfPersona(state.qq.selfPersona, {
     minScopeSummaries: 2,
     minInitialMessages: qqSelfPersonaGenerationInitialMessages,
@@ -2231,9 +2270,11 @@ async function refreshQqSelfPersona() {
     scopeSummariesPerGeneration: qqSelfPersonaGenerationScopeSummaries,
     minHoursBetweenGenerations: qqSelfPersonaGenerationCooldownHours
   });
-  if (!generationPlan.due) {
-    if (accountUpdate.changed) await saveQqSelfPersona();
-    return false;
+  if (!force && !generationPlan.due) {
+    return { ok: false, skipped: true, reason: "全局人设尚未到自动刷新时间。", generationPlan };
+  }
+  if (generationPlan.summarizedScopes < 1) {
+    return { ok: false, skipped: true, reason: "至少需要一个已完成的范围总结，才能刷新全局人设。", generationPlan };
   }
   try {
     const output = await runQqSelfPersonaModelPrompt(
@@ -2244,16 +2285,21 @@ async function refreshQqSelfPersona() {
     if (!persona) throw new Error("global persona generator did not return valid FINAL_JSON");
     state.qq.selfPersona = applyGeneratedQqSelfPersona(state.qq.selfPersona, persona);
     await saveQqSelfPersona();
-    logger.info("QQ global self persona updated", {
+    const result = {
+      ok: true,
       revision: state.qq.selfPersona.generation.revision,
       name: state.qq.selfPersona.persona.name,
+      summarizedScopes: generationPlan.summarizedScopes
+    };
+    logger.info("QQ global self persona updated", {
+      ...result,
+      source,
       interestKeywordCount: state.qq.selfPersona.persona.interestKeywords.length,
       interestCount: state.qq.selfPersona.persona.interests.length,
-      summarizedScopes: generationPlan.summarizedScopes,
       humanMessages: state.qq.selfPersona.totals.humanMessages,
       botReplies: state.qq.selfPersona.totals.botReplies
     }, "learning");
-    return true;
+    return result;
   } catch (error) {
     state.qq.selfPersona = noteQqSelfPersonaGenerationFailure(state.qq.selfPersona, error);
     await saveQqSelfPersona();
@@ -2550,7 +2596,8 @@ function buildPublicState() {
           running: false,
           intervalMs: qqProactiveMinutePollMs
         },
-        runtime: summarizeQqPeriodicRuntime(state.qq.periodicRuntime)
+        runtime: summarizeQqPeriodicRuntime(state.qq.periodicRuntime),
+        manualAiTasks: buildQqManualAiTaskStatus()
       },
       events: state.qq.events.slice(0, 30).map(sanitizePublicQqEvent),
       memory: {
@@ -3909,6 +3956,43 @@ async function maybeScheduleQqKnowledgeDeletionReview() {
   return null;
 }
 
+async function runQqManualKnowledgeDeletionReview({ force = false } = {}) {
+  if (!qqKnowledgeBaseRepository.writable) {
+    return { ok: false, skipped: true, reason: "知识库当前处于只读保护状态。" };
+  }
+  if (qqKnowledgeDeletionReviewPromise) {
+    return { ok: false, busy: true, reason: "已有知识审核正在运行。" };
+  }
+  state.qq.knowledgeBase = markQqKnowledgeFrequencyReviewSweep(state.qq.knowledgeBase);
+  await saveQqKnowledgeBase();
+  const [candidate] = getDueQqKnowledgeDeletionReviews(state.qq.knowledgeBase, force
+    ? {
+      minAgeDays: 0,
+      quietDays: 0,
+      recentWindowDays: 30,
+      maxRecentHits: Number.MAX_SAFE_INTEGER,
+      minTotalHits: 1,
+      reviewCooldownDays: 0,
+      limit: 1
+    }
+    : { limit: 1 });
+  if (!candidate) {
+    return { ok: false, skipped: true, reason: "当前没有达到低频、静默期与复审间隔条件的知识条目。" };
+  }
+  const review = runQqKnowledgeDeletionReview(candidate).finally(() => {
+    if (qqKnowledgeDeletionReviewPromise === review) qqKnowledgeDeletionReviewPromise = null;
+  });
+  qqKnowledgeDeletionReviewPromise = review;
+  const deleted = await review;
+  return {
+    ok: true,
+    title: candidate.title,
+    variantId: candidate.variantId,
+    decision: deleted ? "deleted" : "kept",
+    forced: force
+  };
+}
+
 async function runQqKnowledgeDeletionReview(candidate) {
   const requestedAt = new Date().toISOString();
   const application = {
@@ -4154,9 +4238,18 @@ async function runQqKnowledgeMainDeletionReview(application, interestTriage) {
   };
 }
 
-async function runQqTimedAdaptiveStyleReviews() {
+async function runQqTimedAdaptiveStyleReviews({
+  forceGroupIds = [],
+  source = "periodic",
+  bypassSampleMinimum = false
+} = {}) {
   let changed = false;
-  for (const [groupId, group] of Object.entries(state.qq.personas.groups)) {
+  const forced = new Set((Array.isArray(forceGroupIds) ? forceGroupIds : []).map(String));
+  const results = [];
+  const groups = forced.size > 0
+    ? [...forced].map((groupId) => [groupId, getQqPersonaGroup(groupId)]).filter(([, group]) => group)
+    : Object.entries(state.qq.personas.groups);
+  for (const [groupId, group] of groups) {
     const plan = getQqAdaptiveStyleReviewPlan(group);
     if (plan.initialized) changed = true;
     if (!qqAdaptiveLearningSnapshotLoggedGroups.has(groupId)) {
@@ -4184,7 +4277,7 @@ async function runQqTimedAdaptiveStyleReviews() {
         nextStyleReviewAt: snapshot.nextStyleReviewAt
       }, "learning");
     }
-    if (!plan.due) continue;
+    if (!plan.due && !forced.has(groupId)) continue;
     const scopeEvent = {
       groupId,
       groupName: getQqKnowledgeGroupName(state.qq.knowledgeBase, groupId),
@@ -4194,7 +4287,17 @@ async function runQqTimedAdaptiveStyleReviews() {
     const entries = historySnapshot.messages;
     const humanSamples = entries.filter((entry) => !entry?.isAssistant && entry?.senderId !== "assistant").length;
     const botSamples = entries.filter((entry) => entry?.isAssistant || entry?.senderId === "assistant").length;
-    if (humanSamples < 12 || botSamples < 4) continue;
+    const minimumHumanSamples = bypassSampleMinimum ? 1 : 12;
+    const minimumBotSamples = bypassSampleMinimum ? 1 : 4;
+    if (humanSamples < minimumHumanSamples || botSamples < minimumBotSamples) {
+      results.push({
+        ok: false,
+        skipped: true,
+        groupId,
+        reason: `样本不足：至少需要 ${minimumHumanSamples} 条真人文字和 ${minimumBotSamples} 条新版 Bot 回复，当前为 ${humanSamples}/${botSamples}。`
+      });
+      continue;
+    }
     let reviewed = false;
     let reviewMode = "main-model";
     try {
@@ -4231,6 +4334,7 @@ async function runQqTimedAdaptiveStyleReviews() {
       const snapshot = summarizeQqAdaptiveGroupLearning(group, group?.members || {});
       logger.info("QQ adaptive learning style review completed", {
         groupId,
+        source,
         reviewMode,
         historySnapshotId: historySnapshot.snapshotId,
         historySnapshotShared: historySnapshot.shared,
@@ -4246,9 +4350,26 @@ async function runQqTimedAdaptiveStyleReviews() {
         styleReviewSummary: snapshot.styleReviewSummary,
         styleGuidance: snapshot.styleGuidance
       }, "learning");
+      results.push({
+        ok: true,
+        groupId,
+        reviewMode,
+        humanSamples,
+        botSamples,
+        summary: snapshot.styleReviewSummary,
+        guidanceCount: snapshot.styleGuidance.length
+      });
+    } else {
+      results.push({
+        ok: false,
+        skipped: true,
+        groupId,
+        reason: "风格复盘没有生成可保存的新结果。"
+      });
     }
   }
   if (changed) await saveQqPersonas();
+  return { ok: results.some((result) => result.ok), changed, results };
 }
 
 async function runQqColdGroupInterestCheck() {
@@ -4882,6 +5003,267 @@ function buildQqCodexSessionModeAction(normalized, event) {
   };
 }
 
+function buildQqManualAiTaskStatus() {
+  return {
+    tasks: qqManualAiTaskCatalog.map((task) => ({
+      id: task.id,
+      label: task.label,
+      icon: task.icon,
+      scope: task.scope,
+      description: task.description,
+      usage: task.usage
+    })),
+    running: [...qqManualAiTaskPromises.keys()],
+    periodicPersonaRefreshRunning: Boolean(qqSelfPersonaRefreshPromise),
+    periodicKnowledgeReviewRunning: Boolean(qqKnowledgeDeletionReviewPromise),
+    model: state.ai.model,
+    reasoningEffort: state.ai.reasoningEffort
+  };
+}
+
+function buildQqManualAiTaskEvent(scopeId, originEvent = null) {
+  if (originEvent && getQqMemoryScopeId(originEvent) === scopeId) return originEvent;
+  const entries = state.qq.memory.recentMessages[scopeId] || [];
+  const lastHuman = [...entries].reverse().find((entry) => !entry?.isAssistant && entry?.senderId !== "assistant");
+  if (scopeId.startsWith("private:")) {
+    const senderId = scopeId.slice("private:".length);
+    return {
+      type: "private_message",
+      senderId,
+      senderName: lastHuman?.senderName || lastHuman?.senderLabel || `QQ ${senderId}`,
+      senderLabel: lastHuman?.senderLabel || lastHuman?.senderName || `QQ ${senderId}`,
+      selfId: state.qq.selfPersona.account?.userId || "",
+      isOwner: state.qq.ownerUserIds.includes(senderId),
+      text: "",
+      raw: { message_id: `manual-ai-${Date.now()}-${senderId}`, time: Math.floor(Date.now() / 1000) }
+    };
+  }
+  return {
+    type: "group_message",
+    groupId: scopeId,
+    groupName: getQqKnowledgeGroupName(state.qq.knowledgeBase, scopeId),
+    senderId: originEvent?.senderId || state.qq.ownerUserIds[0] || "0",
+    senderName: originEvent?.senderName || "NCC",
+    senderLabel: originEvent?.senderLabel || "NCC",
+    selfId: state.qq.selfPersona.account?.userId || "",
+    isOwner: Boolean(originEvent?.isOwner),
+    text: "",
+    raw: { message_id: `manual-ai-${Date.now()}-${scopeId}`, time: Math.floor(Date.now() / 1000) }
+  };
+}
+
+async function prepareQqSelfPersonaForManualTask() {
+  const oneBotHealth = await checkOneBotHealth().catch(() => null);
+  if (!oneBotHealth?.ok || !oneBotHealth.nickname) {
+    return { ok: false, reason: "OneBot 身份未就绪，无法安全生成人设类总结。" };
+  }
+  const accountUpdate = updateQqSelfPersonaAccount(state.qq.selfPersona, {
+    userId: oneBotHealth.selfId,
+    nickname: oneBotHealth.nickname
+  });
+  state.qq.selfPersona = syncQqSelfPersonaActivity(
+    accountUpdate.store,
+    state.qq.memory.recentMessages
+  );
+  if (accountUpdate.changed) await saveQqSelfPersona();
+  return { ok: true, oneBotHealth };
+}
+
+async function runExclusiveQqSelfPersonaTask(run) {
+  if (qqSelfPersonaRefreshPromise) {
+    return { ok: false, busy: true, reason: "已有范围总结或人设刷新正在运行。" };
+  }
+  const task = Promise.resolve().then(run).finally(() => {
+    if (qqSelfPersonaRefreshPromise === task) qqSelfPersonaRefreshPromise = null;
+  });
+  qqSelfPersonaRefreshPromise = task;
+  return task;
+}
+
+async function executeQqManualAiTask(taskId, scopeId, {
+  originEvent = null,
+  fullHistory = false,
+  force = false,
+  source = "management-api"
+} = {}) {
+  const event = scopeId ? buildQqManualAiTaskEvent(scopeId, originEvent) : null;
+  if (taskId === "chat-summary") {
+    const summary = await buildQqContextSummary(event, fullHistory ? "总结聊天记录 全部" : "总结聊天记录");
+    return { ok: true, taskId, scopeId, summary };
+  }
+  if (taskId === "scope-summary") {
+    return runExclusiveQqSelfPersonaTask(async () => {
+      const prepared = await prepareQqSelfPersonaForManualTask();
+      if (!prepared.ok) return { ...prepared, taskId, scopeId };
+      const scope = state.qq.selfPersona.scopes[scopeId];
+      const result = await runQqSelfPersonaScopeSummary(scope, {
+        oneBotHealth: prepared.oneBotHealth,
+        sourceType: "manual-scope-summary"
+      });
+      return { ...result, taskId, scopeId };
+    });
+  }
+  if (taskId === "style-review") {
+    const review = await runQqTimedAdaptiveStyleReviews({
+      forceGroupIds: [scopeId],
+      source: force ? "manual-force" : "manual",
+      bypassSampleMinimum: force
+    });
+    return { ...(review.results[0] || { ok: false, skipped: true, reason: "没有可复盘的群数据。" }), taskId, scopeId };
+  }
+  if (taskId === "global-persona") {
+    return runExclusiveQqSelfPersonaTask(async () => {
+      const prepared = await prepareQqSelfPersonaForManualTask();
+      if (!prepared.ok) return { ...prepared, taskId };
+      const result = await runQqGlobalSelfPersonaGeneration({ force: true, source: "manual" });
+      return { ...result, taskId };
+    });
+  }
+  if (taskId === "knowledge-review") {
+    return { ...await runQqManualKnowledgeDeletionReview({ force }), taskId };
+  }
+  if (taskId === "all") {
+    const results = [];
+    results.push(await executeQqManualAiTask("chat-summary", scopeId, {
+      originEvent,
+      fullHistory,
+      force,
+      source
+    }));
+    const personaResults = await runExclusiveQqSelfPersonaTask(async () => {
+      const prepared = await prepareQqSelfPersonaForManualTask();
+      if (!prepared.ok) return [{ ...prepared, taskId: "scope-summary", scopeId }];
+      const scopeResult = await runQqSelfPersonaScopeSummary(
+        state.qq.selfPersona.scopes[scopeId],
+        {
+          oneBotHealth: prepared.oneBotHealth,
+          sourceType: "manual-scope-summary"
+        }
+      );
+      const output = [{ ...scopeResult, taskId: "scope-summary", scopeId }];
+      const globalResult = await runQqGlobalSelfPersonaGeneration({ force: true, source: "manual" });
+      output.push({ ...globalResult, taskId: "global-persona" });
+      return output;
+    });
+    results.push(...(Array.isArray(personaResults) ? personaResults : [personaResults]));
+    if (!scopeId.startsWith("private:")) {
+      results.push(await executeQqManualAiTask("style-review", scopeId, { originEvent, force, source }));
+    }
+    results.push(await executeQqManualAiTask("knowledge-review", "", { originEvent, force, source }));
+    return {
+      ok: results.some((result) => result.ok),
+      taskId,
+      scopeId,
+      results
+    };
+  }
+  return { ok: false, taskId, scopeId, reason: "未知 AI 手动任务。" };
+}
+
+async function runQqManualAiTaskRequest({
+  taskId,
+  scopeId = "",
+  currentScopeId = "",
+  originEvent = null,
+  fullHistory = false,
+  force = false,
+  source = "management-api"
+} = {}) {
+  const validation = validateQqManualAiTaskRequest({
+    taskId,
+    scopeId,
+    currentScopeId,
+    allowedGroups: state.qq.allowedGroups,
+    knownPrivateScopes: Object.keys(state.qq.memory.recentMessages).filter((id) => id.startsWith("private:"))
+  });
+  if (!validation.ok) return validation;
+  const lockKey = `${validation.taskId}:${validation.scopeId || "global"}`;
+  if (qqManualAiTaskPromises.has(lockKey)) {
+    return { ok: false, status: 409, busy: true, taskId: validation.taskId, scopeId: validation.scopeId, reason: "同一个 AI 手动任务正在运行。" };
+  }
+  const startedAt = Date.now();
+  const task = executeQqManualAiTask(validation.taskId, validation.scopeId, {
+    originEvent,
+    fullHistory,
+    force,
+    source
+  }).then((result) => ({
+    ...result,
+    taskId: result.taskId || validation.taskId,
+    scopeId: result.scopeId ?? validation.scopeId,
+    durationMs: Date.now() - startedAt
+  })).finally(() => {
+    if (qqManualAiTaskPromises.get(lockKey) === task) qqManualAiTaskPromises.delete(lockKey);
+  });
+  qqManualAiTaskPromises.set(lockKey, task);
+  logger.info("QQ manual AI task started", {
+    source,
+    taskId: validation.taskId,
+    scopeId: validation.scopeId || null,
+    fullHistory,
+    force
+  }, "learning", originEvent ? qqLogContext(originEvent) : {});
+  try {
+    const result = await task;
+    logger[result.ok ? "info" : "warn"]("QQ manual AI task completed", {
+      source,
+      taskId: validation.taskId,
+      scopeId: validation.scopeId || null,
+      outcome: result.ok ? "completed" : result.busy ? "busy" : "skipped",
+      durationMs: result.durationMs,
+      reason: result.reason || null
+    }, "learning", originEvent ? qqLogContext(originEvent) : {});
+    return result;
+  } catch (error) {
+    logger.error("QQ manual AI task failed", {
+      source,
+      taskId: validation.taskId,
+      scopeId: validation.scopeId || null,
+      durationMs: Date.now() - startedAt,
+      error
+    }, "learning", originEvent ? qqLogContext(originEvent) : {});
+    return {
+      ok: false,
+      status: 500,
+      taskId: validation.taskId,
+      scopeId: validation.scopeId,
+      durationMs: Date.now() - startedAt,
+      reason: error.message
+    };
+  }
+}
+
+function formatQqManualAiTaskResult(result) {
+  if (!result) return "AI 手动任务没有返回结果。";
+  if (result.taskId === "all" && Array.isArray(result.results)) {
+    const rows = result.results.map((item) => formatQqManualAiTaskResult(item).split("\n")[0]);
+    const chatSummary = result.results.find((item) => item.taskId === "chat-summary" && item.summary)?.summary;
+    return [
+      "╭─ 🚀 全部适用任务已处理",
+      ...rows.map((row) => `│ ${row}`),
+      "╰────────────────",
+      chatSummary ? `\n📝 聊天总结\n${chatSummary}` : null
+    ].filter(Boolean).join("\n");
+  }
+  if (result.taskId === "chat-summary" && result.summary) return result.summary;
+  const task = qqManualAiTaskCatalog.find((item) => item.id === result.taskId);
+  const prefix = `${task?.icon || "🤖"} ${task?.label || result.taskId || "AI 任务"}`;
+  if (!result.ok) return `${prefix}：${result.busy ? "正在运行" : "未运行"}\n${result.reason || result.error || "没有满足执行条件。"}`;
+  if (result.taskId === "scope-summary") {
+    return `${prefix}：完成\n复盘 ${result.historyMessageCount || 0} 条记录，范围摘要第 ${result.summaryRevision || 0} 版，更新 ${result.knowledgePatchCount || 0} 条知识。`;
+  }
+  if (result.taskId === "style-review") {
+    return `${prefix}：完成\n样本 ${result.humanSamples || 0} 条真人 / ${result.botSamples || 0} 条 Bot，生成 ${result.guidanceCount || 0} 条适应规则。`;
+  }
+  if (result.taskId === "global-persona") {
+    return `${prefix}：完成\n全局人设已更新到第 ${result.revision || 0} 版，使用 ${result.summarizedScopes || 0} 个范围摘要。`;
+  }
+  if (result.taskId === "knowledge-review") {
+    return `${prefix}：完成\n“${result.title || "知识条目"}”已${result.decision === "deleted" ? "删除" : "保留"}。`;
+  }
+  return `${prefix}：完成`;
+}
+
 async function buildQqCommandAction(event) {
   const command = stripMentionText(event.text).trim();
   if (!command.startsWith("/")) return null;
@@ -4910,6 +5292,38 @@ async function buildQqCommandAction(event) {
     return {
       reply: await buildQqContextSummary(event, normalized)
     };
+  }
+
+  const manualAiTask = parseQqManualAiTaskCommand(normalized);
+  if (manualAiTask) {
+    if (!isQqCommandAllowedForEvent("aiTasks", event)) {
+      return { reply: `${pickActionBeat(event)}AI 手动任务现在没有对你开放。` };
+    }
+    if (manualAiTask.action === "list") {
+      return {
+        reply: formatQqManualAiTaskCenter({
+          running: [...qqManualAiTaskPromises.keys()].map((key) => key.split(":")[0]),
+          includeNccHint: event.isOwner
+        })
+      };
+    }
+    if (manualAiTask.action === "unknown") {
+      return {
+        reply: `没有找到“${manualAiTask.input}”这个任务。\n\n${formatQqManualAiTaskCenter({
+          running: [...qqManualAiTaskPromises.keys()].map((key) => key.split(":")[0]),
+          includeNccHint: event.isOwner
+        })}`
+      };
+    }
+    const result = await runQqManualAiTaskRequest({
+      taskId: manualAiTask.taskId,
+      currentScopeId: getQqMemoryScopeId(event),
+      originEvent: event,
+      fullHistory: manualAiTask.fullHistory,
+      force: manualAiTask.force,
+      source: manualAiTask.force ? "qq-command-force" : "qq-command"
+    });
+    return { reply: formatQqManualAiTaskResult(result) };
   }
 
   if (!event.isOwner && isOwnerOnlyQqCommand(normalized, compact) && !isAllowedPublicQqCommand(normalized, compact, event)) {
@@ -5131,6 +5545,7 @@ function isAllowedPublicQqCommand(normalized, compact, event) {
     || (isQqCommandAllowedForEvent("stop", event) && isPublicQqStopCommand(normalized, compact))
     || (isQqCommandAllowedForEvent("newDialog", event) && isPublicQqClearContextCommand(normalized, compact))
     || (isQqCommandAllowedForEvent("summary", event) && isPublicQqSummarizeContextCommand(normalized, compact))
+    || (isQqCommandAllowedForEvent("aiTasks", event) && Boolean(parseQqManualAiTaskCommand(normalized)))
     || (isQqCommandAllowedForEvent("status", event) && /^(状态|status|查看状态)$/i.test(compact))
     || (isQqCommandAllowedForEvent("config", event) && /^(详细配置|配置|config|settings|详细状态)$/i.test(compact))
     || (isQqCommandAllowedForEvent("interest", event) && isQqInterestConfigCommand(normalized, compact))
@@ -5516,6 +5931,7 @@ function isProtectedQqOwnerTarget(targetId) {
 }
 
 function isOwnerOnlyQqCommand(normalized, compact) {
+  if (parseQqManualAiTaskCommand(normalized)) return true;
   return /^(菜单权限|权限菜单|公开指令|指令权限|允许指令|开放指令|启用指令|禁用指令|关闭指令|禁止指令|状态|status|查看状态|详细配置|配置|config|settings|详细状态|会话模式|长期会话|临时会话|自动会话|session|session-mode|兴趣|主动|兴趣配置|主动配置|主动响应配置|兴趣状态|主动状态|兴趣开关|主动开关|兴趣间隔|主动间隔|兴趣分钟|主动分钟|兴趣时间|主动时间|兴趣模型|主动模型|兴趣超时|主动超时|兴趣最近|主动最近|兴趣重置|主动重置|interest|proactive|群管理|禁言|解禁言|解除禁言|踢人|移出群|全员禁言|群禁言列表|禁言列表|ban|unban|封禁|拉黑|解禁|解除封禁|取消拉黑|banlist|封禁列表|ban列表|白名单|群白名单|白名单列表|加群|添加群|加入群|群添加|群加入|白名单添加|添加白名单群|加入白名单群|删群|删除群|移除群|群删除|群移除|白名单删除|删除白名单群|移除白名单群|模型|qq模型|切模型|切换模型|智能等级|智能|思考强度|qq智能等级|qq智能|qq思考强度)/i.test(normalized)
     || /^(5|5\.5|5\.4|5\.4mini|5\.4-mini|mini|5\.3|5\.3codex|5\.3-codex|codex)$/i.test(compact);
 }
@@ -5523,25 +5939,17 @@ function isOwnerOnlyQqCommand(normalized, compact) {
 function buildQqMenu(event) {
   const owner = Boolean(event?.isOwner);
   const visibleCommands = qqCommandCatalog.filter((command) => owner || isQqCommandAllowedForEvent(command.key, event));
-  const lines = [
-    owner ? "QQ 管理菜单" : "QQ 菜单",
-    owner ? `当前模型：${state.ai.model} / ${state.ai.reasoningEffort}` : null,
-    owner ? `白名单群：${state.qq.allowedGroups.length ? state.qq.allowedGroups.join(", ") : "无"}` : null,
-    "",
-    ...visibleCommands.flatMap((command) => getQqCommandMenuLines(command).map((line) => `${line}${owner && state.qq.commandPermissions.publicCommands[command.key] === true ? "（公开）" : ""}`))
-  ].filter((line) => line != null);
-  if (owner) {
-    lines.push(
-      "",
-      "公开权限：",
-      "/菜单权限",
-      "/允许指令 key",
-      "/禁用指令 key",
-      "/允许指令 key QQ号",
-      "/禁用指令 key QQ号"
-    );
-  }
-  return lines.join("\n");
+  return formatQqVisualMenu({
+    owner,
+    assistantName: state.qq.selfPersona.account?.nickname || assistantName,
+    model: state.ai.model,
+    reasoningEffort: state.ai.reasoningEffort,
+    allowedGroups: state.qq.allowedGroups,
+    commands: visibleCommands.map((command) => ({
+      ...command,
+      public: state.qq.commandPermissions.publicCommands[command.key] === true
+    }))
+  });
 }
 
 function buildQqPermissionAction(normalized) {
@@ -5607,17 +6015,6 @@ function formatQqCommandPermissions() {
 }
 
 function getQqCommandMenuLines(command) {
-  if (command?.key === "interest") {
-    return [
-      "/兴趣配置",
-      `/兴趣间隔 ${state.qq.proactive.judgeEveryMessages}`,
-      `/兴趣分钟 ${state.qq.proactive.judgeEveryMinutes || "关闭"}`,
-      `/兴趣厂商 ${state.qq.proactive.judge.provider}`,
-      `/兴趣模型 ${state.qq.proactive.judge.model}`,
-      `/兴趣超时 ${state.qq.proactive.judge.timeoutMs}`,
-      `/兴趣最近 ${state.qq.proactive.judge.maxRecentMessages}`
-    ];
-  }
   const lines = Array.isArray(command.menuLines) ? command.menuLines : [command.menuLine];
   return lines.map((line) => String(line || "").trim()).filter(Boolean);
 }
@@ -12251,6 +12648,25 @@ async function handleApi(req, res) {
 
   if (req.method === "GET" && req.url === "/api/memory") {
     return sendJson(res, 200, await buildMemorySnapshot());
+  }
+
+  if (req.method === "GET" && req.url === "/api/qq/ai-tasks") {
+    return sendJson(res, 200, buildQqManualAiTaskStatus());
+  }
+
+  if (req.method === "POST" && req.url === "/api/qq/ai-tasks") {
+    if (!trustedLoopbackRequest) {
+      return sendJson(res, 403, { error: "Manual QQ AI tasks can only be started from this computer" });
+    }
+    const body = await readBody(req, { requireJson: true });
+    const result = await runQqManualAiTaskRequest({
+      taskId: body.taskId || body.task,
+      scopeId: body.scopeId || body.scope,
+      fullHistory: body.fullHistory === true,
+      force: body.force === true,
+      source: body.force === true ? "management-api-force" : "management-api"
+    });
+    return sendJson(res, Number(result.status || (result.busy ? 409 : 200)), result);
   }
 
   if (req.method === "POST" && req.url === "/api/qq/knowledge") {

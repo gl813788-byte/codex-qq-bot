@@ -104,6 +104,9 @@ const messageTranslationsZh = Object.freeze({
   "QQ adaptive learning group snapshot": "QQ 自适应学习群快照",
   "QQ adaptive learning review clock initialized": "QQ 自适应学习复盘时钟已初始化",
   "QQ adaptive learning style review completed": "QQ 自适应学习风格复盘完成",
+  "QQ manual AI task started": "QQ 手动 AI 任务已开始",
+  "QQ manual AI task completed": "QQ 手动 AI 任务已完成",
+  "QQ manual AI task failed": "QQ 手动 AI 任务失败",
   "QQ self persona refresh failed": "QQ 全局人设刷新失败",
   "QQ self persona refresh deferred until OneBot identity is available": "OneBot 身份未就绪，已推迟 QQ 全局人设刷新",
   "QQ self persona scope summarized": "QQ 会话人设摘要已更新",
@@ -422,6 +425,9 @@ const detailLabelsZh = Object.freeze({
   learning: "自动学习数据",
   proactiveIntervals: "主动兴趣间隔",
   periodicRuntime: "周期任务状态",
+  taskId: "任务标识",
+  fullHistory: "完整历史",
+  force: "强制执行",
   sampleSize: "总样本数",
   confidence: "可信度",
   textSampleSize: "文字样本数",
@@ -515,7 +521,10 @@ const detailValuesZh = Object.freeze({
     "chat-summary": "手动聊天总结", "periodic-scope-summary": "周期范围总结",
     "conversation-impression": "对话印象总结", "legacy-public-memory": "旧公共记忆",
     "qq-message": "QQ 消息", dashboard: "仪表盘", "new-dialog": "新对话", stop: "停止回复",
-    "frequency-review": "低频删除审核", persistence: "持久化", "qq-follow-up": "QQ 融合追问"
+    "frequency-review": "低频删除审核", persistence: "持久化", "qq-follow-up": "QQ 融合追问",
+    "qq-command": "QQ 手动任务", "qq-command-force": "QQ 强制任务",
+    "management-api": "NCC 手动任务", "management-api-force": "NCC 强制任务",
+    "manual-scope-summary": "手动范围总结", manual: "手动执行", "manual-force": "强制执行"
   },
   kind: { slang: "黑话", note: "普通知识", unknown: "未知" },
   type: {

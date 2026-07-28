@@ -77,6 +77,24 @@ npm run ncc -- session-mode inherit GROUP_ID
 
 On supporting machine-specific controllers, use `ncc session` and `ncc session-mode ...`. Omitting scope changes the default; a group ID or `private:QQ_ID` changes an override. A running Hub persists through `/api/qq/session-mode`; offline control safely updates `data/settings.json` for the next start.
 
+## Manual AI task center
+
+QQ `/AI任务` and both NCC surfaces read the same task catalog and execute through a loopback-only management API:
+
+```bash
+npm run ncc -- ai-tasks
+npm run ncc -- ai-run chat-summary GROUP_ID
+npm run ncc -- ai-run scope-summary private:QQ_ID
+npm run ncc -- ai-run style-review GROUP_ID --force
+npm run ncc -- ai-run global-persona
+npm run ncc -- ai-run knowledge-review --force
+npm run ncc -- ai-run all GROUP_ID --full
+```
+
+Tasks are `chat-summary` (chat summary plus knowledge extraction), `scope-summary` (scope persona-evidence/memory summary), `style-review` (group style review), `global-persona` (global persona refresh), `knowledge-review` (two-model review of a due low-frequency slang item), and `all`. In QQ, send `/AI任务 TASK`; `/AI任务 强制 TASK` explicitly selects force mode.
+
+A normal manual run bypasses the automatic schedule's due-time gate while retaining normal task data thresholds. `--force` additionally bypasses cooldown and normal sample thresholds. It never bypasses QQ owner/menu permissions, group allowlists, the loopback API restriction, concurrency locks, OneBot identity, or the requirement for actual data. A forced knowledge review only broadens candidate selection and still follows interest-model triage, main-model final review, and stale-change guards; it never deletes directly. These tasks use the current QQ model and existing task deadlines, and require a running Hub.
+
 ## Restart catch-up for recurring behavior
 
 Recurring QQ domain work is based on timestamps saved in local state, not on how long the Node.js process has stayed alive. Hub startup immediately checks adaptive style reviews and self-persona summary/generation. Enabling the QQ channel immediately checks restored ordinary-interest cycles plus cold-group and private-interest due times. The normal poll then continues as a wake-up mechanism.

@@ -381,6 +381,108 @@ session_menu() {
   pause
 }
 
+show_ai_tasks() {
+  command -v curl >/dev/null 2>&1 || die "缺少 curl，无法连接 Hub AI 任务中心。"
+  need_node
+  curl -fsS --max-time 5 "${HUB_URL%/}/api/qq/ai-tasks" | node -e '
+    let raw = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => raw += chunk);
+    process.stdin.on("end", () => {
+      const data = JSON.parse(raw);
+      console.log("AI 手动任务中心");
+      console.log("================");
+      console.log(`当前模型：${data.model || "unknown"} / ${data.reasoningEffort || "default"}`);
+      console.log(`运行中：${data.running?.length ? data.running.join("、") : "无"}`);
+      console.log("");
+      for (const [index, task] of (data.tasks || []).entries()) {
+        console.log(`${index + 1}) ${task.icon || "•"} ${task.label}  [${task.id}]`);
+        console.log(`   ${task.description}`);
+        console.log(`   范围：${task.scope}`);
+      }
+      console.log("");
+      console.log("运行：ncc ai-run <任务> [群号|private:QQ号] [--force] [--full]");
+      console.log("强制执行只跳过到期、冷却和常规样本门槛，不绕过权限、白名单、并发锁或数据安全。");
+    });
+  '
+}
+
+run_ai_task() {
+  command -v curl >/dev/null 2>&1 || die "缺少 curl，无法连接 Hub AI 任务中心。"
+  need_node
+  local task_id="${1:-}" scope_id="${2:-}" force="false" full_history="false" arg payload
+  [ -n "$task_id" ] || die "请指定任务。先运行 ncc ai-tasks 查看列表。"
+  shift $(( $# > 0 ? 1 : 0 ))
+  if [ -n "$scope_id" ] && [[ "$scope_id" != --* ]]; then
+    shift $(( $# > 0 ? 1 : 0 ))
+  else
+    scope_id=""
+  fi
+  for arg in "$@"; do
+    case "$arg" in
+      "") ;;
+      --force|-f|强制) force="true" ;;
+      --full|--all|完整|全部) full_history="true" ;;
+      *) die "未知 AI 任务参数：$arg" ;;
+    esac
+  done
+  payload="$(TASK_ID="$task_id" SCOPE_ID="$scope_id" FORCE="$force" FULL_HISTORY="$full_history" node - <<'NODE'
+const body = {
+  taskId: process.env.TASK_ID,
+  force: process.env.FORCE === "true",
+  fullHistory: process.env.FULL_HISTORY === "true"
+};
+if (process.env.SCOPE_ID) body.scopeId = process.env.SCOPE_ID;
+process.stdout.write(JSON.stringify(body));
+NODE
+)"
+  curl -sS --max-time 1200 -X POST "${HUB_URL%/}/api/qq/ai-tasks" \
+    -H 'content-type: application/json' \
+    -d "$payload" | node -e '
+      let raw = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (chunk) => raw += chunk);
+      process.stdin.on("end", () => {
+        const data = JSON.parse(raw);
+        const state = data.ok ? "完成" : data.busy ? "运行中" : "未执行";
+        console.log(`${data.taskId || "AI task"}：${state}`);
+        if (data.scopeId) console.log(`范围：${data.scopeId}`);
+        if (data.durationMs != null) console.log(`耗时：${data.durationMs}ms`);
+        if (data.summary) console.log(`\n${data.summary}`);
+        if (data.reason || data.error) console.log(`原因：${data.reason || data.error}`);
+        for (const item of data.results || []) {
+          console.log(`- ${item.taskId}: ${item.ok ? "完成" : item.busy ? "运行中" : "跳过"}${item.reason ? `（${item.reason}）` : ""}`);
+        }
+        if (!data.ok && !data.results?.some((item) => item.ok)) process.exitCode = 1;
+      });
+    '
+}
+
+ai_task_menu() {
+  show_ai_tasks
+  printf '\n任务编号或 ID（直接回车返回）：'
+  read -r task_id || true
+  [ -n "${task_id:-}" ] || return
+  case "$task_id" in
+    1) task_id="chat-summary" ;;
+    2) task_id="scope-summary" ;;
+    3) task_id="style-review" ;;
+    4) task_id="global-persona" ;;
+    5) task_id="knowledge-review" ;;
+    6) task_id="all" ;;
+  esac
+  local scope_id="" force_arg=""
+  if [[ "$task_id" != "global-persona" && "$task_id" != "knowledge-review" ]]; then
+    printf '范围（群号或 private:QQ号）：'
+    read -r scope_id || true
+  fi
+  if ask_yes_no "是否强制执行（跳过到期/冷却/常规样本门槛）？" "N"; then
+    force_arg="--force"
+  fi
+  run_ai_task "$task_id" "$scope_id" "$force_arg"
+  pause
+}
+
 branding_menu() {
   local should_pause="${1:-1}"
   ensure_settings
@@ -519,6 +621,7 @@ Codex QQ Bot 控制中心（ncc）
 9) 状态检查
 10) 打开 Hub API 状态
 11) 查看日志
+12) AI 手动任务中心
 0) 退出
 MENU
     printf '\n请选择：'
@@ -535,6 +638,7 @@ MENU
       9) show_status; pause ;;
       10) open_hub_api; pause ;;
       11) print_logs; pause ;;
+      12) ai_task_menu ;;
       0|q|quit|exit) break ;;
       *) log "未知选项。"; pause ;;
     esac
@@ -551,6 +655,8 @@ case "${1:-menu}" in
   groups) groups_menu ;;
   session) show_session_modes ;;
   session-mode) set_session_mode "${2:-}" "${3:-}" ;;
+  ai-tasks|ai-task) show_ai_tasks ;;
+  ai-run) shift; run_ai_task "$@" ;;
   branding) branding_menu ;;
   search-config) search_config ;;
   start) start_hub ;;
@@ -558,7 +664,7 @@ case "${1:-menu}" in
   logs) shift; print_logs "$@" ;;
   help|-h|--help)
     cat <<EOF
-用法：ncc [menu|first-run|status|codex-login|qq|owner|groups|session|session-mode MODE [SCOPE]|branding|search-config|start|open|logs]
+用法：ncc [menu|first-run|status|codex-login|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full]|branding|search-config|start|open|logs]
 首次直接运行 ncc：自动检测环境、安装依赖、验证并填写配置；完成后再运行为常规功能菜单。
 日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
 项目目录：$PROJECT_DIR
@@ -566,7 +672,7 @@ EOF
     ;;
   *)
     cat <<EOF
-用法：ncc [menu|first-run|status|codex-login|qq|owner|groups|session|session-mode MODE [SCOPE]|branding|search-config|start|open|logs]
+用法：ncc [menu|first-run|status|codex-login|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full]|branding|search-config|start|open|logs]
 日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
 项目目录：$PROJECT_DIR
 EOF
