@@ -386,6 +386,7 @@ function normalizeItems(values, forcedLayer = "") {
 function scoreItems(items, {
   query = "",
   layers = [],
+  kinds = [],
   scope = null,
   statuses = ["active"],
   limit = 8,
@@ -395,9 +396,11 @@ function scoreItems(items, {
   const normalizedQuery = normalizeSemanticText(query);
   const queryEmbedding = embedLocalSemanticText(normalizedQuery);
   const allowedLayers = new Set((Array.isArray(layers) ? layers : [layers]).filter(Boolean));
+  const allowedKinds = new Set((Array.isArray(kinds) ? kinds : [kinds]).filter(Boolean));
   const allowedStatuses = new Set((Array.isArray(statuses) ? statuses : [statuses]).filter(Boolean));
   return items
     .filter((item) => (!allowedLayers.size || allowedLayers.has(item.layer))
+      && (!allowedKinds.size || allowedKinds.has(item.kind))
       && (!allowedStatuses.size || allowedStatuses.has(item.status))
       && matchesScope(item, scope))
     .map((item) => {

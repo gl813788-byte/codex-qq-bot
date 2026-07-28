@@ -41,6 +41,27 @@ test("QQ semantic recall combines scoped layers and excludes summaries already d
       ];
     }
     if (layer === "unified") {
+      if (options.kinds?.includes("personProfile")) {
+        return [{
+          id: "unified:person-profile",
+          layer,
+          kind: "personProfile",
+          userId: "20002",
+          summary: "当前人物统一简述",
+          score: 0
+        }];
+      }
+      if (options.kinds?.includes("personSession")) {
+        return [{
+          id: "unified:person-session",
+          layer,
+          kind: "personSession",
+          userId: "20002",
+          summary: "其他群聊形成的人物记忆",
+          metadata: { sourceScopeId: "10002" },
+          score: 0.25
+        }];
+      }
       return [{ id: "unified:one", layer, summary: "主人统一记忆", score: 0.3 }];
     }
     return [];
@@ -60,16 +81,26 @@ test("QQ semantic recall combines scoped layers and excludes summaries already d
 
   assert.deepEqual(
     calls.map((call) => call.layers[0]),
-    ["impression", "short-term", "knowledge", "unified"]
+    ["impression", "short-term", "knowledge", "unified", "unified", "unified"]
   );
-  assert.ok(calls.every((call) => call.query === "之前说过的发布安排"));
+  assert.ok(calls
+    .filter((call) => !call.kinds?.includes("personProfile"))
+    .every((call) => call.query === "之前说过的发布安排"));
+  assert.equal(calls.find((call) => call.kinds?.includes("personProfile"))?.query, "");
   assert.deepEqual(
     recall.items.map((item) => item.id),
-    ["impression:group", "knowledge:new", "unified:one"]
+    [
+      "impression:group",
+      "knowledge:new",
+      "unified:person-profile",
+      "unified:person-session",
+      "unified:one"
+    ]
   );
   assert.match(recall.context, /本轮相关知识/);
+  assert.match(recall.context, /\[其他会话\].*其他群聊形成的人物记忆/);
   assert.doesNotMatch(recall.context, /已经给过/);
-  assert.equal(summarizeQqSemanticRecall(recall).resultCount, 3);
+  assert.equal(summarizeQqSemanticRecall(recall).resultCount, 5);
 });
 
 test("fused QQ semantic recall can skip impressions and reports a failed layer", async () => {
@@ -92,4 +123,6 @@ test("fused QQ semantic recall can skip impressions and reports a failed layer",
   assert.equal(recall.errors[0].layer, "knowledge");
   assert.equal(recall.layers.impression, undefined);
   assert.equal(recall.layers.unified, undefined);
+  assert.equal(recall.layers["unified-person-profile"], 0);
+  assert.equal(recall.layers["unified-person-session"], 0);
 });
