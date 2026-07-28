@@ -49,7 +49,7 @@ environment + runtime paths
 | `src/qq-history-retrieval.js` | QQ review-history boundary | NapCat pagination, normalization, local merging and deduplication |
 | `src/qq-short-term-memory.js` | QQ short-term memory domain | legacy migration, brief/detail, overwrite and stale lifecycle |
 | `src/qq-style-review.js` | Human/Bot style-review boundary | flexible main-model prompt, structured parsing and safe compaction |
-| `src/unified-memory/` | Cross-channel memory | SQLite/FTS/vector hybrid recall, shared QQ chat-query construction, scope filtering and one-shot brief injection |
+| `src/unified-memory/` | Cross-channel memory | SQLite/FTS/vector hybrid recall, QQ-id/unique-alias person resolution, AI profile promotion, cross-session person scoping, and one-shot brief injection |
 | `src/*.js` | Existing domain and infrastructure modules | changing the named capability while it is migrated incrementally |
 | `modules/` | Platform clients and optional integrations | changing shared UI, launchers or the QQ social bridge |
 | `scripts/` | Operator and deployment commands | changing checks, deployment or the `ncc` CLI |

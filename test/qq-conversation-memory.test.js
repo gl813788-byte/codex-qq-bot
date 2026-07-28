@@ -8,7 +8,8 @@ import {
   normalizeQqConversationMemory,
   qqConversationMemoryVersion,
   updateQqConversationMemoryFromEvent,
-  updateQqConversationMemoryFromExchange
+  updateQqConversationMemoryFromExchange,
+  updateQqConversationPersonAlias
 } from "../src/qq-conversation-memory.js";
 
 test("tracks group topics, people, links, impressions and bot thoughts", () => {
@@ -92,7 +93,7 @@ test("migrates legacy per-group people into the cross-group QQ identity layer", 
     }
   });
 
-  assert.equal(qqConversationMemoryVersion, 3);
+  assert.equal(qqConversationMemoryVersion, 4);
   assert.equal(memory.version, qqConversationMemoryVersion);
   assert.equal(memory.people["20002"].impression, "旧版已有的人物印象");
   assert.deepEqual(memory.people["20002"].groupAliases["10001"], ["旧群名片"]);
@@ -164,6 +165,50 @@ test("tracks private-chat impressions and strips invisible model memory metadata
   );
   assert.equal(sensitive.visibleText, "可见回复");
   assert.deepEqual(sensitive.patches, []);
+});
+
+test("AI can promote a complete QQ person impression and private aliases share the QQ id", () => {
+  const groupEvent = {
+    groupId: "10001",
+    senderId: "20002",
+    senderName: "一群名片",
+    text: "我们又聊到记忆设计了"
+  };
+  const privateEvent = {
+    type: "private_message",
+    senderId: "20002",
+    senderName: "私聊昵称",
+    text: "私聊继续讨论"
+  };
+  let memory = updateQqConversationMemoryFromEvent(createEmptyQqConversationMemory(), groupEvent);
+  memory = updateQqConversationMemoryFromExchange(memory, groupEvent, "继续。", [{
+    personImpressionSummary: "重视连续上下文、可验证实现和清晰产品体验",
+    personImpressionDetail: "长期关注机器人记忆、连续上下文、实际可用性和验证过程；提出需求时会补充边界，也倾向按稳定身份组织跨会话信息。",
+    personImpressionComplete: false
+  }]);
+  assert.equal(memory.people["20002"].unifiedMemory.promotedAt, null);
+  memory = updateQqConversationMemoryFromExchange(memory, groupEvent, "画像成熟度已确认。", [{
+    personImpressionComplete: true,
+    personImpressionPromotionReason: "多次互动已经覆盖关注点、沟通方式和稳定偏好"
+  }]);
+  memory = updateQqConversationMemoryFromEvent(memory, privateEvent);
+
+  const person = memory.people["20002"];
+  assert.ok(person.unifiedMemory.promotedAt);
+  assert.deepEqual(person.unifiedMemory.sourceScopeIds, ["10001"]);
+  assert.match(person.unifiedMemory.reason, /多次互动/);
+  assert.ok(person.aliases.includes("一群名片"));
+  assert.ok(person.aliases.includes("私聊昵称"));
+
+  const aliasUpdate = updateQqConversationPersonAlias(memory, {
+    userId: "20002",
+    action: "replace",
+    alias: "一群名片",
+    replacement: "记忆哥"
+  });
+  assert.equal(aliasUpdate.ok, true);
+  assert.ok(aliasUpdate.person.aliases.includes("记忆哥"));
+  assert.ok(aliasUpdate.person.suppressedAliases.includes("一群名片"));
 });
 
 test("never exposes malformed invisible memory metadata to QQ", () => {

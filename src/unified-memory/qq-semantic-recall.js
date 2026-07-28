@@ -41,9 +41,17 @@ export async function recallQqSemanticMemory({
 
   const semanticScope = buildQqSemanticScope(event);
   const publicSemanticScope = { ...semanticScope, includeGlobal: true };
-  const ownerSemanticScope = {
+  const personSemanticScope = {
     ...semanticScope,
-    includeGlobal: Boolean(event.isOwner)
+    includeGlobal: false
+  };
+  const ownerGlobalSemanticScope = {
+    ...semanticScope,
+    scopeId: "",
+    groupId: "",
+    privateUserId: "",
+    userIds: [],
+    includeGlobal: true
   };
   const requests = [
     includeImpressions
@@ -53,7 +61,8 @@ export async function recallQqSemanticMemory({
           query,
           layers: ["impression"],
           scope: semanticScope,
-          limit: 8
+          limit: 12,
+          minScore: 0
         }
       }
       : null,
@@ -75,13 +84,35 @@ export async function recallQqSemanticMemory({
         limit: 6
       }
     },
+    {
+      name: "unified-person-profile",
+      options: {
+        query: "",
+        layers: ["unified"],
+        kinds: ["personProfile"],
+        scope: personSemanticScope,
+        limit: 12,
+        minScore: 0
+      }
+    },
+    {
+      name: "unified-person-session",
+      options: {
+        query,
+        layers: ["unified"],
+        kinds: ["personSession"],
+        scope: personSemanticScope,
+        limit: 8,
+        minScore: query ? 0.06 : 0
+      }
+    },
     event.isOwner
       ? {
         name: "unified",
         options: {
           query,
           layers: ["unified"],
-          scope: ownerSemanticScope,
+          scope: ownerGlobalSemanticScope,
           limit: 4
         }
       }
@@ -122,7 +153,9 @@ export async function recallQqSemanticMemory({
     scope: semanticScope,
     items,
     itemIds: items.map((item) => String(item.id)),
-    context: formatSemanticMemoryPrompt(items),
+    context: formatSemanticMemoryPrompt(items, {
+      currentScopeId: semanticScope.scopeId
+    }),
     layers,
     errors
   };

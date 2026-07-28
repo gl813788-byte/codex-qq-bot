@@ -47,7 +47,8 @@ export function formatQqMainModelInstructions({
     "【记忆与知识】",
     currentDate ? `当前日期（Asia/Shanghai）：${currentDate}。` : null,
     "回复后只有出现具有复用价值的新信息时，才可附 qq_memory 或 qq_knowledge 标记；临时情绪、无依据猜测和重复旧内容不写。",
-    "qq_memory 格式：[[qq_memory:{\"scopeImpressionSummary\":\"不超过96字的群印象简述\",\"scopeImpressionDetail\":\"完整群印象\",\"personImpressionSummary\":\"不超过96字的人物印象简述\",\"personImpressionDetail\":\"完整人物印象\",\"recentTopic\":\"...\",\"botThoughtSummary\":\"不超过96字的感想简述\",\"botThoughtDetail\":\"完整感想\"}]]。仅保存群印象、稳定人物印象、近期话题或 Bot 想法；群印象不跨群，人物印象按 QQ 号共享。同一对象的新印象是对旧版本的整体修订，使用固定画像原位覆盖，不能把新版作为第二份并列追加。",
+    "qq_memory 格式：[[qq_memory:{\"scopeImpressionSummary\":\"不超过96字的群印象简述\",\"scopeImpressionDetail\":\"完整群印象\",\"personImpressionSummary\":\"不超过96字的人物印象简述\",\"personImpressionDetail\":\"完整人物印象\",\"personImpressionComplete\":false,\"personImpressionPromotionReason\":\"成熟度判断理由\",\"recentTopic\":\"...\",\"botThoughtSummary\":\"不超过96字的感想简述\",\"botThoughtDetail\":\"完整感想\"}]]。仅保存群印象、稳定人物印象、近期话题或 Bot 想法；群印象不跨群，人物印象按 QQ 号共享。同一对象的新印象是对旧版本的整体修订，使用固定画像原位覆盖，不能把新版作为第二份并列追加。",
+    "每次写 personImpressionSummary/Detail 时都必须由你判断 personImpressionComplete。只有画像已经覆盖多个稳定维度、依据来自多次互动、内容非敏感且足以在未来跨会话可靠识别这个人时才设为 true，并写简短 promotionReason；设为 true 后 Hub 会按 QQ 号把人物画像提升到统一记忆，并允许在本轮明确识别到此人时召回其其他群聊/私聊中形成的 AI 画像摘要。证据不够就设为 false。不得把群内私事、原始聊天、短期情绪、密钥或敏感身份迁入统一人物记忆。",
     knowledgeMarkerExample ? `长期知识示例：${knowledgeMarkerExample}` : null,
     knowledgeScopeRule || null,
     privateChat
@@ -117,10 +118,14 @@ export function formatQqMainToolGuide({
   replyTarget = "",
   messageText = "",
   pokeEvent = false,
-  replyStickerCandidates = []
+  replyStickerCandidates = [],
+  memoryPeople = []
 } = {}) {
   const actionRelevant = /(?:拍一拍|点赞|好友|加群|入群|群邀请|申请|QQ\s*空间|空间|动态|评论|ban|封禁|拉黑|禁言|踢人)/i.test(String(messageText || "")) || pokeEvent;
   const candidates = Array.isArray(replyStickerCandidates) ? replyStickerCandidates : [];
+  const detectedPeople = (Array.isArray(memoryPeople) ? memoryPeople : [])
+    .filter((person) => person?.userId && (person.summary || person.hasDetail || person.promoted))
+    .slice(0, 8);
   return [
     "【内部工具】",
     "只有确实缺信息或确要执行动作时才调用。调用轮只输出独占一行的 [[qq_command:/...]]，不要同时写给群友看的草稿；看到结果后可继续查，或输出最终消息并附 [[qq_done]]。内部标记不会显示给用户。",
@@ -130,7 +135,18 @@ export function formatQqMainToolGuide({
     "- 最新资料：/联网 查询词 或 /搜索 查询词。查询应具体；结果不够或来源冲突就换角度，不重复同一命令。",
     "- 当前对话短期记忆：/记忆 列表|搜索|详细|添加|覆盖|过时|删除。短期记忆与知识库采用相同的语义检索和覆盖更新原则；发现候选旧项已过时就标记过时，发现同主题就覆盖，只有确实不同的主题才新增。",
     "- 长期知识：/知识库 标题 [范围]、搜索 标题词 | 范围、查看 标题 | 范围、添加 标题 | 内容 | 范围、黑话 词 | 解释 | 范围。核查时效知识时先查旧标题，再联网，最后沿用同一标题覆盖更新。",
-    "- 跨端稳定记忆：/统一记忆 列表、搜索 关键词、印象详细、添加 内容、状态。提示词只注入印象简述；需要完整画像时调用“印象详细”，不要根据简述补写细节。",
+    isOwner
+      ? "- 跨端稳定记忆：/统一记忆 列表、搜索 关键词、添加 内容、状态。"
+      : null,
+    detectedPeople.length
+      ? `- 本轮已按 QQ 号/唯一别名识别的人物：${detectedPeople.map((person) => `${person.displayName || "QQ用户"}(${person.userId})${person.promoted ? "【统一人物】" : ""}`).join("；")}。提示词只给简述；需要完整画像或其他会话人物记忆时调用 /人物记忆 详细 QQ号。只能使用这里列出的 QQ 号。`
+      : null,
+    detectedPeople.some((person) => !person.promoted && person.hasDetail)
+      ? "- 尚未提升但已有详细画像的人物，可在本轮确实需要理解此人或评估画像成熟度时先读取详细印象；读完若确认画像已完整、稳定、非敏感，可在最终回复后附只含 personImpressionComplete=true 与 promotionReason 的 qq_memory 标记，Hub 会使用已有完整画像完成提升。"
+      : null,
+    detectedPeople.length
+      ? "- 人物别名维护：/人物别称 列表 QQ号；/人物别称 添加 QQ号 | 新别称；/人物别称 删除 QQ号 | 旧别称；/人物别称 修改 QQ号 | 旧别称 | 新别称。QQ 号是稳定主键，别称只用于无歧义文本识别。"
+      : null,
     actionRelevant
       ? "本轮可能相关的 QQ 动作：/拍一拍 发送者；/点赞 发送者 1；/申请 列表|同步|同意 最新|拒绝 #申请ID 理由；/主动加好友 QQ号 验证=信息 | 答案=答案 | 备注=备注（/加好友、/添加好友 也识别）；/主动加群 群号 答案=答案；/动态 最近 QQ号 10；/发动态 文字；/发动态 图片=当前；/发动态 文字 | 图片=当前；/评论动态 QQ号 tid 内容；/ban QQ号 10m；/unban QQ号。写操作和管理动作仍按当前发送者权限校验。"
       : null,

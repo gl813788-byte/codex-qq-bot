@@ -10,6 +10,7 @@ export function buildQqSemanticScope(event = {}, { includeGlobal = false } = {})
     addUserId(userIds, queued?.senderId, event.selfId);
     for (const id of queued?.atTargets || []) addUserId(userIds, id, event.selfId);
   }
+  for (const id of event.qqSemanticPersonIds || []) addUserId(userIds, id, event.selfId);
   return {
     channel: "qq",
     scopeId: groupId || (privateUserId ? `private:${privateUserId}` : ""),
@@ -106,32 +107,44 @@ export function buildImpressionSemanticItems(profiles = []) {
 
 export function formatSemanticMemoryPrompt(items = [], {
   title = "相关记忆摘要（语义检索）",
-  detailCommand = "/统一记忆 印象详细"
+  detailCommand = "/统一记忆 印象详细",
+  currentScopeId = ""
 } = {}) {
   const seen = new Set();
+  const seenSummaries = new Set();
   const lines = [];
   for (const item of Array.isArray(items) ? items : []) {
     const key = String(item.id || `${item.layer}:${item.scopeType}:${item.scopeId}:${item.summary}`);
-    if (seen.has(key) || !item.summary) continue;
+    const summaryKey = `${item.userId || ""}:${String(item.summary || "").normalize("NFKC").toLowerCase().replace(/\s+/g, "")}`;
+    if (seen.has(key) || seenSummaries.has(summaryKey) || !item.summary) continue;
     seen.add(key);
-    const label = item.layer === "short-term"
-      ? "短期"
-      : item.layer === "knowledge"
-        ? "长期知识"
-        : item.layer === "impression"
-          ? "印象"
-          : "统一";
+    seenSummaries.add(summaryKey);
+    const label = formatSemanticItemLabel(item, currentScopeId);
     lines.push(`- [${label}] ${item.title ? `${item.title}：` : ""}${item.summary}`);
   }
   if (!lines.length) return "";
   return [
     `${title}：`,
-    "Hub 已按当前群、私聊和相关人物过滤，并对同一记忆去重；这里只提供简短描述，旧内容不得覆盖当前消息。",
+    "Hub 已按当前群、私聊和本轮明确识别的人物过滤，并对同一记忆去重；已提升人物可带来其他会话的相关摘要。这里只提供简短描述，旧内容不得覆盖当前消息。",
     ...lines,
     items.some((item) => item.layer === "impression")
       ? `需要印象完整描述时再调用 ${detailCommand}，不要凭摘要补写细节。`
       : null
   ].filter(Boolean).join("\n");
+}
+
+function formatSemanticItemLabel(item, currentScopeId) {
+  if (item.layer === "short-term") return "短期";
+  if (item.layer === "knowledge") return "长期知识";
+  if (item.layer === "impression") return "人物简述";
+  if (item.kind === "personProfile") return "统一人物";
+  if (item.kind === "personSession") {
+    return item.metadata?.sourceScopeId
+      && item.metadata.sourceScopeId !== currentScopeId
+      ? "其他会话"
+      : "人物会话";
+  }
+  return "统一";
 }
 
 function mapKnowledgeScope(scope) {

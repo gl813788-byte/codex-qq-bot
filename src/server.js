@@ -244,6 +244,14 @@ import {
   recallQqSemanticMemory,
   summarizeQqSemanticRecall
 } from "./unified-memory/qq-semantic-recall.js";
+import {
+  applyQqPersonAliasToolCommand,
+  buildUnifiedPersonMemoryEntries,
+  formatQqPersonMemorySource,
+  listPromotedQqPersonIds,
+  resolveQqMemoryPeople,
+  selectDetectedQqMemoryPeople
+} from "./unified-memory/qq-person-memory.js";
 import { createWebSearch, formatWebSearchProviderName } from "./web-search.js";
 import { isSupportedImageContentType, readResponseJson, writeResponseBodyToFile } from "./bounded-stream.js";
 import { runJsonProcess } from "./process-runner.js";
@@ -405,6 +413,9 @@ function fallbackMemoryStore() {
       return { ok: true, enabled: false, count: 0, reason: "unified-memory module is not installed" };
     },
     async write() {
+      return { ok: false, skipped: true, reason: "unified-memory module is not installed" };
+    },
+    async writeMany() {
       return { ok: false, skipped: true, reason: "unified-memory module is not installed" };
     },
     async clear() {
@@ -1601,6 +1612,17 @@ async function buildQqPendingSteeringInput(entries, generation) {
   const aggregate = buildAggregatedQqEvent(entries);
   if (!aggregate) return [];
   const parentEvent = generation?.qqEvent;
+  aggregate.qqMemoryPeople = resolveQqMemoryPeople(state.qq.conversationMemory, aggregate);
+  aggregate.qqSemanticPersonIds = aggregate.qqMemoryPeople.map((person) => person.userId);
+  if (parentEvent) {
+    parentEvent.qqMemoryPeople = [
+      ...(parentEvent.qqMemoryPeople || []),
+      ...aggregate.qqMemoryPeople
+    ].filter((person, index, values) => (
+      values.findIndex((candidate) => candidate.userId === person.userId) === index
+    )).slice(0, 12);
+    parentEvent.qqSemanticPersonIds = parentEvent.qqMemoryPeople.map((person) => person.userId);
+  }
   const replyTargetCandidates = collectQqReplyTargetCandidates(parentEvent || aggregate, entries);
   const replyTargetInstruction = formatQqReplyTargetInstruction(replyTargetCandidates);
   if (parentEvent) parentEvent.qqReplyTargetCandidates = replyTargetCandidates;
@@ -1619,7 +1641,7 @@ async function buildQqPendingSteeringInput(entries, generation) {
     })
     : { text: "", messageIds: [], messageCount: 0, semanticSeedCount: 0 };
   const semanticRecall = await recallQqChatSemantics(aggregate, {
-    includeImpressions: false,
+    includeImpressions: true,
     excludeItemIds: parentEvent?.qqSemanticMemoryItemIds || [],
     source: "fused-follow-up"
   });
@@ -1937,14 +1959,41 @@ async function syncQqSemanticMemoryLayer(layer) {
   }
 }
 
+async function syncPromotedQqPersonMemories(userIds = listPromotedQqPersonIds(state.qq.conversationMemory)) {
+  const ids = [...new Set((Array.isArray(userIds) ? userIds : [userIds]).map(String).filter(Boolean))];
+  const entries = ids.flatMap((userId) => (
+    buildUnifiedPersonMemoryEntries(state.qq.conversationMemory, userId)
+  ));
+  if (!entries.length) return { ok: true, skipped: true, count: 0 };
+  try {
+    const result = await unifiedMemory.writeMany(entries);
+    logger.debug("QQ person memories synchronized to unified memory", {
+      personCount: ids.length,
+      entryCount: entries.length,
+      outcome: result?.ok ? "synchronized" : "skipped",
+      reason: result?.reason
+    }, "memory");
+    return { ...result, personCount: ids.length, entryCount: entries.length };
+  } catch (error) {
+    logger.warn("Unable to synchronize QQ person memories to unified memory", {
+      personCount: ids.length,
+      entryCount: entries.length,
+      outcome: "failed",
+      error
+    }, "memory");
+    return { ok: false, error: error.message, personCount: ids.length, entryCount: entries.length };
+  }
+}
+
 async function syncAllSemanticMemoryLayers() {
+  const personMemoryResult = await syncPromotedQqPersonMemories();
   const results = await Promise.all([
     syncQqSemanticMemoryLayer("short-term"),
     syncQqSemanticMemoryLayer("knowledge"),
     syncQqSemanticMemoryLayer("impression"),
     unifiedMemory.syncSemanticMemory?.()
   ]);
-  return results;
+  return [personMemoryResult, ...results];
 }
 
 async function recallQqChatSemantics(event, {
@@ -5687,7 +5736,8 @@ function formatQqBotInternalToolContext(event) {
     replyTarget,
     messageText: event.text,
     pokeEvent: isQqPokeEvent(event),
-    replyStickerCandidates
+    replyStickerCandidates,
+    memoryPeople: event.qqMemoryPeople || []
   });
 }
 
@@ -6361,7 +6411,7 @@ function isQqBotKnowledgeCommand(command) {
 }
 
 function isQqBotUnifiedMemoryCommand(command) {
-  return /^\/?(统一记忆|跨端记忆|全局记忆|unified-memory|unified memory|交接)(?:\s+.*)?$/i.test(command);
+  return /^\/?(统一记忆|跨端记忆|全局记忆|unified-memory|unified memory|交接|人物记忆|人物印象|人物别称)(?:\s+.*)?$/i.test(command);
 }
 
 function isQqBotWebSearchCommand(command) {
@@ -6666,35 +6716,65 @@ function resolveQqBotPokeTarget(command, event) {
 
 async function executeQqBotUnifiedMemoryCommand(command, event) {
   const normalized = String(command || "").trim().replace(/^\/+/, "");
+  if (/^人物别称(?:\s+|$)/i.test(normalized)) {
+    return executeQqBotPersonAliasCommand(command, event);
+  }
   const isHandoff = /^交接(?:\s+|$)/i.test(normalized);
-  const body = normalized.replace(/^(?:统一记忆|跨端记忆|全局记忆|unified-memory|unified memory|交接)\s*/i, "").trim();
+  const personMemoryCommand = /^(?:人物记忆|人物印象)(?:\s+|$)/i.test(normalized);
+  const body = normalized.replace(/^(?:统一记忆|跨端记忆|全局记忆|unified-memory|unified memory|交接|人物记忆|人物印象)\s*/i, "").trim();
   const addMatch = body.match(/^(?:添加|新增|写入|记住|add|write)\s+([\s\S]+)$/i);
   const searchMatch = body.match(/^(?:搜索|查找|查|search)\s+(.+)$/i);
-  const impressionDetailMatch = body.match(/^(?:印象详细|印象详情|详细印象|完整印象|impression-detail)(?:\s+([\s\S]+))?$/i);
+  const impressionDetailMatch = body.match(/^(?:印象详细|印象详情|详细印象|完整印象|详细|详情|impression-detail)(?:\s+([\s\S]+))?$/i);
   if (impressionDetailMatch) {
-    const query = String(impressionDetailMatch[1] || "").trim();
+    const selector = String(impressionDetailMatch[1] || "").trim();
+    const detectedPeople = getDetectedQqMemoryPeople(event);
+    const selectedPeople = selectDetectedQqMemoryPeople(detectedPeople, selector);
+    if (!selectedPeople.length) {
+      return {
+        ok: false,
+        command,
+        reply: detectedPeople.length
+          ? "只能查看本轮已识别人物的详细印象；请使用工具目录列出的 QQ 号。"
+          : "本轮没有识别到可查看的人物画像。"
+      };
+    }
+    const selectedIds = new Set(selectedPeople.map((person) => person.userId));
+    const semanticScope = {
+      ...buildQqSemanticScope(event),
+      userIds: [...selectedIds],
+      includeGlobal: false
+    };
     const items = await unifiedMemory.semanticSearch({
-      query,
-      layers: ["impression"],
-      scope: buildQqSemanticScope(event),
+      query: "",
+      layers: ["impression", "unified"],
+      kinds: ["person-impression", "private-impression", "personProfile", "personSession"],
+      scope: semanticScope,
       statuses: ["active"],
-      limit: 10,
-      minScore: query ? 0.04 : 0
-    }).catch(() => []);
+      limit: 24,
+      minScore: 0
+    }).then((results) => results.filter((item) => selectedIds.has(String(item.userId || ""))))
+      .catch(() => []);
     if (!items.length) {
       return {
         ok: true,
         command,
-        reply: query ? `当前范围没有找到与“${query}”相关的完整印象。` : "当前范围还没有可查看的完整印象。"
+        reply: "本轮已识别人物还没有可查看的完整印象。"
       };
     }
+    const seenDescriptions = new Set();
+    const detailBlocks = items.filter((item) => {
+      const key = `${item.userId}:${String(item.detail || item.summary || "").replace(/\s+/g, "")}`;
+      if (seenDescriptions.has(key)) return false;
+      seenDescriptions.add(key);
+      return true;
+    });
     return {
       ok: true,
       command,
       reply: [
-        "当前消息涉及的完整印象（弱参考，不是绝对事实）：",
-        ...items.map((item) => [
-          `【${item.title || "印象"}】`,
+        "本轮已识别人物的完整印象（弱参考，不是绝对事实；“其他会话”只含 AI 整理的人物画像，不含原始聊天）：",
+        ...detailBlocks.map((item) => [
+          `【${formatQqPersonMemorySource(item, semanticScope.scopeId)}·${item.title || "人物印象"}】`,
           `简述：${item.summary}`,
           `详细：${item.detail || item.summary}`,
           `更新：${item.updatedAt || "未知"}`
@@ -6728,6 +6808,13 @@ async function executeQqBotUnifiedMemoryCommand(command, event) {
       ok: result.ok,
       command,
       reply: result.ok ? `已更新统一记忆交接：${text}` : `交接写入失败：${result.reason || "未知原因"}`
+    };
+  }
+  if (personMemoryCommand) {
+    return {
+      ok: false,
+      command,
+      reply: "人物记忆可用：/人物记忆 详细 QQ号。只能查看本轮已识别的人物。"
     };
   }
   if (!body || /^(?:列表|查看|看看|list|show)$/i.test(body)) {
@@ -6774,6 +6861,35 @@ async function executeQqBotUnifiedMemoryCommand(command, event) {
   };
 }
 
+async function executeQqBotPersonAliasCommand(command, event) {
+  const body = String(command || "")
+    .trim()
+    .replace(/^\/+/, "")
+    .replace(/^人物别称\s*/i, "")
+    .trim();
+  const result = applyQqPersonAliasToolCommand(
+    state.qq.conversationMemory,
+    body,
+    getDetectedQqMemoryPeople(event)
+  );
+  if (!result.ok || !result.changed) {
+    return { ok: result.ok, command, reply: result.reply };
+  }
+  state.qq.conversationMemory = result.memory;
+  await saveQqConversationMemory();
+  await syncPromotedQqPersonMemories([result.userId]);
+  event.qqMemoryPeople = resolveQqMemoryPeople(state.qq.conversationMemory, event);
+  event.qqSemanticPersonIds = event.qqMemoryPeople.map((item) => item.userId);
+  return { ok: true, command, reply: result.reply };
+}
+
+function getDetectedQqMemoryPeople(event) {
+  const people = Array.isArray(event?.qqMemoryPeople) && event.qqMemoryPeople.length
+    ? event.qqMemoryPeople
+    : resolveQqMemoryPeople(state.qq.conversationMemory, event);
+  return people.filter((person) => person?.userId && (person.summary || person.hasDetail || person.promoted));
+}
+
 function formatUnifiedMemorySnapshotForQq(snapshot, query = "") {
   const lines = [];
   if (snapshot.latestHandoff?.summary) lines.push(`最近交接：${snapshot.latestHandoff.summary}`);
@@ -6799,6 +6915,8 @@ function formatUnifiedMemoryStatusForQq(status) {
     `点子：${counts.ideas || 0} 条`,
     `待办：${counts.openLoops || 0} 条`,
     `日常状态：${counts.dailyTimeline || 0} 条`,
+    `统一人物：${counts.personProfiles || 0} 人`,
+    `人物会话记忆：${counts.personSessions || 0} 条`,
     `语义底座：${semantic.backend || "不可用"}，${semantic.count || 0} 条索引`,
     ...(semantic.layers || []).map((item) => `- ${item.layer}/${item.status}：${item.count}`)
   ].join("\n");
@@ -7824,6 +7942,8 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   event.qqKnowledgeMatches = knowledgeMatches;
   const selfPersonaContext = formatQqSelfPersonaContext(state.qq.selfPersona);
   const scopeTopicContext = formatQqSelfPersonaScopeTopicContext(state.qq.selfPersona, scopeId);
+  event.qqMemoryPeople = resolveQqMemoryPeople(state.qq.conversationMemory, event);
+  event.qqSemanticPersonIds = event.qqMemoryPeople.map((person) => person.userId);
   const semanticRecall = await recallQqChatSemantics(event, {
     includeImpressions: true,
     source: "initial"
@@ -9853,6 +9973,14 @@ async function processQqReplyEvent(event, options = {}) {
             event.qqConversationMemoryPatches || []
           );
           await saveQqConversationMemory();
+          const personMemoryChanged = (event.qqConversationMemoryPatches || []).some((patch) => (
+            patch?.personImpressionSummary
+            || patch?.personImpressionDetail
+            || patch?.personImpressionComplete
+          ));
+          if (personMemoryChanged && event.senderId) {
+            await syncPromotedQqPersonMemories([event.senderId]);
+          }
           if (event.qqKnowledgePatches?.length && qqKnowledgeBaseRepository.writable) {
             const knowledge = applyQqKnowledgePatches(
               state.qq.knowledgeBase,

@@ -49,7 +49,7 @@
 | `src/qq-history-retrieval.js` | QQ 复盘历史边界 | NapCat 分页、消息归一化、本地合并和去重 |
 | `src/qq-short-term-memory.js` | QQ 短期记忆领域 | 旧数据迁移、简述/详述、覆盖和过时生命周期 |
 | `src/qq-style-review.js` | 真人/Bot 风格复盘边界 | 灵活主模型提示、结构解析和安全压缩 |
-| `src/unified-memory/` | 跨通道统一记忆 | SQLite/FTS/语义向量混合召回、统一 QQ 聊天查询构造、范围过滤和单次摘要注入 |
+| `src/unified-memory/` | 跨通道统一记忆 | SQLite/FTS/语义向量混合召回、QQ 号/唯一别名人物识别、AI 画像提升、跨会话人物范围过滤和单次简述注入 |
 | `src/*.js` | 现有领域与基础设施模块 | 修改对应能力并渐进迁移 |
 | `modules/` | 平台客户端和可选集成 | 共享界面、启动器、QQ 社交桥接 |
 | `scripts/` | 部署与运维命令 | 检查、部署、日志和仓库 `ncc` |

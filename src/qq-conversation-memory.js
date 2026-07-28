@@ -4,7 +4,7 @@ const markerPattern = /\[\[qq_memory:(\{[^\n]*?\})\]\]/g;
 const anyMarkerPattern = /\[\[qq_memory:[\s\S]*?\]\]/g;
 const maxPeoplePerGroup = 500;
 const maxGlobalPeople = 2_000;
-export const qqConversationMemoryVersion = 3;
+export const qqConversationMemoryVersion = 4;
 
 export function createEmptyQqConversationMemory() {
   return {
@@ -28,9 +28,11 @@ export function normalizeQqConversationMemory(value) {
   };
   normalizeConversationProfiles(state);
   normalizeGlobalPeople(state.people);
+  mergePrivatePeopleIntoGlobal(state);
   if (Number(input.version || 1) < 2) migrateLegacyGroupPeople(state);
   normalizeConversationProfiles(state);
   normalizeGlobalPeople(state.people);
+  mergePrivatePeopleIntoGlobal(state);
   return state;
 }
 
@@ -82,8 +84,18 @@ export function updateQqConversationMemoryFromEvent(memory, event, { now = () =>
   } else if (event?.senderId) {
     const chat = getPrivateChat(state, event.senderId, event.senderLabel || event.senderName);
     if (!chat) return state;
+    const globalPerson = getGlobalPerson(
+      state,
+      event.senderId,
+      "",
+      event.senderLabel || event.senderName
+    );
     chat.updatedAt = at;
     chat.messageCount = Number(chat.messageCount || 0) + 1;
+    if (globalPerson) {
+      globalPerson.updatedAt = at;
+      globalPerson.messageCount = Number(globalPerson.messageCount || 0) + 1;
+    }
     if (topic) chat.recentTopics = pushTopic(chat.recentTopics, topic, event, at, 10);
     chat.recentLinks = pushLinks(chat.recentLinks, links, event, at);
     if (reusableText) {
@@ -124,10 +136,24 @@ export function updateQqConversationMemoryFromExchange(memory, event, reply, pat
   } else if (event?.senderId) {
     const chat = getPrivateChat(state, event.senderId, event.senderLabel || event.senderName);
     if (!chat) return state;
+    const globalPerson = getGlobalPerson(
+      state,
+      event.senderId,
+      "",
+      event.senderLabel || event.senderName
+    );
     chat.updatedAt = at;
     if (assistantText) chat.recentMessages = pushLimited(chat.recentMessages, { at, role: "assistant", text: assistantText }, 12);
     chat.recentConversations = pushLimited(chat.recentConversations, { at, userText, assistantText }, 8);
-    for (const patch of patches) applyPatchToPrivateChat(chat, normalizePatch(patch), at);
+    for (const patch of patches) {
+      applyPatchToPrivateChat(
+        chat,
+        globalPerson,
+        normalizePatch(patch),
+        at,
+        `private:${String(event.senderId)}`
+      );
+    }
   }
   state.updatedAt = at;
   return state;
@@ -259,6 +285,60 @@ export function summarizeQqConversationMemory(memory) {
   };
 }
 
+export function updateQqConversationPersonAlias(memory, {
+  userId,
+  action,
+  alias = "",
+  replacement = ""
+} = {}, { now = () => new Date() } = {}) {
+  const state = ensureMemory(memory);
+  const id = String(userId || "").trim();
+  if (!/^\d{4,20}$/.test(id)) return { memory: state, ok: false, reason: "invalid_user_id" };
+  const person = getGlobalPerson(state, id, "", "");
+  if (!person) return { memory: state, ok: false, reason: "person_unavailable" };
+  const currentAlias = safeMemoryField(alias, 48);
+  const nextAlias = safeMemoryField(replacement, 48);
+  person.manualAliases = normalizeAliasList(person.manualAliases);
+  person.suppressedAliases = normalizeAliasList(person.suppressedAliases);
+
+  if (action === "add") {
+    if (!isValidManagedAlias(currentAlias)) return { memory: state, ok: false, reason: "invalid_alias" };
+    person.suppressedAliases = removeAliasValue(person.suppressedAliases, currentAlias);
+    person.manualAliases = addAliasToList(person.manualAliases, currentAlias);
+    person.aliases = addAliasToList(person.aliases, currentAlias);
+  } else if (action === "remove") {
+    if (!currentAlias) return { memory: state, ok: false, reason: "invalid_alias" };
+    person.manualAliases = removeAliasValue(person.manualAliases, currentAlias);
+    person.aliases = removeAliasValue(person.aliases, currentAlias);
+    person.suppressedAliases = addAliasToList(person.suppressedAliases, currentAlias);
+  } else if (action === "replace") {
+    if (!currentAlias || !isValidManagedAlias(nextAlias)) {
+      return { memory: state, ok: false, reason: "invalid_alias" };
+    }
+    person.manualAliases = removeAliasValue(person.manualAliases, currentAlias);
+    person.aliases = removeAliasValue(person.aliases, currentAlias);
+    person.suppressedAliases = addAliasToList(person.suppressedAliases, currentAlias);
+    person.suppressedAliases = removeAliasValue(person.suppressedAliases, nextAlias);
+    person.manualAliases = addAliasToList(person.manualAliases, nextAlias);
+    person.aliases = addAliasToList(person.aliases, nextAlias);
+  } else {
+    return { memory: state, ok: false, reason: "invalid_action" };
+  }
+
+  person.updatedAt = now().toISOString();
+  state.updatedAt = person.updatedAt;
+  return {
+    memory: state,
+    ok: true,
+    person: {
+      userId: id,
+      aliases: collectVisibleAliases(person),
+      manualAliases: [...person.manualAliases],
+      suppressedAliases: [...person.suppressedAliases]
+    }
+  };
+}
+
 function ensureMemory(memory) {
   if (!memory || typeof memory !== "object") return createEmptyQqConversationMemory();
   if (Number(memory.version || 1) < qqConversationMemoryVersion) return normalizeQqConversationMemory(memory);
@@ -330,7 +410,7 @@ function getGlobalPerson(state, senderId, groupId, senderName = "") {
   if (!senderId) return null;
   const id = String(senderId);
   const scopedGroupId = String(groupId || "");
-  if (!isSafeRecordKey(id) || !isSafeRecordKey(scopedGroupId)) return null;
+  if (!isSafeRecordKey(id) || (scopedGroupId && !isSafeRecordKey(scopedGroupId))) return null;
   if (!state.people[id] && Object.keys(state.people).length >= maxGlobalPeople) {
     const oldestId = Object.keys(state.people).sort((left, right) => {
       const leftAt = Date.parse(state.people[left]?.updatedAt || "") || 0;
@@ -342,9 +422,11 @@ function getGlobalPerson(state, senderId, groupId, senderName = "") {
   state.people[id] ||= createGlobalPerson(id);
   const person = state.people[id];
   addAlias(person, senderName);
-  person.groupIds = [...new Set([...(person.groupIds || []), scopedGroupId])].slice(-32);
   person.groupAliases = normalizeRecord(person.groupAliases);
-  person.groupAliases[scopedGroupId] = addAliasToList(person.groupAliases[scopedGroupId], senderName);
+  if (scopedGroupId) {
+    person.groupIds = [...new Set([...(person.groupIds || []), scopedGroupId])].slice(-32);
+    person.groupAliases[scopedGroupId] = addAliasToList(person.groupAliases[scopedGroupId], senderName);
+  }
   return person;
 }
 
@@ -373,6 +455,7 @@ function getPrivateChat(state, senderId, senderName = "") {
 }
 
 function addAlias(record, alias) {
+  if (hasAliasValue(record?.suppressedAliases, alias)) return;
   record.aliases = addAliasToList(record.aliases, alias);
 }
 
@@ -454,6 +537,15 @@ function applyPatchToGroup(group, person, globalPerson, patch, at) {
       detail: patch.personImpressionDetail
     }, "impression", at);
   }
+  if (patch.personImpressionComplete
+    || ((patch.personImpressionDetail || patch.personImpressionSummary)
+      && globalPerson?.unifiedMemory?.promotedAt)) {
+    markPersonUnifiedMemoryPromotion(globalPerson, {
+      at,
+      reason: patch.personImpressionPromotionReason,
+      sourceScopeId: group?.groupId || ""
+    });
+  }
   if (patch.botThoughtDetail || patch.botThoughtSummary) {
     applyDescriptionPatch(group, {
       summary: patch.botThoughtSummary,
@@ -480,6 +572,8 @@ function createGlobalPerson(userId) {
   return {
     userId,
     aliases: [],
+    manualAliases: [],
+    suppressedAliases: [],
     groupIds: [],
     groupAliases: Object.create(null),
     messageCount: 0,
@@ -487,7 +581,8 @@ function createGlobalPerson(userId) {
     impression: "",
     impressionSummary: "",
     impressionDetail: "",
-    descriptionUpdatedAt: null
+    descriptionUpdatedAt: null,
+    unifiedMemory: createEmptyUnifiedMemoryPromotion()
   };
 }
 
@@ -507,8 +602,28 @@ function normalizeGlobalPeople(people) {
     }
     person.messageCount = Math.max(0, Number(person.messageCount) || 0);
     person.updatedAt = person.updatedAt || null;
+    person.manualAliases = normalizeAliasList(person.manualAliases);
+    person.suppressedAliases = normalizeAliasList(person.suppressedAliases);
+    person.aliases = collectVisibleAliases(person);
     normalizeDescriptionFields(person, "impression");
+    person.unifiedMemory = normalizeUnifiedMemoryPromotion(person.unifiedMemory);
     people[userId] = person;
+  }
+}
+
+function mergePrivatePeopleIntoGlobal(state) {
+  for (const [userId, chat] of Object.entries(state.privateChats || {})) {
+    const person = getGlobalPerson(state, userId, "", chat?.aliases?.at(-1) || "");
+    if (!person) continue;
+    for (const alias of chat?.aliases || []) addAlias(person, alias);
+    const chatUpdatedAt = Date.parse(chat?.descriptionUpdatedAt || chat?.updatedAt || "") || 0;
+    const personUpdatedAt = Date.parse(person.descriptionUpdatedAt || person.updatedAt || "") || 0;
+    if (chatUpdatedAt >= personUpdatedAt && (chat?.impressionSummary || chat?.impressionDetail)) {
+      applyDescriptionPatch(person, {
+        summary: chat.impressionSummary,
+        detail: chat.impressionDetail
+      }, "impression", chat.descriptionUpdatedAt || chat.updatedAt || new Date().toISOString());
+    }
   }
 }
 
@@ -536,13 +651,25 @@ function migrateLegacyGroupPeople(state) {
   }
 }
 
-function applyPatchToPrivateChat(chat, patch, at) {
+function applyPatchToPrivateChat(chat, globalPerson, patch, at, sourceScopeId) {
   if (patch.personImpressionDetail || patch.personImpressionSummary
     || patch.scopeImpressionDetail || patch.scopeImpressionSummary) {
-    applyDescriptionPatch(chat, {
+    const description = {
       summary: patch.personImpressionSummary || patch.scopeImpressionSummary,
       detail: patch.personImpressionDetail || patch.scopeImpressionDetail
-    }, "impression", at);
+    };
+    applyDescriptionPatch(chat, description, "impression", at);
+    applyDescriptionPatch(globalPerson, description, "impression", at);
+  }
+  if (patch.personImpressionComplete
+    || ((patch.personImpressionDetail || patch.personImpressionSummary
+      || patch.scopeImpressionDetail || patch.scopeImpressionSummary)
+      && globalPerson?.unifiedMemory?.promotedAt)) {
+    markPersonUnifiedMemoryPromotion(globalPerson, {
+      at,
+      reason: patch.personImpressionPromotionReason,
+      sourceScopeId
+    });
   }
   if (patch.botThoughtDetail || patch.botThoughtSummary) {
     applyDescriptionPatch(chat, {
@@ -577,6 +704,8 @@ function normalizePatch(value) {
       96
     ),
     personImpressionDetail: safeMemoryField(value.personImpressionDetail || legacyPerson, 1_200),
+    personImpressionComplete: value.personImpressionComplete === true,
+    personImpressionPromotionReason: safeMemoryField(value.personImpressionPromotionReason, 160),
     recentTopic: safeMemoryField(value.recentTopic, 80),
     botThoughtSummary: safeMemoryField(
       value.botThoughtSummary || (legacyThought ? summarizeDescription(legacyThought) : ""),
@@ -635,6 +764,97 @@ function normalizeDescriptionFields(record, prefix) {
   record[prefix] = detail;
   record[`${prefix}Summary`] = summary;
   record[`${prefix}Detail`] = detail;
+}
+
+function createEmptyUnifiedMemoryPromotion() {
+  return {
+    promotedAt: null,
+    updatedAt: null,
+    reason: "",
+    sourceScopeIds: []
+  };
+}
+
+function normalizeUnifiedMemoryPromotion(value) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    promotedAt: normalizeMemoryTime(input.promotedAt),
+    updatedAt: normalizeMemoryTime(input.updatedAt),
+    reason: safeMemoryField(input.reason, 160),
+    sourceScopeIds: Array.isArray(input.sourceScopeIds)
+      ? [...new Set(input.sourceScopeIds.map((item) => memoryText(item, 80)).filter(Boolean))].slice(-32)
+      : []
+  };
+}
+
+function markPersonUnifiedMemoryPromotion(person, {
+  at,
+  reason = "",
+  sourceScopeId = ""
+} = {}) {
+  if (!person || !isCompletePersonImpression(person)) return false;
+  const previous = normalizeUnifiedMemoryPromotion(person.unifiedMemory);
+  const sourceScopes = sourceScopeId
+    ? [...previous.sourceScopeIds, memoryText(sourceScopeId, 80)]
+    : previous.sourceScopeIds;
+  person.unifiedMemory = {
+    promotedAt: previous.promotedAt || normalizeMemoryTime(at) || new Date().toISOString(),
+    updatedAt: normalizeMemoryTime(at) || new Date().toISOString(),
+    reason: safeMemoryField(reason, 160) || previous.reason || "AI 判定人物印象已足够完整",
+    sourceScopeIds: [...new Set(sourceScopes.filter(Boolean))].slice(-32)
+  };
+  return true;
+}
+
+function isCompletePersonImpression(person) {
+  const summary = safeMemoryField(person?.impressionSummary, 96);
+  const detail = safeMemoryField(person?.impressionDetail || person?.impression, 1_200);
+  return [...summary].length >= 8 && [...detail].length >= 40;
+}
+
+function normalizeMemoryTime(value) {
+  const timestamp = Date.parse(value || "");
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
+function normalizeAliasList(values) {
+  return (Array.isArray(values) ? values : [])
+    .map((value) => safeMemoryField(value, 48))
+    .filter(Boolean)
+    .reduce(addAliasToList, [])
+    .slice(-32);
+}
+
+function collectVisibleAliases(person) {
+  const suppressed = new Set(
+    normalizeAliasList(person?.suppressedAliases).map(normalizeAliasKey)
+  );
+  return [...(person?.aliases || []), ...(person?.manualAliases || [])]
+    .map((value) => safeMemoryField(value, 48))
+    .filter((value) => value && !suppressed.has(normalizeAliasKey(value)))
+    .reduce(addAliasToList, [])
+    .slice(-32);
+}
+
+function removeAliasValue(values, alias) {
+  const key = normalizeAliasKey(alias);
+  return normalizeAliasList(values).filter((value) => normalizeAliasKey(value) !== key);
+}
+
+function hasAliasValue(values, alias) {
+  const key = normalizeAliasKey(alias);
+  return Boolean(key) && normalizeAliasList(values).some((value) => normalizeAliasKey(value) === key);
+}
+
+function normalizeAliasKey(value) {
+  return String(value || "").normalize("NFKC").toLowerCase().replace(/\s+/g, "").replace(/^@+/, "");
+}
+
+function isValidManagedAlias(value) {
+  const normalized = normalizeAliasKey(value);
+  const length = [...normalized].length;
+  if (length < 2 || length > 48) return false;
+  return !/^\d{4,20}$/.test(normalized);
 }
 
 function applyDescriptionPatch(record, patch, prefix, at) {

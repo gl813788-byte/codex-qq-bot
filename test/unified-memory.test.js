@@ -42,3 +42,70 @@ test("refuses to overwrite malformed unified-memory data", async (t) => {
   );
   assert.equal(await readFile(memoryPath, "utf8"), "{not-json");
 });
+
+test("upserts promoted QQ people by stable id and scopes them by QQ identity", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-qq-person-memory-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const memoryPath = join(directory, "unified-memory.json");
+  const semanticMemoryPath = join(directory, "semantic-memory.sqlite");
+  const memory = createUnifiedMemory({ memoryPath, semanticMemoryPath });
+  t.after(() => memory.close());
+
+  await memory.writeMany([{
+    id: "qq-person-profile:20002",
+    type: "personProfile",
+    source: "test",
+    channel: "qq",
+    topic: "小林的人物印象",
+    summary: "重视可靠记忆",
+    detail: "重视可靠记忆，也会持续检查跨会话检索是否真正工作。",
+    subjectChannel: "qq",
+    subjectUserId: "20002",
+    subjectAliases: ["A群小林", "私聊小林"],
+    sourceScopeType: "person",
+    sourceScopeId: "member:20002"
+  }, {
+    id: "global-note",
+    type: "projectNote",
+    source: "test",
+    topic: "项目",
+    summary: "只有主人能自动召回的全局项目记忆"
+  }]);
+  await memory.writeMany([{
+    id: "qq-person-profile:20002",
+    type: "personProfile",
+    source: "test",
+    channel: "qq",
+    topic: "小林的人物印象",
+    summary: "重视可靠记忆和稳定身份",
+    detail: "新版完整画像原位覆盖旧画像。",
+    subjectChannel: "qq",
+    subjectUserId: "20002",
+    subjectAliases: ["A群小林", "私聊小林"]
+  }]);
+
+  const snapshot = await memory.read({ limit: 10 });
+  assert.equal(snapshot.entries.length, 2);
+  assert.equal(
+    snapshot.entries.find((entry) => entry.id === "qq-person-profile:20002")?.summary,
+    "重视可靠记忆和稳定身份"
+  );
+
+  const personHits = await memory.semanticSearch({
+    query: "",
+    layers: ["unified"],
+    kinds: ["personProfile"],
+    scope: { userIds: ["20002"], includeGlobal: false },
+    minScore: 0
+  });
+  assert.deepEqual(personHits.map((item) => item.id), ["unified:qq-person-profile:20002"]);
+  assert.equal(personHits[0].detail, "新版完整画像原位覆盖旧画像。");
+
+  const unrelatedHits = await memory.semanticSearch({
+    query: "",
+    layers: ["unified"],
+    scope: { userIds: ["30003"], includeGlobal: false },
+    minScore: 0
+  });
+  assert.deepEqual(unrelatedHits, []);
+});

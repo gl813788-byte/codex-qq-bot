@@ -28,6 +28,8 @@ test("main-model core prompt presents one execution path and one dynamic style a
   assert.match(prompt, /\[\[qq_reply:quote:QQ号\]\].*\[\[qq_reply:mention:QQ号\]\].*\[\[qq_reply:plain\]\]/);
   assert.match(prompt, /不会擅自引用或艾特最早触发者/);
   assert.match(prompt, /qq_memory 格式/);
+  assert.match(prompt, /personImpressionComplete/);
+  assert.match(prompt, /提升到统一记忆/);
   assert.match(prompt, /当前日期.*2026-07-21/);
   assert.match(prompt, /长期群聊归纳本群实际的主要话题/);
   assert.match(prompt, /不得预设领域或固定知识类别/);
@@ -79,6 +81,7 @@ test("main tool guide keeps common tools visible and hides unrelated social oper
   assert.match(ordinary, /真实动作硬约束/);
   assert.match(ordinary, /可见回复声称已经.*加好友/);
   assert.match(ordinary, /一旦写操作已经成功.*不能静默吞掉/);
+  assert.doesNotMatch(ordinary, /\/人物记忆 详细/);
 
   const social = formatQqMainToolGuide({
     messageText: "给他点个赞再看看空间动态",
@@ -98,4 +101,20 @@ test("main tool guide keeps common tools visible and hides unrelated social oper
   assert.match(poke, /真实反拍/);
   assert.match(poke, /必须先在调用轮独占输出 \[\[qq_command:\/拍一拍 发送者\]\]/);
   assert.match(poke, /未调用或调用失败时不得把反拍写成已完成/);
+
+  const withPerson = formatQqMainToolGuide({
+    messageText: "小林之前怎么说的",
+    currentSender: "小明(QQ 10000)",
+    memoryPeople: [{
+      userId: "20002",
+      displayName: "小林",
+      aliases: ["A群小林", "私聊小林"],
+      summary: "重视可靠记忆",
+      hasDetail: true,
+      promoted: true
+    }]
+  });
+  assert.match(withPerson, /小林\(20002\)【统一人物】/);
+  assert.match(withPerson, /\/人物记忆 详细 QQ号/);
+  assert.match(withPerson, /\/人物别称 添加 QQ号/);
 });

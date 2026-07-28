@@ -18,6 +18,42 @@ export function createUnifiedMemory({ memoryPath, semanticMemoryPath = "" } = {}
     if (!index) return { ok: false, skipped: true, reason: "semantic index disabled" };
     return index.replaceLayer("unified", entries.map(unifiedEntryToSemanticItem));
   };
+  const writeEntries = async (values) => serializeFileOperation(memoryPath, async () => {
+    const store = await readStore(memoryPath);
+    const written = [];
+    for (const value of Array.isArray(values) ? values : []) {
+      const normalized = normalizeEntry(value);
+      if (!normalized.summary) continue;
+      const duplicateIndex = store.entries.findIndex((item) => (
+        item.id === normalized.id
+        || memoryDedupeKey(item) === memoryDedupeKey(normalized)
+      ));
+      if (duplicateIndex >= 0) {
+        store.entries[duplicateIndex] = {
+          ...store.entries[duplicateIndex],
+          ...normalized,
+          id: store.entries[duplicateIndex].id,
+          createdAt: store.entries[duplicateIndex].createdAt,
+          updatedAt: new Date().toISOString()
+        };
+        written.push(store.entries[duplicateIndex]);
+      } else {
+        store.entries.push(normalized);
+        written.push(normalized);
+      }
+    }
+    if (!written.length) return { ok: false, skipped: true, reason: "empty summary", entries: [] };
+    store.entries = store.entries.slice(-maxEntries);
+    store.updatedAt = new Date().toISOString();
+    await writeStore(memoryPath, store);
+    await replaceUnifiedLayer(store.entries);
+    return {
+      ok: true,
+      entry: written.at(-1),
+      entries: written,
+      count: store.entries.length
+    };
+  });
   return {
     async read({ query = "", limit = 20 } = {}) {
       const store = await readStore(memoryPath);
@@ -47,32 +83,10 @@ export function createUnifiedMemory({ memoryPath, semanticMemoryPath = "" } = {}
       };
     },
     async write(entry = {}) {
-      return serializeFileOperation(memoryPath, async () => {
-        const store = await readStore(memoryPath);
-        const normalized = normalizeEntry(entry);
-        if (!normalized.summary) return { ok: false, skipped: true, reason: "empty summary" };
-        const duplicateIndex = store.entries.findIndex((item) => memoryDedupeKey(item) === memoryDedupeKey(normalized));
-        if (duplicateIndex >= 0) {
-          store.entries[duplicateIndex] = {
-            ...store.entries[duplicateIndex],
-            ...normalized,
-            id: store.entries[duplicateIndex].id,
-            createdAt: store.entries[duplicateIndex].createdAt,
-            updatedAt: new Date().toISOString()
-          };
-        } else {
-          store.entries.push(normalized);
-        }
-        store.entries = store.entries.slice(-maxEntries);
-        store.updatedAt = new Date().toISOString();
-        await writeStore(memoryPath, store);
-        await replaceUnifiedLayer(store.entries);
-        return {
-          ok: true,
-          entry: duplicateIndex >= 0 ? store.entries[duplicateIndex] : store.entries.at(-1),
-          count: store.entries.length
-        };
-      });
+      return writeEntries([entry]);
+    },
+    async writeMany(entries = []) {
+      return writeEntries(entries);
     },
     async clear() {
       return serializeFileOperation(memoryPath, async () => {
@@ -130,24 +144,33 @@ export function createUnifiedMemory({ memoryPath, semanticMemoryPath = "" } = {}
 }
 
 function unifiedEntryToSemanticItem(entry) {
+  const personMemory = ["personProfile", "personSession"].includes(entry.type)
+    && /^\d{4,20}$/.test(entry.subjectUserId || "");
   return {
     id: `unified:${entry.id}`,
     layer: "unified",
     kind: entry.type || "note",
-    scopeType: "global",
-    scopeId: "global",
+    scopeType: personMemory ? "member" : "global",
+    scopeId: personMemory ? `member:${entry.subjectUserId}` : "global",
     groupId: "",
-    userId: "",
+    userId: personMemory ? entry.subjectUserId : "",
     title: entry.topic || "统一记忆",
     summary: entry.summary || "",
-    detail: entry.summary || "",
+    detail: entry.detail || entry.summary || "",
     status: "active",
     updatedAt: entry.updatedAt || entry.createdAt || null,
     metadata: {
       entryId: entry.id,
       source: entry.source || "",
       channel: entry.channel || "",
-      confidence: entry.confidence
+      confidence: entry.confidence,
+      subjectChannel: entry.subjectChannel || "",
+      subjectUserId: entry.subjectUserId || "",
+      subjectAliases: entry.subjectAliases || [],
+      sourceScopeType: entry.sourceScopeType || "",
+      sourceScopeId: entry.sourceScopeId || "",
+      promotionReason: entry.promotionReason || "",
+      promotedAt: entry.promotedAt || null
     }
   };
 }
@@ -234,9 +257,17 @@ function normalizeEntry(entry) {
     mode: String(entry.mode || "").slice(0, 80),
     topic: String(entry.topic || inferTopic(entry.summary || entry.sourceTextHint || "")).trim().slice(0, 120),
     summary: String(entry.summary || "").trim().slice(0, 1200),
+    detail: String(entry.detail || entry.summary || "").trim().slice(0, 6000),
     sourceTextHint: String(entry.sourceTextHint || "").trim().slice(0, 500),
     confidence: clampConfidence(entry.confidence),
     zone: String(entry.zone || "base").slice(0, 40),
+    subjectChannel: String(entry.subjectChannel || "").slice(0, 40),
+    subjectUserId: normalizeSubjectUserId(entry.subjectUserId),
+    subjectAliases: normalizeSubjectAliases(entry.subjectAliases),
+    sourceScopeType: normalizeSourceScopeType(entry.sourceScopeType),
+    sourceScopeId: String(entry.sourceScopeId || "").trim().slice(0, 120),
+    promotionReason: String(entry.promotionReason || "").trim().slice(0, 160),
+    promotedAt: normalizeOptionalTime(entry.promotedAt),
     createdAt: entry.createdAt || now,
     updatedAt: entry.updatedAt || now
   });
@@ -256,9 +287,17 @@ function normalizeStoredEntry(entry) {
     mode: String(entry.mode || ""),
     topic: String(entry.topic || inferTopic(summary)).trim(),
     summary,
+    detail: String(entry.detail || summary).trim().slice(0, 6000),
     sourceTextHint: String(entry.sourceTextHint || ""),
     confidence: clampConfidence(entry.confidence),
     zone: String(entry.zone || "base"),
+    subjectChannel: String(entry.subjectChannel || "").slice(0, 40),
+    subjectUserId: normalizeSubjectUserId(entry.subjectUserId),
+    subjectAliases: normalizeSubjectAliases(entry.subjectAliases),
+    sourceScopeType: normalizeSourceScopeType(entry.sourceScopeType),
+    sourceScopeId: String(entry.sourceScopeId || "").trim().slice(0, 120),
+    promotionReason: String(entry.promotionReason || "").trim().slice(0, 160),
+    promotedAt: normalizeOptionalTime(entry.promotedAt),
     createdAt: entry.createdAt || entry.updatedAt || new Date().toISOString(),
     updatedAt: entry.updatedAt || entry.createdAt || new Date().toISOString()
   };
@@ -266,7 +305,16 @@ function normalizeStoredEntry(entry) {
 
 function normalizeType(type) {
   const value = String(type || "note");
-  if (["handoff", "idea", "projectNote", "openLoop", "dailyState", "note"].includes(value)) return value;
+  if ([
+    "handoff",
+    "idea",
+    "projectNote",
+    "openLoop",
+    "dailyState",
+    "note",
+    "personProfile",
+    "personSession"
+  ].includes(value)) return value;
   return "note";
 }
 
@@ -310,7 +358,9 @@ function countEntries(entries) {
     projectNotes: entries.filter((entry) => entry.type === "projectNote").length,
     openLoops: entries.filter((entry) => entry.type === "openLoop").length,
     dailyTimeline: entries.filter((entry) => entry.type === "dailyState").length,
-    notes: entries.filter((entry) => entry.type === "note").length
+    notes: entries.filter((entry) => entry.type === "note").length,
+    personProfiles: entries.filter((entry) => entry.type === "personProfile").length,
+    personSessions: entries.filter((entry) => entry.type === "personSession").length
   };
 }
 
@@ -330,6 +380,28 @@ function inferTopic(text) {
 function clampConfidence(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : 0.6;
+}
+
+function normalizeSubjectUserId(value) {
+  const id = String(value || "").trim();
+  return /^\d{4,20}$/.test(id) ? id : "";
+}
+
+function normalizeSubjectAliases(values) {
+  return [...new Set((Array.isArray(values) ? values : [])
+    .map((value) => String(value || "").replace(/\s+/g, " ").trim().slice(0, 48))
+    .filter(Boolean))]
+    .slice(-32);
+}
+
+function normalizeSourceScopeType(value) {
+  const type = String(value || "").trim();
+  return ["person", "group", "private"].includes(type) ? type : "";
+}
+
+function normalizeOptionalTime(value) {
+  const timestamp = Date.parse(value || "");
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
 function decision(action, text, source, channel, confidence, reason) {
