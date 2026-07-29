@@ -34,7 +34,12 @@ import { formatQqVisualMenu } from "./qq-menu.js";
 import { createConcurrencyLimiter } from "./concurrency-limiter.js";
 import { createCodexModelCatalog, findCodexModel } from "./codex-model-catalog.js";
 import { buildCodexChildEnv } from "./codex-child-env.js";
-import { CODEX_TASK_TYPES, getCodexTaskTimeoutMs } from "./codex-task-timeout.js";
+import {
+  CODEX_TASK_TYPES,
+  getCodexTaskTimeoutMs,
+  getCodexTaskTimeoutPolicyMap
+} from "./codex-task-timeout.js";
+import { buildQqReplySendPlan } from "./qq-reply-chunks.js";
 import {
   isQqImageLookRequest,
   isQqImageOutputRequest,
@@ -389,6 +394,7 @@ const {
   qqImageMaxBytes,
   qqBubbleSeparator,
   qqBubbleSendDelayMs,
+  qqBubbleMaxChars,
   qqBubbleMaxCount,
   tavilyApiKey,
   sqliteTimeoutMs,
@@ -521,7 +527,10 @@ if (qqEnhancerModule) {
   qqEnhancerModule.configureQqEnhancer?.({
     imageMaxBytes: qqImageMaxBytes,
     oneBotApiBase,
-    safeFetchMode
+    safeFetchMode,
+    bubbleSeparator: qqBubbleSeparator,
+    bubbleMaxChars: qqBubbleMaxChars,
+    bubbleMaxCount: qqBubbleMaxCount
   });
   buildQqSendPlan = qqEnhancerModule.buildQqSendPlan || buildQqSendPlan;
   scoreQqTextInterest = qqEnhancerModule.scoreQqTextInterest || scoreQqTextInterest;
@@ -2330,7 +2339,11 @@ async function runQqSelfPersonaModelPrompt(prompt, label) {
   await runCodexCli(args, prompt, {
     cwd: codexWorkspaceDir,
     taskType: CODEX_TASK_TYPES.QQ_SELF_PERSONA,
-    timeout: getCodexTaskTimeoutMs(codexTaskTimeouts, CODEX_TASK_TYPES.QQ_SELF_PERSONA),
+    timeout: getCodexTaskTimeoutMs(
+      codexTaskTimeouts,
+      CODEX_TASK_TYPES.QQ_SELF_PERSONA,
+      state.ai.reasoningEffort
+    ),
     env: {
       ...process.env,
       CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_MODE: "1"
@@ -2836,6 +2849,7 @@ async function buildMaintenanceStatus({ force = false } = {}) {
     checkOneBotHealth({ force })
   ]);
   const webLookupProviderPlan = buildWebSearchProviderPlan();
+  const timeoutPolicies = getCodexTaskTimeoutPolicyMap(codexTaskTimeouts, state.ai.reasoningEffort);
   const { path: _privateCodexPath, ...codexMaintenance } = state.maintenance.codex;
   return {
     startedAt: state.maintenance.startedAt,
@@ -2850,7 +2864,16 @@ async function buildMaintenanceStatus({ force = false } = {}) {
       ...codexMaintenance,
       pathExists: codexPathOk,
       queue: codexRunLimiter.snapshot(),
-      taskTimeoutsMs: { ...codexTaskTimeouts },
+      reasoningEffort: state.ai.reasoningEffort,
+      timeoutMultiplier: timeoutPolicies[CODEX_TASK_TYPES.QQ_REPLY].multiplier,
+      taskTimeoutBaseMs: Object.fromEntries(Object.entries(timeoutPolicies).map(([taskType, policy]) => [
+        taskType,
+        policy.baseTimeoutMs
+      ])),
+      taskTimeoutsMs: Object.fromEntries(Object.entries(timeoutPolicies).map(([taskType, policy]) => [
+        taskType,
+        policy.timeoutMs
+      ])),
       quota
     },
     channels: { qq: state.channels.qq },
@@ -4219,7 +4242,7 @@ async function runQqKnowledgeMainDeletionReview(application, interestTriage) {
   await runCodexCli(args, prompt, {
     cwd: codexWorkspaceDir,
     taskType,
-    timeout: getCodexTaskTimeoutMs(codexTaskTimeouts, taskType),
+    timeout: getCodexTaskTimeoutMs(codexTaskTimeouts, taskType, state.ai.reasoningEffort),
     env: {
       ...process.env,
       CODEX_REMOTE_CONTACT_QQ_KNOWLEDGE_REVIEW_MODE: "1"
@@ -6040,6 +6063,9 @@ function buildQqOwnerStatus() {
 
 function buildQqOwnerConfigDetail() {
   pruneExpiredQqBans();
+  const timeoutPolicies = getCodexTaskTimeoutPolicyMap(codexTaskTimeouts, state.ai.reasoningEffort);
+  const timeoutFor = (taskType) => formatCodexTaskTimeout(timeoutPolicies[taskType].timeoutMs);
+  const timeoutMultiplier = timeoutPolicies[CODEX_TASK_TYPES.QQ_REPLY].multiplier;
   return [
     "QQ 详细配置",
     `通道：${state.channels.qq ? "开启" : "关闭"}`,
@@ -6055,7 +6081,8 @@ function buildQqOwnerConfigDetail() {
     `主动判定模型：${state.qq.proactive.judge.provider}/${state.qq.proactive.judge.model}，Key：${state.qq.proactive.judge.apiKeyConfigured ? "已配置" : "未配置"}，Token 静默超时 ${state.qq.proactive.judge.timeoutMs}ms`,
     `联网查询：${state.qq.webLookup.enabled ? "开启" : "关闭"}`,
     `主人文件/图片任务：${qqOwnerFileImageTasksEnabled ? "开启" : "关闭"}`,
-    `任务时限：普通回复 ${formatCodexTaskTimeout(codexTaskTimeouts[CODEX_TASK_TYPES.QQ_REPLY])}，看图回复 ${formatCodexTaskTimeout(codexTaskTimeouts[CODEX_TASK_TYPES.QQ_VISION_REPLY])}，总结 ${formatCodexTaskTimeout(codexTaskTimeouts[CODEX_TASK_TYPES.QQ_CONTEXT_SUMMARY])}，人格刷新 ${formatCodexTaskTimeout(codexTaskTimeouts[CODEX_TASK_TYPES.QQ_SELF_PERSONA])}，文件任务 ${formatCodexTaskTimeout(codexTaskTimeouts[CODEX_TASK_TYPES.QQ_FILE_TASK])}，画图 ${formatCodexTaskTimeout(codexTaskTimeouts[CODEX_TASK_TYPES.QQ_IMAGE_GENERATION])}`,
+    `任务时限（当前 ${state.ai.reasoningEffort}，基础时限 ×${timeoutMultiplier}）：普通回复 ${timeoutFor(CODEX_TASK_TYPES.QQ_REPLY)}，看图回复 ${timeoutFor(CODEX_TASK_TYPES.QQ_VISION_REPLY)}，总结 ${timeoutFor(CODEX_TASK_TYPES.QQ_CONTEXT_SUMMARY)}，人格刷新 ${timeoutFor(CODEX_TASK_TYPES.QQ_SELF_PERSONA)}，文件任务 ${timeoutFor(CODEX_TASK_TYPES.QQ_FILE_TASK)}，画图 ${timeoutFor(CODEX_TASK_TYPES.QQ_IMAGE_GENERATION)}`,
+    `长回复投递：每条最多 ${qqBubbleMaxChars} 字，单次回复最多 ${qqBubbleMaxCount} 条，超长正文自动按自然边界拆分`,
     `短期记忆范围：${Object.keys(state.qq.memory.shortTermNotes).length}`,
     `长期知识标题：${state.qq.knowledgeBase.entries.length}`,
     `记忆群数：${Object.keys(state.qq.memory.entries).length}`,
@@ -7874,7 +7901,7 @@ function formatQqBotToolTranscript(transcript) {
 
 function formatQqBotToolFallbackReply(results) {
   const text = formatQqBotToolResults(results);
-  return text ? text.slice(0, 900) : "内部工具执行完了，但没有生成可读回复。";
+  return text || "内部工具执行完了，但没有生成可读回复。";
 }
 
 function parseQqBanDuration(command) {
@@ -8392,7 +8419,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     const result = await runSteerableQqCodexTurn(prompt, {
       cwd: codexWorkspaceDir,
       taskType,
-      timeout: getCodexTaskTimeoutMs(codexTaskTimeouts, taskType),
+      timeout: getCodexTaskTimeoutMs(codexTaskTimeouts, taskType, state.ai.reasoningEffort),
       imagePaths: currentImagePaths,
       env: {
         ...process.env,
@@ -8740,7 +8767,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       ...parsedMemory.patches
     ];
     if (!parsedMemory.visibleText) return event.qqColdProactive || event.qqPrivateProactive ? "" : buildAssistantReply(event);
-    return parsedMemory.visibleText.slice(0, 900);
+    return parsedMemory.visibleText;
   } finally {
     event.imagePaths = imagePaths;
   }
@@ -8883,7 +8910,11 @@ async function buildQqContextSummary(event, commandText = "") {
   await runCodexCli(args, prompt, {
     cwd: codexWorkspaceDir,
     taskType: CODEX_TASK_TYPES.QQ_CONTEXT_SUMMARY,
-    timeout: getCodexTaskTimeoutMs(codexTaskTimeouts, CODEX_TASK_TYPES.QQ_CONTEXT_SUMMARY),
+    timeout: getCodexTaskTimeoutMs(
+      codexTaskTimeouts,
+      CODEX_TASK_TYPES.QQ_CONTEXT_SUMMARY,
+      state.ai.reasoningEffort
+    ),
     env: {
       ...process.env,
       CODEX_REMOTE_CONTACT_QQ_CONTEXT_SUMMARY: "1"
@@ -8929,7 +8960,7 @@ async function buildQqContextSummary(event, commandText = "") {
   return [
     history.ok ? null : "（NapCat 历史暂时不可用，本次仅总结 Hub 已保存的本地记录。）",
     visibleSummary
-  ].filter(Boolean).join("\n").slice(0, 900);
+  ].filter(Boolean).join("\n");
 }
 
 function resolveQqSummaryHistoryLimit(commandText) {
@@ -8946,7 +8977,7 @@ function fallbackQqContextSummary(recentMessages, participationEntries) {
     "最近上下文大概是：",
     ...recent,
     ...replies
-  ].filter(Boolean).join("\n").slice(0, 900);
+  ].filter(Boolean).join("\n");
 }
 
 function shouldUseQqOwnerFileImageTask(event) {
@@ -9048,7 +9079,7 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
     await runCodexCli(args, prompt, {
       cwd: projectDir,
       taskType,
-      timeout: getCodexTaskTimeoutMs(codexTaskTimeouts, taskType),
+      timeout: getCodexTaskTimeoutMs(codexTaskTimeouts, taskType, state.ai.reasoningEffort),
       env: {
         ...process.env,
         CODEX_REMOTE_CONTACT_QQ_OWNER_FILE_IMAGE_MODE: "1",
@@ -9077,7 +9108,7 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
       await runCodexCli(retryArgs, retryPrompt, {
         cwd: projectDir,
         taskType,
-        timeout: getCodexTaskTimeoutMs(codexTaskTimeouts, taskType),
+        timeout: getCodexTaskTimeoutMs(codexTaskTimeouts, taskType, state.ai.reasoningEffort),
         env: {
           ...process.env,
           CODEX_REMOTE_CONTACT_QQ_OWNER_FILE_IMAGE_MODE: "1",
@@ -10906,22 +10937,12 @@ function normalizeQqBubbleSeparator(value) {
   return separator || "|||";
 }
 
-function getQqBubbleSeparatorPattern() {
-  return new RegExp(`(?:^|\\r?\\n)[ \\t]*${escapeRegExp(qqBubbleSeparator)}[ \\t]*(?=\\r?\\n|$)`, "g");
-}
-
 function buildDefaultQqSendPlan(_event, reply) {
-  const text = String(reply || "").trim();
-  if (!text) return { bubbles: [], flattened: "" };
-  const bubbles = text
-    .split(getQqBubbleSeparatorPattern())
-    .map((bubble) => bubble.trim())
-    .filter(Boolean)
-    .slice(0, qqBubbleMaxCount);
-  return {
-    bubbles,
-    flattened: bubbles.join("\n")
-  };
+  return buildQqReplySendPlan(reply, {
+    separator: qqBubbleSeparator,
+    maxChars: qqBubbleMaxChars,
+    maxBubbles: qqBubbleMaxCount
+  });
 }
 
 function flattenQqReplyForMemory(event, reply) {

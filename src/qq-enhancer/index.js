@@ -2,6 +2,7 @@ import { copyFile, mkdir, readdir, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join } from "node:path";
 import crypto from "node:crypto";
 import { isSupportedImageContentType, writeResponseBodyToFile } from "../bounded-stream.js";
+import { buildQqReplySendPlan } from "../qq-reply-chunks.js";
 import { fetchWithUrlPolicy } from "../safe-fetch.js";
 
 export {
@@ -22,6 +23,9 @@ const imageExtensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
 let imageMaxBytes = 20 * 1024 * 1024;
 let oneBotApiBase = "http://127.0.0.1:3000";
 let safeFetchMode = "strict";
+let bubbleSeparator = "|||";
+let bubbleMaxChars = 900;
+let bubbleMaxCount = 24;
 
 export function configureQqEnhancer(options = {}) {
   const requestedMaxBytes = Number(options.imageMaxBytes);
@@ -30,21 +34,17 @@ export function configureQqEnhancer(options = {}) {
     : imageMaxBytes;
   oneBotApiBase = String(options.oneBotApiBase || oneBotApiBase).replace(/\/$/, "");
   safeFetchMode = options.safeFetchMode === "proxy-compatible" ? "proxy-compatible" : "strict";
+  bubbleSeparator = String(options.bubbleSeparator || "").trim() || bubbleSeparator;
+  bubbleMaxChars = boundedInteger(options.bubbleMaxChars, bubbleMaxChars, 200, 4_000);
+  bubbleMaxCount = boundedInteger(options.bubbleMaxCount, bubbleMaxCount, 1, 64);
 }
 
 export function buildQqSendPlan(_event, reply) {
-  const raw = String(reply || "").trim();
-  if (!raw) return { bubbles: [], flattened: "" };
-  const explicit = raw
-    .split(/(?:^|\r?\n)[ \t]*\|\|\|[ \t]*(?=\r?\n|$)/g)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const bubbles = (explicit.length > 1 ? explicit : splitLongReply(raw))
-    .slice(0, 6);
-  return {
-    bubbles,
-    flattened: bubbles.join("\n")
-  };
+  return buildQqReplySendPlan(reply, {
+    separator: bubbleSeparator,
+    maxChars: bubbleMaxChars,
+    maxBubbles: bubbleMaxCount
+  });
 }
 
 export async function sendQqGroupBubbles({ event, reply, sendGroupMessage, quoteFirstBubble = true, delayMs = 650 }) {
@@ -165,22 +165,6 @@ export function stripQqImageAttachmentMarkers(text) {
     .trim();
 }
 
-function splitLongReply(text) {
-  if (text.length <= 260) return [text];
-  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
-  if (lines.length > 1) return lines;
-  return text
-    .split(/(?<=[。！？!?])\s*/g)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .reduce((bubbles, part) => {
-      const last = bubbles[bubbles.length - 1] || "";
-      if (!last || `${last}${part}`.length > 220) bubbles.push(part);
-      else bubbles[bubbles.length - 1] = `${last}${part}`;
-      return bubbles;
-    }, []);
-}
-
 async function prepareSingleImage(image, { outputDir, fetchOneBotImage } = {}) {
   if (Number(image?.fileSize || 0) > imageMaxBytes) {
     throw new Error(`QQ image exceeds ${imageMaxBytes} bytes`);
@@ -284,4 +268,10 @@ function dedupeImages(images) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function boundedInteger(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(number)));
 }
