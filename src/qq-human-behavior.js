@@ -4,7 +4,7 @@ const mediaOnlyPattern = /^(?:\[(?:图片|表情|语音|文件)(?:[^\]]*)?\]|[\p
 const casualEmotionPattern = /(累|困|晕|烦|气死|难受|开心|高兴|想睡|睡懵|绷不住|笑死|离谱|无语|我去|卧槽|草|好耶|寄了|麻了)/i;
 const imageQuestionPattern = /(看|看看|识别|评价|锐评|什么图|这是啥|这是什么|什么梗|什么意思|图里|截图|表情包)/i;
 const socialRequestPattern = /(叫.{0,8}(?:爸爸|爹|妈)|揍|打|锤|夸我|骂我|亲一个|抱一下|给.{0,8}(?:点.{0,4}赞|点赞)|充.{0,8}(?:会员|svip)|借我|唱一个)/i;
-const protectedMarkerPattern = /\[\[qq_(?:memory|image|file|sticker|command):[^\n]*?\]\]|\[\[qq_done\]\]/g;
+const protectedMarkerPattern = /\[\[qq_(?:memory|image|file|sticker|command|progress|task_budget):[^\n]*?\]\]|\[\[qq_(?:done|task_continue)\]\]/g;
 const emojiCharacterPattern = /\p{Extended_Pictographic}/u;
 const compactMediaTokenPattern = /\[(?:图片|表情|语音|文件)(?:[^\]]*)?\]/giu;
 

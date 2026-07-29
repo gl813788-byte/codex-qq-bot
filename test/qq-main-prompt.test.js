@@ -19,6 +19,7 @@ test("main-model core prompt presents one execution path and one dynamic style a
   });
   assert.match(prompt, /后台兴趣模型和 Hub 已负责是否触发/);
   assert.match(prompt, /准确理解当前语境；确有需要时调用内部工具/);
+  assert.match(prompt, /内部能力能明显提高准确性.*就应主动调用/);
   assert.match(prompt, /真人化行为规划.*唯一的长度、气泡、emoji 和表情包风格依据/);
   assert.match(prompt, /自行判断本轮是普通闲聊，还是需要交付结果的实质任务/);
   assert.match(prompt, /第19题.*过程呢.*继续任务/);
@@ -34,6 +35,8 @@ test("main-model core prompt presents one execution path and one dynamic style a
   assert.match(prompt, /不会擅自引用或艾特最早触发者/);
   assert.match(prompt, /qq_memory 格式/);
   assert.match(prompt, /personImpressionComplete/);
+  assert.match(prompt, /personImpressionMemorable/);
+  assert.match(prompt, /本次互动本身非常鲜明/);
   assert.match(prompt, /提升到统一记忆/);
   assert.match(prompt, /当前日期.*2026-07-21/);
   assert.match(prompt, /长期群聊归纳本群实际的主要话题/);
@@ -83,6 +86,8 @@ test("main tool guide keeps common tools visible and hides unrelated social oper
   assert.match(ordinary, /先查旧标题，再联网，最后沿用同一标题覆盖更新/);
   assert.doesNotMatch(ordinary, /\/主动加好友/);
   assert.match(ordinary, /调用轮只输出独占一行/);
+  assert.match(ordinary, /内部能力不是最后手段/);
+  assert.match(ordinary, /留下深刻印象.*主动先搜索再添加或覆盖/);
   assert.match(ordinary, /真实动作硬约束/);
   assert.match(ordinary, /可见回复声称已经.*加好友/);
   assert.match(ordinary, /一旦写操作已经成功.*不能静默吞掉/);

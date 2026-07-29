@@ -82,15 +82,17 @@ export function getOneBotPokeSenderId(payload) {
 export function normalizeOneBotPokeEvent(payload) {
   const senderId = getOneBotPokeSenderId(payload);
   const targetId = normalizeQqIdentifier(payload.target_id);
+  const selfId = normalizeQqIdentifier(payload.self_id);
   const isGroup = payload.group_id != null;
   const senderName = payload.sender?.card || payload.sender?.nickname || `QQ ${senderId || "群友"}`;
+  const targetLabel = targetId && targetId === selfId ? "你" : targetId ? `QQ ${targetId}` : "某人";
   return {
     type: isGroup ? "group_poke" : "private_poke",
-    selfId: normalizeQqIdentifier(payload.self_id),
+    selfId,
     groupId: isGroup ? normalizeQqIdentifier(payload.group_id) : undefined,
     senderId,
     senderName,
-    text: `${senderName} 拍了拍你。`,
+    text: `${senderName} 拍了拍${targetLabel}。`,
     images: [],
     hasAudioSegment: false,
     hasAtSegment: false,

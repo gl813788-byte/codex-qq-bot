@@ -86,6 +86,85 @@ test("keeps pending entries when the active turn cannot restart", async () => {
   coordinator.close();
 });
 
+test("prefers steering new messages into the active turn without interrupting it", async () => {
+  const pending = { group: [{ id: "one", text: "补充条件" }] };
+  const steered = [];
+  let restartCount = 0;
+  const generation = {
+    id: "generation-1",
+    steer: async (input) => {
+      steered.push(input);
+      return {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        deadlineRenewalCount: 1
+      };
+    },
+    restart: async () => {
+      restartCount += 1;
+      return {};
+    }
+  };
+  const coordinator = createQqReplySteeringCoordinator({
+    delayMs: 0,
+    getActiveGeneration: () => generation,
+    getPendingEntries: (scopeId) => pending[scopeId] || [],
+    buildSteeringInput: (entries) => entries.map((entry) => entry.text).join("\n"),
+    consumeEntries: (scopeId, entries) => {
+      pending[scopeId] = pending[scopeId].filter((entry) => !entries.includes(entry));
+      return entries.length;
+    }
+  });
+
+  const result = await coordinator.schedule("group");
+  assert.equal(result.ok, true);
+  assert.equal(result.deliveryMode, "steered");
+  assert.equal(result.deadlineRenewalCount, 1);
+  assert.deepEqual(steered, ["补充条件"]);
+  assert.equal(restartCount, 0);
+  assert.deepEqual(pending.group, []);
+  coordinator.close();
+});
+
+test("falls back to a replacement turn when active steering is rejected", async () => {
+  const pending = { group: [{ id: "one", text: "新的要求" }] };
+  let restartCount = 0;
+  const generation = {
+    id: "generation-1",
+    steer: async () => {
+      const error = new Error("turn no longer accepts steer");
+      error.code = "CODEX_STEER_REJECTED";
+      throw error;
+    },
+    restart: async () => {
+      restartCount += 1;
+      return {
+        threadId: "thread-1",
+        turnId: "turn-2",
+        interruptedTurnId: "turn-1"
+      };
+    }
+  };
+  const coordinator = createQqReplySteeringCoordinator({
+    delayMs: 0,
+    getActiveGeneration: () => generation,
+    getPendingEntries: (scopeId) => pending[scopeId] || [],
+    buildSteeringInput: (entries) => entries.map((entry) => entry.text).join("\n"),
+    consumeEntries: (scopeId, entries) => {
+      pending[scopeId] = pending[scopeId].filter((entry) => !entries.includes(entry));
+      return entries.length;
+    }
+  });
+
+  const result = await coordinator.schedule("group");
+  assert.equal(result.ok, true);
+  assert.equal(result.deliveryMode, "restarted");
+  assert.equal(result.steerFailureReason, "CODEX_STEER_REJECTED");
+  assert.equal(restartCount, 1);
+  assert.deepEqual(pending.group, []);
+  coordinator.close();
+});
+
 test("cuts the active turn directly after the quiet window and starts a replacement answer", async () => {
   const pending = {
     group: [
@@ -187,7 +266,7 @@ test("waits for the resettable fusion window when scheduled work is explicitly d
   coordinator.schedule("group");
   const result = await coordinator.waitForIdle("group");
 
-  assert.equal(result.reason, "no_restartable_generation");
+  assert.equal(result.reason, "no_controllable_generation");
   assert.ok(Date.now() - startedAt >= 30);
   assert.equal(pending.group.length, 2);
   coordinator.close();

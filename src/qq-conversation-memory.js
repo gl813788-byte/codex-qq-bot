@@ -538,6 +538,7 @@ function applyPatchToGroup(group, person, globalPerson, patch, at) {
     }, "impression", at);
   }
   if (patch.personImpressionComplete
+    || patch.personImpressionMemorable
     || ((patch.personImpressionDetail || patch.personImpressionSummary)
       && globalPerson?.unifiedMemory?.promotedAt)) {
     markPersonUnifiedMemoryPromotion(globalPerson, {
@@ -662,6 +663,7 @@ function applyPatchToPrivateChat(chat, globalPerson, patch, at, sourceScopeId) {
     applyDescriptionPatch(globalPerson, description, "impression", at);
   }
   if (patch.personImpressionComplete
+    || patch.personImpressionMemorable
     || ((patch.personImpressionDetail || patch.personImpressionSummary
       || patch.scopeImpressionDetail || patch.scopeImpressionSummary)
       && globalPerson?.unifiedMemory?.promotedAt)) {
@@ -705,6 +707,7 @@ function normalizePatch(value) {
     ),
     personImpressionDetail: safeMemoryField(value.personImpressionDetail || legacyPerson, 1_200),
     personImpressionComplete: value.personImpressionComplete === true,
+    personImpressionMemorable: value.personImpressionMemorable === true,
     personImpressionPromotionReason: safeMemoryField(value.personImpressionPromotionReason, 160),
     recentTopic: safeMemoryField(value.recentTopic, 80),
     botThoughtSummary: safeMemoryField(
