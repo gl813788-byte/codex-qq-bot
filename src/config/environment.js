@@ -194,7 +194,16 @@ export function createEnvironmentConfig(env = process.env) {
     qqImageMaxBytes,
     qqBubbleSeparator: normalizeBubbleSeparator(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR),
     qqBubbleSendDelayMs: Math.max(0, numberOrDefault(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEND_DELAY_MS, 650)),
-    qqBubbleMaxCount: Math.max(1, numberOrDefault(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_MAX_COUNT, 6)),
+    qqBubbleMaxChars: boundedInteger(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_MAX_CHARS, {
+      defaultValue: 900,
+      min: 200,
+      max: 4_000
+    }),
+    qqBubbleMaxCount: boundedInteger(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_MAX_COUNT, {
+      defaultValue: 24,
+      min: 1,
+      max: 64
+    }),
 
     openRouterApiKey: env.OPENROUTER_API_KEY || env.CODEX_REMOTE_CONTACT_OPENROUTER_API_KEY || "",
     openRouterBaseUrl: env.OPENROUTER_BASE_URL || env.CODEX_REMOTE_CONTACT_OPENROUTER_BASE_URL || getDefaultInterestModelBaseUrl("openrouter"),

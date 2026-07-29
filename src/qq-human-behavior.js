@@ -143,6 +143,7 @@ export function buildQqHumanBehaviorPlan(event = {}, intent = {}, style = {}, { 
   let maxSentences = privateChat ? 2 : 1;
   let compact = true;
   let openEnded = false;
+  let completionDriven = false;
 
   if (event.qqPrivateProactive) {
     mode = "private_proactive";
@@ -187,10 +188,12 @@ export function buildQqHumanBehaviorPlan(event = {}, intent = {}, style = {}, { 
     maxSentences = 2;
   } else if (intent.asksAction) {
     mode = "task";
-    goal = "先完成事情或给结果，再补唯一必要的说明";
-    maxChars = privateChat ? 180 : 110;
-    maxSentences = privateChat ? 4 : 3;
+    goal = "直接完成并交付结果；篇幅按任务正确性和完整性自行决定";
+    maxChars = null;
+    maxSentences = null;
     compact = false;
+    openEnded = true;
+    completionDriven = true;
   } else if (hasImages && !explicitImageQuestion) {
     mode = "visual_reaction";
     goal = "像群友看见图后接一句，不主动做图片解析报告";
@@ -234,6 +237,7 @@ export function buildQqHumanBehaviorPlan(event = {}, intent = {}, style = {}, { 
     maxSentences,
     compact,
     openEnded,
+    completionDriven,
     preferMultiBubble,
     multiBubbleChance,
     maxBubbles: preferMultiBubble ? clamp(Number(style.runP90 || 2), 2, 3) : 1,
@@ -261,8 +265,9 @@ export function formatQqHumanBehaviorContext(style = {}, plan = {}, {
   return [
     `真人化动态规划（匿名统计样本 ${style.sampleSize || 0} 条；不模仿具体个人）：`,
     `- 模式：${plan.mode || "casual"}；目标：${plan.goal || "自然承接"}。`,
+    "- 先根据完整上下文自行判断是否正在执行或继续一个实质任务；若是，任务完整性优先，下面的闲聊长度与句数建议自动失效。",
     plan.openEnded
-      ? "- 冷群分支不额外设置硬性字数或句数限制；按找到的内容自然组织，但仍要像群聊而不是写报告。"
+      ? "- 本轮不额外设置硬性字数或句数限制；按实际内容自然组织，任务要完整交付，非任务仍要像群聊而不是无故写报告。"
       : `- 可见正文建议控制在 ${plan.maxChars || 48} 字以内、最多 ${plan.maxSentences || 2} 句；任务正确性、必要解释和安全提示优先于字数。QQ 内部标记、链接和文件路径不计入字数。`,
     `- ${bubbles}`,
     `- ${emojiInstruction}`,

@@ -148,14 +148,14 @@ A non-loopback listener requires explicit remote allowance and a token. Wildcard
 | `CODEX_REMOTE_CONTACT_CODEX_MAX_CONCURRENCY` | `2` | Active jobs, bounded 1–8 |
 | `CODEX_REMOTE_CONTACT_CODEX_MAX_PENDING` | `32` | Pending jobs, bounded 0–256 |
 | `CODEX_REMOTE_CONTACT_QUOTA_CACHE_TTL_MS` | `30000` | Quota cache lifetime |
-| `CODEX_REMOTE_CONTACT_CODEX_REPLY_TIMEOUT_MS` | `180000` | Per-round limit for ordinary text replies |
-| `CODEX_REMOTE_CONTACT_CODEX_VISION_REPLY_TIMEOUT_MS` | `240000` | Per-round limit for replies that inspect images |
+| `CODEX_REMOTE_CONTACT_CODEX_REPLY_TIMEOUT_MS` | `120000` | Low-effort base per-round limit for ordinary text replies |
+| `CODEX_REMOTE_CONTACT_CODEX_VISION_REPLY_TIMEOUT_MS` | `180000` | Low-effort base per-round limit for replies that inspect images |
 | `CODEX_REMOTE_CONTACT_CODEX_CONTEXT_SUMMARY_TIMEOUT_MS` | `90000` | Limit for `/总结聊天记录` |
 | `CODEX_REMOTE_CONTACT_CODEX_SELF_PERSONA_TIMEOUT_MS` | `90000` | Self-persona summary/regeneration limit |
 | `CODEX_REMOTE_CONTACT_CODEX_FILE_TASK_TIMEOUT_MS` | `300000` | Owner local-file task limit |
 | `CODEX_REMOTE_CONTACT_CODEX_IMAGE_GENERATION_TIMEOUT_MS` | `600000` | Image-generation limit; configurable up to 60 minutes |
 
-The Hub classifies each Codex task before selecting its deadline, so image generation no longer shares a hard-coded limit with ordinary replies. Values are milliseconds. The normal accepted range is 10 seconds to 30 minutes, while image generation permits up to 60 minutes. When an active QQ turn accepts steered follow-up input or a fused follow-up starts a replacement turn, it receives a fresh full task-specific window; a complete lifecycle with replacements can therefore exceed the per-round value above. `/详细配置`, `/api/maintenance`, and structured Codex logs expose the configured policy or the task type, limit, and renewal count selected for a run.
+The Hub classifies each Codex task and scales its base deadline by the current reasoning effort: `low ×1`, `medium ×1.5`, `high ×2`, `xhigh ×3`, `max ×4`, and `ultra ×5`. Ordinary text replies therefore start at two minutes for `low` and rise by effort, while vision, summary, file, and image tasks retain distinct bases. Values are milliseconds. Effective normal-task deadlines are capped at 30 minutes and image generation at 60 minutes. When an active QQ turn accepts steered follow-up input or a fused follow-up starts a replacement turn, it receives a fresh full task-specific window; a complete lifecycle with replacements can therefore exceed the per-round value above. `/详细配置`, `/api/maintenance`, and structured Codex logs expose the effort, multiplier, base/effective policy, or the task type, limit, and renewal count selected for a run.
 
 ### OneBot
 
@@ -190,7 +190,10 @@ Use the same token on both sides. Without one, the webhook trusts only requests 
 | `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | Safe-download mode; `proxy-compatible` additionally permits DNS names mapped into proxy Fake-IP range `198.18.0.0/15`, while literal private IPs and other reserved ranges stay blocked |
 | `CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR` | `|||` | Multi-bubble separator |
 | `..._BUBBLE_SEND_DELAY_MS` | `650` | Base inter-bubble delay |
-| `..._BUBBLE_MAX_COUNT` | `6` | Maximum bubbles per reply |
+| `..._BUBBLE_MAX_CHARS` | `900` | Safe character limit per QQ message, bounded 200–4000 |
+| `..._BUBBLE_MAX_COUNT` | `24` | Maximum bubbles per reply, bounded 1–64 |
+
+The main model decides from the full context whether a turn is casual chat or a substantive deliverable. Casual replies still follow the learned group rhythm; problem solving, proofs, calculations, code, writing, translation, summaries, and short continuations of those tasks have no fixed response length and should be as long as correct completion requires. Delivery no longer hard-cuts normal model output at 900 characters. Any bubble above the per-message safety limit is split into ordered QQ messages at paragraph or sentence boundaries, with hard cuts used only for unbroken text. If the configured per-reply bubble ceiling is exceeded, the last sent bubble explicitly reports truncation instead of risking one oversized OneBot send.
 
 Self-persona thresholds use `CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_*`; account sticker settings use `CODEX_REMOTE_CONTACT_QQ_ACCOUNT_STICKER_*`. Consult `src/config/environment.js` for every exact name, default and bound.
 

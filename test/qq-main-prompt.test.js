@@ -20,6 +20,11 @@ test("main-model core prompt presents one execution path and one dynamic style a
   assert.match(prompt, /后台兴趣模型和 Hub 已负责是否触发/);
   assert.match(prompt, /准确理解当前语境；确有需要时调用内部工具/);
   assert.match(prompt, /真人化行为规划.*唯一的长度、气泡、emoji 和表情包风格依据/);
+  assert.match(prompt, /自行判断本轮是普通闲聊，还是需要交付结果的实质任务/);
+  assert.match(prompt, /第19题.*过程呢.*继续任务/);
+  assert.match(prompt, /不得只回复.*马上写.*空占位/);
+  assert.match(prompt, /实质任务的回复长度由你.*自行决定/);
+  assert.match(prompt, /解题至少给出结论和必要过程/);
   assert.match(prompt, /不输出分析过程/);
   assert.match(prompt, /任何进入主模型的聊天轮.*都不强制你发言/);
   assert.match(prompt, /重复骚扰.*已经觉得烦/);

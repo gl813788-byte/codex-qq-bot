@@ -88,7 +88,10 @@ test("plans reactions, short answers and tasks with different behavior budgets",
   assert.equal(answerPlan.mode, "casual_answer");
   assert.equal(taskPlan.mode, "task");
   assert.ok(imagePlan.maxChars < answerPlan.maxChars);
-  assert.ok(answerPlan.maxChars < taskPlan.maxChars);
+  assert.equal(taskPlan.maxChars, null);
+  assert.equal(taskPlan.maxSentences, null);
+  assert.equal(taskPlan.openEnded, true);
+  assert.equal(taskPlan.completionDriven, true);
 });
 
 test("cold-group interest keeps normal reply freedom for model-led research and topic opening", () => {
@@ -194,6 +197,7 @@ test("formats anonymous evidence and recognizes proactive silence", () => {
     preferSticker: true
   }, { proactive: true, bubbleSeparator: "---" });
   assert.match(context, /匿名统计/);
+  assert.match(context, /实质任务.*闲聊长度与句数建议自动失效/);
   assert.match(context, /2 条短气泡/);
   assert.match(context, /表情包规划/);
   assert.match(context, /单独一行写 ---/);

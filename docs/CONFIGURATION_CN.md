@@ -150,14 +150,14 @@ npm run ncc -- setup
 | `CODEX_REMOTE_CONTACT_CODEX_MAX_CONCURRENCY` | `2` | Codex 同时运行数，范围 1–8 |
 | `CODEX_REMOTE_CONTACT_CODEX_MAX_PENDING` | `32` | 等待队列，范围 0–256 |
 | `CODEX_REMOTE_CONTACT_QUOTA_CACHE_TTL_MS` | `30000` | 额度信息缓存时间 |
-| `CODEX_REMOTE_CONTACT_CODEX_REPLY_TIMEOUT_MS` | `180000` | 普通文字回复单轮时限 |
-| `CODEX_REMOTE_CONTACT_CODEX_VISION_REPLY_TIMEOUT_MS` | `240000` | 带图片理解的回复单轮时限 |
+| `CODEX_REMOTE_CONTACT_CODEX_REPLY_TIMEOUT_MS` | `120000` | 普通文字回复在 `low` 档的单轮基础时限 |
+| `CODEX_REMOTE_CONTACT_CODEX_VISION_REPLY_TIMEOUT_MS` | `180000` | 带图片理解的回复在 `low` 档的单轮基础时限 |
 | `CODEX_REMOTE_CONTACT_CODEX_CONTEXT_SUMMARY_TIMEOUT_MS` | `90000` | `/总结聊天记录` 时限 |
 | `CODEX_REMOTE_CONTACT_CODEX_SELF_PERSONA_TIMEOUT_MS` | `90000` | 自我人格摘要/刷新时限 |
 | `CODEX_REMOTE_CONTACT_CODEX_FILE_TASK_TIMEOUT_MS` | `300000` | 主人本机文件任务时限 |
 | `CODEX_REMOTE_CONTACT_CODEX_IMAGE_GENERATION_TIMEOUT_MS` | `600000` | 图片生成时限；允许配置到 60 分钟 |
 
-Hub 会先识别 Codex 任务类型，再选择对应时限；画图不再和普通回复共用同一个硬编码截止时间。以上值的单位都是毫秒，默认允许范围为 10 秒到 30 分钟，图片生成单独允许到 60 分钟。运行中的 QQ turn 接受追问引导或融合追问启动替代 turn 后，会重新获得一整段对应任务时限，因此包含多轮追问替换的完整回复生命周期可以长于表中的单轮时限。`/详细配置`、`/api/maintenance` 和 Codex 结构化日志会显示当前策略或本次任务实际采用的类型、时限与续期次数。
+Hub 会先识别 Codex 任务类型，再把上表的任务基础时限按当前思考强度放大：`low ×1`、`medium ×1.5`、`high ×2`、`xhigh ×3`、`max ×4`、`ultra ×5`。因此普通文字回复默认从 `low` 的 2 分钟逐档增加；看图、总结、文件与画图任务保留各自的基础时限。以上值的单位都是毫秒，普通任务最终不超过 30 分钟，图片生成不超过 60 分钟。运行中的 QQ turn 接受追问引导或融合追问启动替代 turn 后，会重新获得一整段对应任务时限，因此包含多轮追问替换的完整回复生命周期可以长于表中的单轮时限。`/详细配置`、`/api/maintenance` 和 Codex 结构化日志会显示当前思考强度、倍率、基础时限、实际时限或本次任务采用的类型与续期次数。
 
 ### OneBot
 
@@ -192,7 +192,10 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 | `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | 安全下载模式；`proxy-compatible` 仅额外允许域名解析到 `198.18.0.0/15` 代理 Fake-IP，仍拦截字面私网 IP 和其他保留地址 |
 | `CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR` | `|||` | 多气泡分隔符 |
 | `..._BUBBLE_SEND_DELAY_MS` | `650` | 气泡间基础延迟 |
-| `..._BUBBLE_MAX_COUNT` | `6` | 一次回复最大气泡数 |
+| `..._BUBBLE_MAX_CHARS` | `900` | 单条 QQ 消息的安全字符上限，范围 200–4000 |
+| `..._BUBBLE_MAX_COUNT` | `24` | 一次回复最大气泡数，范围 1–64 |
+
+模型自行判断回复是闲聊还是需要交付结果的实质任务。闲聊继续跟随群节奏；解题、证明、计算、代码、写作、翻译、总结及其短续答不套固定字数，按正确完成任务所需篇幅作答。投递层不再把正常模型回复硬裁到 900 字；任何超过单条安全上限的气泡都会优先按段落和句子边界自动拆成多条有序 QQ 消息，只有无自然边界的连续长文本才硬切。超过本次最大气泡数时，最后一条会明确标注截断，而不会让 OneBot 用一条超限消息冒险发送。
 
 自我人格刷新阈值使用 `CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_*`；账号贴纸使用 `CODEX_REMOTE_CONTACT_QQ_ACCOUNT_STICKER_*`。所有精确名称、范围和默认值以 `src/config/environment.js` 为准。
 
