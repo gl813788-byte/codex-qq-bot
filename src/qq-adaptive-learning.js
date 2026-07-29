@@ -6,7 +6,7 @@ import {
   isQqStickerStyleMessage
 } from "./qq-human-behavior.js";
 
-const profileVersion = 5;
+const profileVersion = 6;
 const bootstrapVersion = 1;
 const interruptionBootstrapVersion = 1;
 const interruptionWindowSeconds = 120;
@@ -48,6 +48,29 @@ export function recordQqAdaptiveHumanMessage(group, member, event = {}, {
   notePostBotFollowUp(groupLearning, memberLearning, event.senderId, observedAt);
   applyHumanSample(groupLearning, features, clock, observedAt, String(event.senderId), true, interruption);
   applyHumanSample(memberLearning, features, clock, observedAt, String(event.senderId), false);
+  return true;
+}
+
+export function recordQqAdaptiveHumanPoke(group, member, event = {}, {
+  at
+} = {}) {
+  if (!group || !member || !event?.senderId) return false;
+  const observedAt = resolveObservedAt(event, at);
+  const senderId = normalizeId(event.senderId);
+  const targetId = normalizeId(event?.poke?.targetId);
+  const selfId = normalizeId(event.selfId);
+  if (!senderId || senderId === selfId) return false;
+  const groupLearning = ensureQqAdaptiveLearning(group);
+  const memberLearning = ensureQqAdaptiveLearning(member);
+  const toBot = Boolean(targetId && selfId && targetId === selfId);
+
+  for (const learning of [groupLearning, memberLearning]) {
+    increment(learning, "humanPokeCount");
+    if (toBot) increment(learning, "humanPokeToBotCount");
+    else if (targetId) increment(learning, "humanPokeToOtherCount");
+    learning.firstPokeAt ||= observedAt.toISOString();
+    learning.lastPokeAt = observedAt.toISOString();
+  }
   return true;
 }
 
@@ -558,11 +581,11 @@ export function getQqAdaptiveProactiveIntervals(signals = {}, {
 export function formatQqAdaptiveLearningContext(signals = {}) {
   const group = signals?.group || {};
   const member = signals?.member || {};
-  if (Number(group.sampleSize || 0) === 0) return "";
+  if (Number(group.sampleSize || 0) === 0 && Number(group.humanPokeCount || 0) === 0) return "";
   const groupHours = formatActiveHours(group.activeHours);
   const memberHours = formatActiveHours(member.activeHours);
-  const memberLine = Number(member.sampleSize || 0) >= 4
-    ? `当前群友已学习 ${member.sampleSize} 条：平均纯文字 ${member.averageTextChars || 0} 字，表情 ${percentage(member.stickerMessageRatio)}，emoji ${percentage(member.emojiMessageRatio)}，两分钟内连续发言 ${percentage(member.burstContinuationRatio)}，常见时段 ${memberHours || "尚不稳定"}。`
+  const memberLine = Number(member.sampleSize || 0) >= 4 || Number(member.humanPokeCount || 0) > 0
+    ? `当前群友已学习 ${member.sampleSize} 条消息：平均纯文字 ${member.averageTextChars || 0} 字，表情 ${percentage(member.stickerMessageRatio)}，emoji ${percentage(member.emojiMessageRatio)}，两分钟内连续发言 ${percentage(member.burstContinuationRatio)}，拍一拍 ${member.humanPokeCount || 0} 次（占已观察互动 ${percentage(member.humanPokeActivityRatio)}），常见时段 ${memberHours || "尚不稳定"}。`
     : "当前群友的个人样本还少，只采用群级节奏，不做强个性化。";
   const guidance = Array.isArray(group.styleGuidance) ? group.styleGuidance.slice(0, 5) : [];
   return [
@@ -571,16 +594,22 @@ export function formatQqAdaptiveLearningContext(signals = {}) {
     Number(group.interruptionSampleSize || 0) > 0
       ? `- 两分钟内的真人活跃衔接共 ${group.interruptionSampleSize} 次，换人插话率 ${percentage(group.interruptionRate)}；这是时机参考，不代表 Bot 必须插话。`
       : null,
+    Number(group.humanPokeCount || 0) > 0
+      ? `- 已观察真人拍一拍 ${group.humanPokeCount} 次，占消息与拍一拍合计互动的 ${percentage(group.humanPokeActivityRatio)}；其中拍 Bot ${percentage(group.humanPokeToBotRatio)}、拍其他人 ${percentage(group.humanPokeToOtherRatio)}。可把它作为是否自然使用真实 /拍一拍 工具的弱节奏信号，但不能机械照抄或刷屏。`
+      : null,
     `- ${memberLine}`,
     group.styleReviewSummary ? `- 最近一次真人/Bot 差异复盘：${group.styleReviewSummary}。` : null,
     ...guidance.map((item) => `- 已压缩的改进规则：${item}`),
-    "- 这些是弱信号：用于调整回复长度、表情、连发和插话节奏；不要复述统计、给群友贴标签，也不要模仿某个人的具体措辞。"
+    "- 这些是弱信号：用于调整回复长度、表情、连发、拍一拍和插话节奏；不要复述统计、给群友贴标签，也不要模仿某个人的具体措辞。"
   ].filter(Boolean).join("\n");
 }
 
 export function summarizeQqAdaptiveGroupLearning(group, members = {}, options = {}) {
   const signals = buildQqAdaptiveLearningSignals(group, null, options);
-  const learnedMembers = Object.values(members || {}).filter((member) => Number(member?.adaptive?.sampleCount || 0) > 0).length;
+  const learnedMembers = Object.values(members || {}).filter((member) => (
+    Number(member?.adaptive?.sampleCount || 0) > 0
+    || Number(member?.adaptive?.humanPokeCount || 0) > 0
+  )).length;
   return {
     ...signals.group,
     learnedMembers,
@@ -606,6 +635,9 @@ function createQqAdaptiveLearning() {
     questionCount: 0,
     directBotInteractionCount: 0,
     burstContinuationCount: 0,
+    humanPokeCount: 0,
+    humanPokeToBotCount: 0,
+    humanPokeToOtherCount: 0,
     interruptionOpportunityCount: 0,
     interruptionCount: 0,
     interruptionBootstrapVersion: 0,
@@ -621,6 +653,8 @@ function createQqAdaptiveLearning() {
     recentGapSeconds: [],
     firstSeenAt: null,
     lastMessageAt: null,
+    firstPokeAt: null,
+    lastPokeAt: null,
     lastSenderId: "",
     lastBotReplyAt: null,
     botTrackingStartedAt: null,
@@ -651,6 +685,7 @@ function normalizeQqAdaptiveLearning(value) {
     "sampleCount", "textSampleCount", "textCharSum", "shortTextCount", "longTextCount",
     "stickerCount", "imageCount", "emojiCount", "replyCount", "mentionCount", "questionCount",
     "directBotInteractionCount", "burstContinuationCount", "botReplyCount", "botStickerReplyCount",
+    "humanPokeCount", "humanPokeToBotCount", "humanPokeToOtherCount",
     "interruptionOpportunityCount", "interruptionCount",
     "botMultiBubbleReplyCount", "botReplyCharSum", "botReplyFollowUpCount",
     "lastStyleReviewSampleCount", "lastStyleReviewBotReplyCount", "styleHumanSampleSize", "styleBotSampleSize",
@@ -674,7 +709,7 @@ function normalizeQqAdaptiveLearning(value) {
     .map(Number)
     .filter((seconds) => Number.isFinite(seconds) && seconds >= 0 && seconds <= 86400)
     .slice(-recentGapLimit);
-  for (const key of ["firstSeenAt", "lastMessageAt", "interruptionTrackingStartedAt", "lastBotReplyAt", "botTrackingStartedAt", "lastStyleReviewAt", "styleReviewWindowStartedAt", "lastColdProactiveCheckAt", "lastColdProactiveAt", "lastPrivateProactiveCheckAt", "lastPrivateProactiveAt"]) {
+  for (const key of ["firstSeenAt", "lastMessageAt", "firstPokeAt", "lastPokeAt", "interruptionTrackingStartedAt", "lastBotReplyAt", "botTrackingStartedAt", "lastStyleReviewAt", "styleReviewWindowStartedAt", "lastColdProactiveCheckAt", "lastColdProactiveAt", "lastPrivateProactiveCheckAt", "lastPrivateProactiveAt"]) {
     base[key] = validIsoDate(source[key]);
   }
   base.lastSenderId = normalizeId(source.lastSenderId);
@@ -808,6 +843,14 @@ function summarizeLearning(learning, currentHour, { confidenceAt }) {
     questionMessageRatio: ratio(learning.questionCount, samples),
     directBotInteractionRatio: ratio(learning.directBotInteractionCount, samples),
     burstContinuationRatio: ratio(learning.burstContinuationCount, samples),
+    humanPokeCount: learning.humanPokeCount,
+    humanPokeToBotCount: learning.humanPokeToBotCount,
+    humanPokeToOtherCount: learning.humanPokeToOtherCount,
+    humanPokeActivityRatio: ratio(learning.humanPokeCount, samples + learning.humanPokeCount),
+    humanPokeToBotRatio: ratio(learning.humanPokeToBotCount, learning.humanPokeCount),
+    humanPokeToOtherRatio: ratio(learning.humanPokeToOtherCount, learning.humanPokeCount),
+    firstPokeAt: learning.firstPokeAt,
+    lastPokeAt: learning.lastPokeAt,
     interruptionSampleSize: learning.interruptionOpportunityCount,
     interruptionCount: learning.interruptionCount,
     interruptionRate: ratio(learning.interruptionCount, learning.interruptionOpportunityCount),

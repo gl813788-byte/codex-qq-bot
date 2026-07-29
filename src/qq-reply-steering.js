@@ -62,8 +62,9 @@ export function createQqReplySteeringCoordinator({
 
   const run = async (scopeId) => {
     const generation = getActiveGeneration?.(scopeId) || null;
-    if (!generation || typeof generation.restart !== "function") {
-      return report({ ok: false, scopeId, reason: "no_restartable_generation", consumedCount: 0 });
+    if (!generation
+      || (typeof generation.steer !== "function" && typeof generation.restart !== "function")) {
+      return report({ ok: false, scopeId, reason: "no_controllable_generation", consumedCount: 0 });
     }
     const entries = [...(getPendingEntries?.(scopeId) || [])];
     if (entries.length === 0) {
@@ -75,10 +76,30 @@ export function createQqReplySteeringCoordinator({
         return report({ ok: false, scopeId, reason: "empty_replacement_input", consumedCount: 0 });
       }
       const currentGeneration = getActiveGeneration?.(scopeId) || null;
-      if (!currentGeneration || currentGeneration.id !== generation.id || currentGeneration.restart !== generation.restart) {
+      if (!isSameControllableGeneration(currentGeneration, generation)) {
         return report({ ok: false, scopeId, reason: "generation_changed", consumedCount: 0 });
       }
-      const accepted = await generation.restart(input);
+      let accepted;
+      let deliveryMode;
+      let steerFailureReason = null;
+      if (typeof generation.steer === "function") {
+        try {
+          accepted = await generation.steer(input);
+          deliveryMode = "steered";
+        } catch (steerError) {
+          steerFailureReason = steerError?.code || steerError?.message || "steer_failed";
+          const fallbackGeneration = getActiveGeneration?.(scopeId) || null;
+          if (typeof generation.restart !== "function"
+            || !isSameControllableGeneration(fallbackGeneration, generation)) {
+            throw steerError;
+          }
+          accepted = await generation.restart(input);
+          deliveryMode = "restarted";
+        }
+      } else {
+        accepted = await generation.restart(input);
+        deliveryMode = "restarted";
+      }
       const consumedCount = Number(consumeEntries?.(scopeId, entries, generation, accepted) || 0);
       return report({
         ok: true,
@@ -88,7 +109,8 @@ export function createQqReplySteeringCoordinator({
         turnId: accepted?.turnId || generation.turnId || null,
         interruptedTurnId: accepted?.interruptedTurnId || null,
         deadlineRenewalCount: Number(accepted?.deadlineRenewalCount || 0),
-        deliveryMode: "restarted",
+        deliveryMode,
+        steerFailureReason,
         queuedCount: entries.length,
         consumedCount
       });
@@ -145,7 +167,8 @@ export function createQqReplySteeringCoordinator({
       if (current?.promise === promise) scheduled.delete(key);
       if (result.ok && !closed && (getPendingEntries?.(key) || []).length > 0) {
         const generation = getActiveGeneration?.(key);
-        if (generation && typeof generation.restart === "function") {
+        if (generation
+          && (typeof generation.steer === "function" || typeof generation.restart === "function")) {
           void schedule(key);
         }
       }
@@ -222,6 +245,13 @@ export function createQqReplySteeringCoordinator({
       };
     }
   };
+}
+
+function isSameControllableGeneration(current, expected) {
+  if (!current || !expected || current.id !== expected.id) return false;
+  if (typeof expected.steer === "function" && current.steer !== expected.steer) return false;
+  if (typeof expected.restart === "function" && current.restart !== expected.restart) return false;
+  return true;
 }
 
 function normalizeDelay(value) {

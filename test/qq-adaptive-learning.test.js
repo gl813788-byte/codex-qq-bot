@@ -15,6 +15,7 @@ import {
   personalizeQqHumanStyle,
   recordQqAdaptiveBotReply,
   recordQqAdaptiveHumanMessage,
+  recordQqAdaptiveHumanPoke,
   summarizeQqAdaptiveGroupLearning
 } from "../src/qq-adaptive-learning.js";
 
@@ -48,6 +49,33 @@ test("learns bounded per-group and per-member timing and expression statistics",
   assert.ok(ensureQqAdaptiveLearning(group).recentGapSeconds.length <= 64);
 });
 
+test("learns human poke frequency separately for pokes to the Bot and other people", () => {
+  const group = {};
+  const member = {};
+  for (let index = 0; index < 8; index += 1) {
+    recordQqAdaptiveHumanMessage(group, member, humanEvent(index));
+  }
+  recordQqAdaptiveHumanPoke(group, member, {
+    ...humanEvent(9),
+    selfId: "99999",
+    poke: { targetId: "99999" }
+  });
+  recordQqAdaptiveHumanPoke(group, member, {
+    ...humanEvent(10),
+    selfId: "99999",
+    poke: { targetId: "77777" }
+  });
+  const signals = buildQqAdaptiveLearningSignals(group, member);
+  assert.equal(signals.version, 6);
+  assert.equal(signals.group.humanPokeCount, 2);
+  assert.equal(signals.group.humanPokeToBotCount, 1);
+  assert.equal(signals.group.humanPokeToOtherCount, 1);
+  assert.equal(signals.group.humanPokeActivityRatio, 0.2);
+  assert.equal(signals.member.humanPokeActivityRatio, 0.2);
+  assert.match(formatQqAdaptiveLearningContext(signals), /真人拍一拍 2 次/);
+  assert.match(formatQqAdaptiveLearningContext(signals), /拍 Bot 50%/);
+});
+
 test("learns and backfills the group speaker-switch interjection rate from two-minute transitions", () => {
   const group = {};
   const members = {};
@@ -67,7 +95,7 @@ test("learns and backfills the group speaker-switch interjection rate from two-m
     }));
   }
   const signals = buildQqAdaptiveLearningSignals(group, null, { now: start + 500_000 });
-  assert.equal(signals.version, 5);
+  assert.equal(signals.version, 6);
   assert.equal(signals.group.interruptionWindowSeconds, 120);
   assert.equal(signals.group.interruptionSampleSize, 3);
   assert.equal(signals.group.interruptionCount, 2);

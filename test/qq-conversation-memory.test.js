@@ -211,6 +211,26 @@ test("AI can promote a complete QQ person impression and private aliases share t
   assert.ok(aliasUpdate.person.suppressedAliases.includes("一群名片"));
 });
 
+test("a substantive high-salience person impression can enter unified memory before a mature profile is complete", () => {
+  const event = {
+    groupId: "10001",
+    senderId: "20003",
+    senderName: "灵感群友",
+    text: "提出了一个让 Bot 很感兴趣的独特记忆方案"
+  };
+  let memory = updateQqConversationMemoryFromEvent(createEmptyQqConversationMemory(), event);
+  memory = updateQqConversationMemoryFromExchange(memory, event, "这个角度很有意思。", [{
+    personImpressionSummary: "常从独特角度讨论记忆与人机关系",
+    personImpressionDetail: "这次提出了一个结构清楚且很有辨识度的记忆方案，让 Bot 产生了持续兴趣；当前只确认这一鲜明特点，其他维度仍待后续互动。",
+    personImpressionComplete: false,
+    personImpressionMemorable: true,
+    personImpressionPromotionReason: "单次互动显著且与 Bot 的长期兴趣高度相关，值得跨会话保留"
+  }]);
+
+  assert.ok(memory.people["20003"].unifiedMemory.promotedAt);
+  assert.match(memory.people["20003"].unifiedMemory.reason, /长期兴趣/);
+});
+
 test("never exposes malformed invisible memory metadata to QQ", () => {
   const parsed = extractQqConversationMemoryMarkers("正常回复\n[[qq_memory:{bad json}]]");
   assert.equal(parsed.visibleText, "正常回复");

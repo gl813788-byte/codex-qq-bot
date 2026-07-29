@@ -37,8 +37,16 @@ import { buildCodexChildEnv } from "./codex-child-env.js";
 import {
   CODEX_TASK_TYPES,
   getCodexTaskTimeoutMs,
+  getCodexTaskTimeoutPolicy,
   getCodexTaskTimeoutPolicyMap
 } from "./codex-task-timeout.js";
+import {
+  applyQqTaskBudgetRequest,
+  createQqTaskControl,
+  extractQqTaskControlMarkers,
+  stripQqTaskControlMarkers,
+  takeQqTaskProgress
+} from "./qq-task-control.js";
 import { buildQqReplySendPlan } from "./qq-reply-chunks.js";
 import {
   isQqImageLookRequest,
@@ -174,6 +182,7 @@ import {
   personalizeQqHumanStyle,
   recordQqAdaptiveBotReply,
   recordQqAdaptiveHumanMessage,
+  recordQqAdaptiveHumanPoke,
   summarizeQqAdaptiveGroupLearning
 } from "./qq-adaptive-learning.js";
 import {
@@ -1622,7 +1631,10 @@ function consumeQqPendingReplyEvents(scopeId, entries, generation) {
 
 function getSteerableQqGeneration(scopeId) {
   const generation = state.qq.activeGenerations[String(scopeId || "")];
-  return generation && typeof generation.restart === "function" ? generation : null;
+  return generation
+    && (typeof generation.steer === "function" || typeof generation.restart === "function")
+    ? generation
+    : null;
 }
 
 async function buildQqPendingSteeringInput(entries, generation) {
@@ -1691,7 +1703,7 @@ async function buildQqPendingSteeringInput(entries, generation) {
     type: "text",
     text: [
       `你处理当前 QQ 回复期间又收到了 ${aggregate.queuedMessageCount || entries.length} 条新消息。Hub 已沿用连续消息合并规则，把相邻重复内容压成一条并标出总次数。`,
-      "5 秒静默窗口已经结束，Hub 会截断上一段生成并从这里开启替代轮次。放弃未发送的旧草稿，把这些追加消息融合成一份新的统一 QQ 回复；不要先发旧答案，也不要逐条机械回复“消息一/消息二”。",
+      "5 秒静默窗口已经结束。Hub 会优先把本批新消息引导进当前活跃任务；若活跃 turn 已不接受引导，才会中断旧 turn 并开启替代轮次。无论采用哪种方式，都要把追加消息与正在进行的多轮任务融合成一份统一回复，不要先发过时答案，也不要逐条机械回复“消息一/消息二”。",
       replyTargetInstruction || null,
       semanticRecall.context || null,
       semanticRecall.context ? "" : null,
@@ -1747,6 +1759,7 @@ function logQqReplySteeringResult(result) {
       turnId: result.turnId,
       interruptedTurnId: result.interruptedTurnId || null,
       deadlineRenewalCount: Number(result.deadlineRenewalCount || 0),
+      steerFailureReason: result.steerFailureReason || null,
       queuedCount: result.queuedCount,
       consumedCount: result.consumedCount,
       triggerMessageCount: generation?.qqLastSteeringFusion?.triggerMessageCount || result.queuedCount,
@@ -6165,16 +6178,79 @@ function formatQqBotInternalToolContext(event) {
   });
 }
 
-async function runQqBotToolLoop({ initialReply, event, memoryContext, runBuiltReplyPrompt, replyScope = null }) {
+async function runQqBotToolLoop({
+  initialReply,
+  event,
+  memoryContext,
+  runBuiltReplyPrompt,
+  taskControl,
+  sendProgress,
+  replyScope = null
+}) {
   let reply = String(initialReply || "");
   const transcript = [];
   const commandCounts = new Map();
-  for (let round = 1; round <= qqBotToolLoopLimit; round += 1) {
+  while (taskControl.roundsUsed < taskControl.roundLimit) {
+    taskControl.roundsUsed += 1;
+    const round = taskControl.roundsUsed;
     assertQqReplyScopeActive(replyScope);
     event.qqCurrentToolRound = round;
-    const resolution = await resolveQqBotCommandMarkers(reply, event, { commandCounts });
+    const controls = extractQqTaskControlMarkers(reply);
+    const controlResults = [];
+    for (const request of controls.budgetRequests) {
+      const result = applyQqTaskBudgetRequest(taskControl, request);
+      controlResults.push({
+        ok: result.ok,
+        command: "/任务预算申请",
+        reply: result.reply
+      });
+      logger[result.ok ? "info" : "warn"]("QQ task budget request handled", {
+        outcome: result.ok ? "approved" : "rejected",
+        groupId: event.groupId || null,
+        senderId: event.senderId || null,
+        round,
+        grantedMinutes: Number(result.grantedMinutes || 0),
+        grantedRounds: Number(result.grantedRounds || 0),
+        timeoutMs: taskControl.timeoutMs,
+        roundLimit: taskControl.roundLimit,
+        roundsUsed: taskControl.roundsUsed,
+        budgetRequestsUsed: taskControl.budgetRequestsUsed
+      }, "qq", qqLogContext(event));
+    }
+    const progressMessages = takeQqTaskProgress(taskControl, controls.progresses.slice(0, 1));
+    for (const progress of progressMessages) {
+      let progressResult = { ok: false, reason: "当前消息通道不支持任务中途进度。" };
+      try {
+        progressResult = await sendProgress?.(progress) || progressResult;
+      } catch (error) {
+        progressResult = { ok: false, reason: error?.message || "进度消息发送失败。" };
+      }
+      controlResults.push({
+        ok: progressResult.ok !== false,
+        command: "/任务进度",
+        reply: progressResult.ok !== false
+          ? `进度消息已发送给用户：${progress}`
+          : `进度消息未发送：${progressResult.reason || progressResult.error || "未知错误"}`
+      });
+    }
+    if (controls.continueRequested) {
+      controlResults.push({
+        ok: true,
+        command: "/继续任务",
+        reply: "Hub 已允许进入下一轮，请继续推进任务。"
+      });
+    } else if (controls.hadControl && controlResults.length === 0) {
+      controlResults.push({
+        ok: false,
+        command: "/任务控制",
+        reply: "任务控制标记为空或格式无效；请修正标记，或直接给出最终结果。"
+      });
+    }
+
+    const resolution = await resolveQqBotCommandMarkers(controls.visibleText, event, { commandCounts });
+    const roundResults = [...controlResults, ...resolution.results];
     if (resolution.results.length === 0) {
-      if (shouldImplicitlyPokeBack(resolution.visibleText || reply, event)) {
+      if (shouldImplicitlyPokeBack(resolution.visibleText, event)) {
         const pokeResult = await executeQqBotPokeCommand("/拍一拍 发送者", event);
         logger[pokeResult.ok ? "success" : "warn"]("Implicit QQ poke-back intent handled", {
           ok: pokeResult.ok,
@@ -6182,11 +6258,11 @@ async function runQqBotToolLoop({ initialReply, event, memoryContext, runBuiltRe
           senderId: event.senderId || null,
           error: pokeResult.ok ? null : pokeResult.reply
         }, "qq", qqLogContext(event));
-        if (pokeResult.ok) return stripQqBotDoneMarker(resolution.visibleText || reply);
+        if (pokeResult.ok) return stripQqTaskControlMarkers(stripQqBotDoneMarker(resolution.visibleText));
         transcript.push({
           round,
           visibleText: resolution.visibleText,
-          results: [pokeResult]
+          results: [...controlResults, pokeResult]
         });
         reply = await runBuiltReplyPrompt(
           memoryContext,
@@ -6203,7 +6279,7 @@ async function runQqBotToolLoop({ initialReply, event, memoryContext, runBuiltRe
         transcript.push({
           round,
           visibleText: resolution.visibleText,
-          results: [{
+          results: [...controlResults, {
             ok: false,
             command: "/表情标签",
             reply: `你刚查看了尚未标注的表情：${pendingStickers.map((item) => item.name).join("、")}。必须先调用 /表情标签 表情名 | 标签1,标签2 | 画面和适用语境，完成后才能给出最终回复。`
@@ -6219,12 +6295,14 @@ async function runQqBotToolLoop({ initialReply, event, memoryContext, runBuiltRe
         );
         continue;
       }
-      return stripQqBotDoneMarker(resolution.visibleText || reply);
+      if (roundResults.length === 0) {
+        return stripQqTaskControlMarkers(stripQqBotDoneMarker(resolution.visibleText));
+      }
     }
     transcript.push({
       round,
       visibleText: resolution.visibleText,
-      results: resolution.results
+      results: roundResults
     });
     reply = await runBuiltReplyPrompt(
       memoryContext,
@@ -6235,12 +6313,9 @@ async function runQqBotToolLoop({ initialReply, event, memoryContext, runBuiltRe
       round
     );
     assertQqReplyScopeActive(replyScope);
-    if (hasQqBotDoneMarker(reply) && extractQqBotCommandMarkers(reply).length === 0) {
-      return stripQqBotDoneMarker(stripQqBotCommandMarkers(reply));
-    }
   }
 
-  const finalVisible = stripQqBotDoneMarker(stripQqBotCommandMarkers(reply));
+  const finalVisible = stripQqTaskControlMarkers(stripQqBotDoneMarker(stripQqBotCommandMarkers(reply)));
   if (event.qqColdProactive) return finalVisible || "[[qq_silent]]";
   return finalVisible || formatQqBotToolFallbackReply(transcript.flatMap((entry) => entry.results));
 }
@@ -8250,7 +8325,9 @@ function cleanCodexReply(text) {
 }
 
 function normalizeVisibleQqReply(reply, event = {}) {
-  let text = stripQqKnowledgeMarkers(stripQqConversationMemoryMarkers(stripQqBotDoneMarker(stripQqBotCommandMarkers(reply))))
+  let text = stripQqTaskControlMarkers(
+    stripQqKnowledgeMarkers(stripQqConversationMemoryMarkers(stripQqBotDoneMarker(stripQqBotCommandMarkers(reply))))
+  )
     .replace(/\[\[qq_context_more\]\]/g, "")
     .replace(/\[\[qq_silent\]\]/g, "")
     .replace(/\n{3,}/g, "\n\n")
@@ -8395,6 +8472,28 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     })
     : [];
   event.imagePaths = imagePaths;
+  const initialTaskType = imagePaths.length > 0
+    ? CODEX_TASK_TYPES.QQ_VISION_REPLY
+    : CODEX_TASK_TYPES.QQ_REPLY;
+  const initialTaskPolicy = getCodexTaskTimeoutPolicy(
+    codexTaskTimeouts,
+    initialTaskType,
+    state.ai.reasoningEffort
+  );
+  const qqTaskControl = createQqTaskControl({
+    roundLimit: qqBotToolLoopLimit,
+    timeoutMs: initialTaskPolicy.timeoutMs,
+    maximumTimeoutMs: initialTaskPolicy.maximumMs
+  });
+  event.qqTaskControl = {
+    baseRoundLimit: qqTaskControl.baseRoundLimit,
+    roundLimit: qqTaskControl.roundLimit,
+    roundsUsed: qqTaskControl.roundsUsed,
+    timeoutMs: qqTaskControl.timeoutMs,
+    maximumTimeoutMs: qqTaskControl.maximumTimeoutMs,
+    budgetRequestsUsed: 0,
+    progressMessagesSent: 0
+  };
   const botToolContext = event.qqPrivateProactive ? "" : formatQqBotInternalToolContext(event);
   let semanticMemoryContextDelivered = false;
   const proactiveExecutionContext = event.qqColdProactive
@@ -8416,10 +8515,31 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     const taskType = currentImagePaths.length > 0
       ? CODEX_TASK_TYPES.QQ_VISION_REPLY
       : CODEX_TASK_TYPES.QQ_REPLY;
+    const currentTaskPolicy = getCodexTaskTimeoutPolicy(
+      codexTaskTimeouts,
+      taskType,
+      state.ai.reasoningEffort
+    );
+    qqTaskControl.maximumTimeoutMs = Math.max(
+      qqTaskControl.maximumTimeoutMs,
+      currentTaskPolicy.maximumMs
+    );
+    qqTaskControl.timeoutMs = Math.max(
+      qqTaskControl.timeoutMs,
+      currentTaskPolicy.timeoutMs
+    );
+    Object.assign(event.qqTaskControl, {
+      roundLimit: qqTaskControl.roundLimit,
+      roundsUsed: qqTaskControl.roundsUsed,
+      timeoutMs: qqTaskControl.timeoutMs,
+      maximumTimeoutMs: qqTaskControl.maximumTimeoutMs,
+      budgetRequestsUsed: qqTaskControl.budgetRequestsUsed,
+      progressMessagesSent: qqTaskControl.progressMessagesSent
+    });
     const result = await runSteerableQqCodexTurn(prompt, {
       cwd: codexWorkspaceDir,
       taskType,
-      timeout: getCodexTaskTimeoutMs(codexTaskTimeouts, taskType, state.ai.reasoningEffort),
+      timeout: qqTaskControl.timeoutMs,
       imagePaths: currentImagePaths,
       env: {
         ...process.env,
@@ -8732,6 +8852,8 @@ async function buildModelReply(event, { replyScope = null } = {}) {
           event,
           memoryContext,
           runBuiltReplyPrompt,
+          taskControl: qqTaskControl,
+          sendProgress: (progress) => sendQqTaskProgressMessage(event, progress, { replyScope }),
           replyScope
         });
         fusion = await fuseQueuedFollowUpsBeforeSend(baseReply);
@@ -10022,6 +10144,76 @@ async function rememberQqExchange(event, reply) {
   maybeScheduleQqSelfPersonaRefresh();
 }
 
+async function rememberQqTaskProgress(event, progress) {
+  const scopeId = getQqMemoryScopeId(event);
+  if (!state.qq.memory.enabled || !scopeId || !progress) return false;
+  const knowledgeContextChanged = rememberQqConversationAssistantMessage(scopeId, progress, {
+    bubbleCount: 1,
+    replyTargetId: event.senderId,
+    event
+  });
+  const group = getQqPersonaGroup(scopeId);
+  const member = getQqPersonaMember(scopeId, event.senderId, event.senderName);
+  const adaptiveChanged = recordQqAdaptiveBotReply(group, member, event, progress, { bubbleCount: 1 });
+  await Promise.all([
+    saveQqMemory(),
+    knowledgeContextChanged ? saveQqKnowledgeBase() : Promise.resolve(),
+    adaptiveChanged ? saveQqPersonas() : Promise.resolve()
+  ]);
+  return true;
+}
+
+async function sendQqTaskProgressMessage(event, progress, { replyScope = null } = {}) {
+  const text = String(progress || "").trim();
+  if (!text) return { ok: false, reason: "进度内容为空。" };
+  if (event.qqTransportSource !== "onebot") {
+    return { ok: false, reason: "当前消息通道不支持任务中途进度。" };
+  }
+  assertHubAcceptingOutbound();
+  assertQqReplyScopeActive(replyScope);
+  const result = isQqPrivateEvent(event)
+    ? await sendOneBotPrivateMessage(event, text, { replyScope })
+    : await sendOneBotGroupMessage(event, text, {
+      quoteSource: false,
+      replyScope
+    });
+  const send = {
+    ok: result?.ok !== false,
+    bubbles: [text],
+    flattened: text,
+    results: [result]
+  };
+  const receipt = buildQqDeliveryReceipt(text, send);
+  if (receipt.deliveredBubbleCount > 0) {
+    event.qqTaskProgressMessages = [
+      ...(event.qqTaskProgressMessages || []),
+      text
+    ].slice(-4);
+    await rememberQqTaskProgress(event, text);
+    await resetQqOrdinaryInterestAfterDeliveredBotReply(event, receipt);
+    logger.info("QQ task progress delivered", {
+      outcome: "delivered",
+      groupId: event.groupId || null,
+      senderId: event.senderId || null,
+      progressCount: event.qqTaskProgressMessages.length,
+      preview: text.slice(0, 160)
+    }, "qq", qqLogContext(event));
+    return { ok: true, receipt };
+  }
+  await rememberQqDeliveryFailure(event, receipt);
+  logger.warn("QQ task progress delivery failed", {
+    outcome: "failed",
+    groupId: event.groupId || null,
+    senderId: event.senderId || null,
+    error: receipt.error || null
+  }, "qq", qqLogContext(event));
+  return {
+    ok: false,
+    reason: receipt.error || "QQ 没有确认进度消息送达。",
+    receipt
+  };
+}
+
 async function resetQqOrdinaryInterestAfterDeliveredBotReply(event, deliveryReceipt) {
   if (!event?.groupId || Number(deliveryReceipt?.deliveredBubbleCount || 0) <= 0) return false;
   const groupId = String(event.groupId);
@@ -10191,6 +10383,7 @@ async function rememberQqGroupMessage(event) {
 async function processQqReplyEvent(event, options = {}) {
   if (shuttingDown) return;
   const source = options.source || "qq";
+  event.qqTransportSource = source;
   const lifecycleStartedAt = Date.now();
   const traceId = ensureQqTraceId(event);
   const timings = {
@@ -10405,6 +10598,7 @@ async function processQqReplyEvent(event, options = {}) {
             patch?.personImpressionSummary
             || patch?.personImpressionDetail
             || patch?.personImpressionComplete
+            || patch?.personImpressionMemorable
           ));
           if (personMemoryChanged && event.senderId) {
             await syncPromotedQqPersonMemories([event.senderId]);
@@ -10814,6 +11008,14 @@ function updateQqPersonaFromEvent(event) {
   member.firstSeenAt ||= now;
   member.lastSeenAt = now;
   member.updatedAt = now;
+  if (isQqPokeEvent(event)) {
+    const group = getQqPersonaGroup(scopeId);
+    group.updatedAt = now;
+    if (!event.qqAdaptivePokeRecorded) {
+      event.qqAdaptivePokeRecorded = recordQqAdaptiveHumanPoke(group, member, event);
+    }
+    return Boolean(event.qqAdaptivePokeRecorded);
+  }
   member.messageCount = Number(member.messageCount || 0) + 1;
   member.questionCount = Number(member.questionCount || 0) + (/[?？]/.test(text) ? 1 : 0);
   member.imageCount = Number(member.imageCount || 0) + ((event.images || []).length > 0 ? 1 : 0);
@@ -10824,6 +11026,31 @@ function updateQqPersonaFromEvent(event) {
   const group = getQqPersonaGroup(scopeId);
   recordQqAdaptiveHumanMessage(group, member, event);
   group.updatedAt = now;
+  return true;
+}
+
+async function rememberQqHumanPokeActivity(event) {
+  if (!event?.groupId || !event.senderId || !state.channels.qq) return false;
+  if (!state.qq.allowedGroups.includes(event.groupId) || isBannedQqSender(event)) return false;
+  const scopeId = getQqMemoryScopeId(event);
+  if (!scopeId) return false;
+  const group = getQqPersonaGroup(scopeId);
+  const member = getQqPersonaMember(scopeId, event.senderId, event.senderName);
+  const changed = recordQqAdaptiveHumanPoke(group, member, event);
+  event.qqAdaptivePokeRecorded = changed;
+  if (!changed) return false;
+  const now = new Date().toISOString();
+  member.firstSeenAt ||= now;
+  member.lastSeenAt = now;
+  member.updatedAt = now;
+  group.updatedAt = now;
+  await saveQqPersonas();
+  logger.debug("QQ human poke rhythm learned", {
+    groupId: event.groupId,
+    senderId: event.senderId,
+    targetId: event.poke?.targetId || null,
+    targetIsBot: event.poke?.targetId === event.selfId
+  }, "learning", qqLogContext(event));
   return true;
 }
 
@@ -11014,7 +11241,7 @@ function attachQqGenerationSteering(id, controls = {}) {
   generation.steer = typeof controls.steer === "function" ? controls.steer : null;
   generation.restart = typeof controls.restart === "function" ? controls.restart : null;
   generation.interrupt = typeof controls.interrupt === "function" ? controls.interrupt : null;
-  if (generation.scopeId && generation.restart) {
+  if (generation.scopeId && (generation.steer || generation.restart)) {
     trackBackgroundTask(qqReplySteering.schedule(generation.scopeId), () => null);
   }
   return generation;
@@ -11404,8 +11631,9 @@ async function ensureCodexReplyWorkspace() {
       "",
       "你只为 QQ 生成最终短回复或正式提示允许的内部标记，不写分析、标题或 Markdown。",
       `自称“我”；需要代号时只说 ${assistantName}。仅在权限/管理需要时称呼${ownerLabel}，其他群友不用该称呼。`,
-      "可用 [[qq_command:/...]] 多轮查记录、短期记忆、长期知识库、联网摘要或执行菜单动作；结果够用后在最终回复附 [[qq_done]]。所有内部标记都不向群友解释。",
-      "按正式提示用 [[qq_memory:{...}]] 写会话印象，用 [[qq_knowledge:{...}]] 写标题化长期知识；没有可靠的新信息就不写。",
+      "只要内部能力能明显改善正确性、上下文、记忆或真实执行，就主动用 [[qq_command:/...]] 多轮查记录、短期/统一记忆、长期知识库、联网摘要或执行动作；结果够用后在最终回复附 [[qq_done]]。所有内部标记都不向群友解释。",
+      "复杂任务可在任意阶段自行选择用 [[qq_progress:真实进度]] 报少量进度，也可不报；预算不足可用 [[qq_task_budget:{...}]] 申请额外时长/轮数，仅需再思考一轮可用 [[qq_task_continue]]，之后仍须交付最终结果。",
+      "按正式提示用 [[qq_memory:{...}]] 写会话印象，用 [[qq_knowledge:{...}]] 写标题化长期知识；有人留下深刻印象或引发持续兴趣时要主动评估人物印象、Bot 感想、短期记忆和统一人物提升，普通寒暄仍不滥记。",
       state.qq.enhancer.enabled ? "表情名必须来自提示中的真实表情库；需查看或标注时使用对应内部工具。" : null,
       "群聊中可在最终正文写“@准确昵称 ”或“@QQ号 ”来发送 QQ 真实 at 段；目标后留一个空格，昵称不确定或重名时使用 QQ 号。",
       "正式提示列出多位候选人时，每人都可由你按内容选择 [[qq_reply:quote:QQ号]] 引用、[[qq_reply:mention:QQ号]] 艾特或 [[qq_reply:plain]] 普通回复；省略标记也表示普通回复，不能默认引用或艾特最早触发者。",
@@ -12073,14 +12301,14 @@ async function resolveLocalQqReplyMedia(reply, { stickerDir } = {}) {
 }
 
 function stripLocalQqMediaMarkers(text) {
-  return stripQqConversationMemoryMarkers(String(text || "")
+  return stripQqTaskControlMarkers(stripQqConversationMemoryMarkers(String(text || "")
     .replace(/\[\[qq_image:[^\]\n]+\]\]/g, "")
     .replace(/\[\[qq_sticker:[^\]\n]+\]\]/g, "")
     .replace(/\[\[qq_file:[^\]\n]+\]\]/g, "")
     .replace(qqBotCommandMarkerStripPattern, "")
     .replace(qqBotDoneMarkerPattern, "")
     .replace(/\n{3,}/g, "\n\n")
-    .trim());
+    .trim()));
 }
 
 function extractQqImageMarkers(text) {
@@ -12990,13 +13218,6 @@ async function handleApi(req, res) {
       return sendJson(res, 200, await handleIncomingOneBotRequest(payload, { trustedSource: trustedOneBotRequest }));
     }
     if (isOneBotPokeNotice(payload)) {
-      if (!isOneBotPokeToSelf(payload)) {
-        logger.debug("OneBot poke ignored because it did not target the bot", {
-          senderId: payload.user_id || payload.sender_id || null,
-          targetId: payload.target_id || null
-        }, "onebot");
-        return sendJson(res, 200, { ignored: true, reason: "Only poke events targeting the bot are handled" });
-      }
       const event = enrichQqEvent(normalizeOneBotPokeEvent(payload), { allowOwner: trustedOneBotRequest });
       if (!event.senderId || (payload.group_id != null && !event.groupId)) {
         return sendJson(res, 400, { error: "Invalid OneBot QQ identifier" });
@@ -13017,6 +13238,20 @@ async function handleApi(req, res) {
         recordQqEvent(record);
         logger.debug("Duplicate OneBot poke ignored", { dedupeKey, groupId: event.groupId || null, senderId: event.senderId || null }, "onebot", qqLogContext(event));
         return sendJson(res, 200, { status: "ok", duplicate: true, traceId: event.traceId });
+      }
+      await rememberQqHumanPokeActivity(event);
+      if (!isOneBotPokeToSelf(payload)) {
+        logger.debug("OneBot poke observed for learning but ignored for reply because it did not target the bot", {
+          senderId: event.senderId,
+          targetId: event.poke?.targetId || null,
+          groupId: event.groupId || null
+        }, "onebot", qqLogContext(event));
+        return sendJson(res, 200, {
+          ignored: true,
+          learned: Boolean(event.qqAdaptivePokeRecorded),
+          reason: "Poke rhythm learned; only poke events targeting the bot trigger replies",
+          traceId: event.traceId
+        });
       }
       logger.debug("OneBot poke received", { groupId: event.groupId || null, senderId: event.senderId || null }, "onebot", qqLogContext(event));
       await processQqReplyEvent(event, { source: "onebot" });

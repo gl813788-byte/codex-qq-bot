@@ -63,6 +63,8 @@ test("normalizes poke notices and validates QQ identifiers", () => {
   assert.equal(isOneBotPokeNotice(payload), true);
   assert.equal(isOneBotPokeToSelf(payload), true);
   assert.equal(normalizeOneBotPokeEvent(payload).type, "group_poke");
+  assert.match(normalizeOneBotPokeEvent(payload).text, /拍了拍你/);
+  assert.match(normalizeOneBotPokeEvent({ ...payload, target_id: 456789 }).text, /拍了拍QQ 456789/);
   assert.equal(normalizeQqIdentifier("123"), undefined);
   assert.equal(normalizeQqIdentifier(" 123456 "), "123456");
 });
