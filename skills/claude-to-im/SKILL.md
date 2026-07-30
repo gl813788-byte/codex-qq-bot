@@ -18,6 +18,8 @@ description: |
 
 You are managing the local QQ bridge that lets the user talk to this Codex setup from QQ.
 
+## Local Control and Services
+
 Primary control script:
 
 ```bash
@@ -44,7 +46,6 @@ Default services:
 - Codex QQ Bot backend: `http://127.0.0.1:3789`
 - Codex QQ Bot dashboard: `http://127.0.0.1:3789/` (alias `/dashboard`)
 - Backend project: `/root/Codex-Remote-Contact`
-- The recommended public install is `npx -y "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"` or the same exact-version pattern with `pnpm dlx`; when Node.js is absent, use raw-main `install.sh` through curl or wget. The v1.1.8 npm installer revision is `1.1.8-1` because the registry tombstone for an earlier unpublished `1.1.8` cannot be reused. Resolving the exact registry version before npx execution bypasses a stale `_npx` executable cache. The outer installer requires neither Node, npm, Git nor zsh: it selects curl/wget, installs missing unzip/SHA-256 tooling with the host package manager, refreshes the default-branch head, downloads a commit-pinned ZIP, and reconstructs a missing `一键部署.command` when package/core ncc/deploy scripts are valid. Valid stages remain resumable; damaged caches are quarantined and extraction is rebuilt cleanly. Archive upgrades retain `data`, `runtime`, local configuration, and extra files with a full backup; Git worktrees and unrelated paths are not overwritten. The wrapper tells the user to run `ncc` instead of opening the wizard by default. First-run `ncc` invokes `scripts/bootstrap-environment.sh`: it fills base tools, installs a SHA-256-verified official Node.js v22 into the user's isolated prefix when Node 20+ is unavailable, installs Codex CLI and project dependencies, then runs `npm run verify`. On apt-get/dnf Linux x64/arm64 it also invokes NapCat's official rootless Shell installer by default to provide LinuxQQ, NapCat, Xvfb and runtime libraries; existing OneBot/NapCat is reused. The repository does not redistribute QQ/NapCat binaries, and the user must still complete the QQ QR scan. Set `CODEX_QQ_BOT_INSTALL_NAPCAT=skip` for an external OneBot or `required` to reject unsupported automatic-NapCat platforms early.
 - Use `ncc` for process lifecycle and the dashboard for state, health, channel, memory, log, and local appearance controls. The dashboard does not replace `ncc` startup/login recovery.
 - Dashboard assets live in `/root/Codex-Remote-Contact/modules/mac-client/Resources` and are served through `/root/Codex-Remote-Contact/src/dashboard-assets.js`; the removed `modules/web-console` is not used.
 - Do not add separate shortcut scripts for QQ on/off/status. The user wants one control entry: `ncc` / `/root/napcat-codex-control.sh`.
@@ -56,6 +57,36 @@ Default services:
   under `qq.ownerUserIds`. Owner-only QQ slash commands are accepted from this QQ id
   in whitelisted groups without needing to @ the bot.
 - The main QQ system prompt fixes QQ `3784642920` as this project's developer. This project identity is independent of the current owner list and does not change when owner configuration changes. Owner authority remains a separate trusted `isOwner` decision.
+
+## Installation, Upgrade, and Release Contract
+
+Documentation ownership:
+
+- `docs/INSTALLATION.md` and `docs/INSTALLATION_CN.md` are authoritative for public commands, environment decisions, Termux/PRoot, root rules, stage recovery, options, and caches.
+- `docs/DEPLOY_WITH_CODEX*` covers Codex-operated deployment and acceptance, `docs/CONFIGURATION*` owns variable tables, and `docs/OPERATIONS*` starts after deployment. Link to the authoritative page instead of copying long installer explanations between documents.
+- Keep English and Chinese headings and decision tables structurally synchronized.
+
+Public entry behavior:
+
+1. Prefer `npx -y "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"` or the same exact-version `pnpm dlx` pattern. npm/pnpm must complete source, platform dependencies, Node.js 20+, official Codex CLI, project dependencies, and `npm run verify`.
+2. When Node is absent, raw-main `install.sh` through curl/wget prepares source and `ncc`; `--prepare` opts into the complete path and `--download-only` stops after source.
+3. Source, PRoot, Node/Codex, npm dependency, and verification checkpoints are valid only after integrity/health checks. Repeating the same command must reuse good state and start at the first unfinished stage. Quarantine damaged downloads; never treat file existence alone as success.
+4. Archive upgrades retain `data`, `runtime`, local configuration, extra files, and a complete rollback backup. Never overwrite a Git worktree, local changes, an unrelated non-empty path, or a different global `ncc`.
+
+Environment decisions:
+
+- `scripts/install-environment.sh` is the side-effect-free authority for macOS, native Linux, WSL, containers, native Termux, Termux/PRoot, architecture, libc, package manager, and real/sudo/doas/unprivileged/virtual-root modes.
+- Native Termux must run as the normal app user. Its Android layer prepares only `proot-distro`; managed Debian owns Node, official Codex, dependencies, verification, and daily `ncc`. Use an existing PRoot guest directly and never nest it. Reject Android `su` root.
+- Require both a discoverable `codex` and a successful `codex --version`; do not silently substitute an unofficial Codex fork on unsupported kernels.
+- Only supported native apt-get/dnf glibc Linux x64/arm64 may automatically invoke NapCat's official rootless installer. Termux/PRoot, WSL, containers, macOS, musl, and other unsupported hosts use an external OneBot; `required` fails early.
+- The repository does not redistribute QQ/NapCat binaries, and the user must complete the QQ QR scan.
+
+Release discipline:
+
+1. Treat `package.json` as the version authority; keep version assertions and release-facing docs consistent with it.
+2. Before publishing, run the narrow installer tests, `npm run verify`, and `npm pack --dry-run`; inspect the packed file list for every runtime script.
+3. The npm launcher downloads the repository default branch. Do not publish a version whose required installer source exists only on an unmerged PR; merge the reviewed source first, then publish and verify the registry version.
+4. Keep the installed `/root/.codex/skills/claude-to-im/SKILL.md` and tracked `skills/claude-to-im/SKILL.md` byte-identical. Only the tracked copy belongs in Git.
 
 ## Maintenance Contract
 
@@ -119,6 +150,9 @@ Source map:
 | `src/dashboard-assets.js` + `modules/mac-client/Resources/` | Register and serve the local dashboard under a strict CSP. Executable JS/CSS stays in external assets. |
 | `src/public-tunnel.js` | Own Cloudflare Quick Tunnel dependency discovery, child-process lifecycle, URL parsing and exact active-host matching behind a small tested interface. |
 | `src/codex-child-env.js` | Build the environment inherited by Codex child processes; reread the active profile when required. |
+| `install.sh` + `bin/codex-qq-bot.mjs` | Resolve and safely install exact default-branch source; the npm entry enables complete preparation by default. |
+| `scripts/install-environment.sh` + `scripts/bootstrap-environment.sh` | Detect the host without mutation, then execute the selected package, Node, Codex, and OneBot policy. |
+| `scripts/prepare-environment.sh` + `scripts/termux-proot.command` | Bridge Bash-to-zsh preparation and own native-Termux managed PRoot entry without nesting an existing guest. |
 | `scripts/ncc.command` | Public repository setup/status helper, invoked unambiguously as `npm run ncc -- <command>`. |
 | `/root/napcat-codex-control.sh` | This machine's full NapCat/Hub lifecycle controller, invoked as global `ncc`. It is not the same command surface as the repository helper. |
 
@@ -208,96 +242,60 @@ curl -fsS --max-time 3 http://127.0.0.1:3000/get_login_info | jq .
 
 Report tests, Hub, dashboard, OneBot login, QQ channel and recent fatal/error logs separately. A process existing is not sufficient proof that the message path works.
 
-## Codex-First Backend Deployment
+## Codex-Operated Deployment
 
-Use this when the user asks Codex to download, install, reinstall, upgrade, or deploy the Codex QQ Bot backend.
+Use this when Codex is asked to install, repair, upgrade, or start the backend. The detailed public installer behavior stays in `docs/INSTALLATION*`; this section defines the operator workflow for the current machine.
 
-Codex is the deployment operator. Inspect the machine, execute safe in-scope commands, repair ordinary setup issues, run verification, start the services, and report the actual end state. Ask the user only for actions Codex cannot perform, such as scanning a QQ QR code, supplying a missing secret, or approving a privileged command. Do not stop after printing a command list when the requested deployment can continue automatically.
-
-Default backend repository:
-
-```bash
-https://github.com/gl813788-byte/codex-qq-bot.git
-```
-
-Default install path:
-
-```bash
-/root/Codex-Remote-Contact
-```
-
-Deployment flow:
-
-1. Inspect the host and existing installation before changing anything:
+1. Inventory before mutation:
 
    ```bash
-   uname -a
+   cd /root/Codex-Remote-Contact
+   bash scripts/install-environment.sh --report
    command -v git node npm codex ncc || true
-   node --version
+   git status --short --branch
+   git remote -v
+   ```
+
+   Preserve local changes, `data/`, `runtime/`, local environment files, and databases. Never reset, clean, or force-checkout a deployment.
+
+2. Select the path:
+
+   - For a new public install, use the exact-version npm/pnpm command or raw installer from `docs/INSTALLATION*` and operate it through completion.
+   - For this existing checkout, update only when the worktree permits it; a clean checkout may use fast-forward-only pull.
+   - For repair, rerun the same installer or `ncc` so validated stages resume. Do not hand-edit completion markers.
+
+3. Verify code and dependencies:
+
+   ```bash
+   npm install
+   npm run verify
    codex --version
-   git -C /root/Codex-Remote-Contact status --short --branch 2>/dev/null || true
    ```
 
-   Require Node.js 20 or newer. Preserve local changes and runtime data. Never reset, clean, or overwrite a dirty worktree to make deployment easier.
-
-2. If `/root/Codex-Remote-Contact/.git` does not exist, clone the backend:
-
-   ```bash
-   git clone https://github.com/gl813788-byte/codex-qq-bot.git /root/Codex-Remote-Contact
-   ```
-
-3. If the repo already exists, verify its remote and worktree before updating:
-
-   ```bash
-   git -C /root/Codex-Remote-Contact status --short
-   git -C /root/Codex-Remote-Contact remote -v
-   ```
-
-   If there are local changes, do not overwrite them. Continue using the current checkout when safe, or ask before pulling/merging if an update is required. A clean checkout may be fast-forwarded with `git pull --ff-only`.
-
-4. Install dependencies and verify the checkout before starting it:
-
-   ```bash
-   npm --prefix /root/Codex-Remote-Contact install
-   npm --prefix /root/Codex-Remote-Contact run verify
-   ```
-
-5. Verify the single control entry:
+4. Identify the control surface before using it:
 
    ```bash
    command -v ncc
-   test -x /root/napcat-codex-control.sh
+   readlink -f "$(command -v ncc)" 2>/dev/null || true
+   ncc help
    ```
 
-   If `/root/napcat-codex-control.sh` exists but `ncc` is missing, create or repair only the wrapper:
+   A global `ncc` may be this machine's `/root/napcat-codex-control.sh` or the repository helper installed by the public installer. Never replace one with the other. Repository commands remain available as `npm run ncc -- <command>`. If the machine controller is missing, report it instead of inventing a replacement.
 
-   ```bash
-   ln -sf /root/napcat-codex-control.sh /usr/local/bin/ncc
-   chmod +x /root/napcat-codex-control.sh /usr/local/bin/ncc
-   ```
+5. On this configured machine, start with `ncc status` and `ncc all`. Pause only for QR scanning or a missing secret/approval, then continue with `ncc connect`.
 
-   If the control script itself is missing, stop and report that the local `ncc` controller is missing rather than inventing a replacement.
-
-6. Start and connect the stack:
-
-   ```bash
-   ncc status
-   ncc all
-   ```
-
-   If NapCat requires login, surface the QR URL or local WebUI details and pause only for the user's scan. After login, run `ncc connect` yourself.
-
-7. Verify the deployment end to end:
+6. Accept end to end:
 
    ```bash
    ncc status
    curl -fsS --max-time 3 http://127.0.0.1:3789/api/state | jq '{channels, maintenance}'
+   curl -fsS --max-time 3 http://127.0.0.1:3789/ -o /dev/null
    curl -fsS --max-time 3 http://127.0.0.1:3000/get_login_info | jq .
    ```
 
-   Report separately whether the Hub, NapCat login, OneBot, QQ channel, dashboard, and test suite succeeded. Never describe the deployment as complete while a required component is unavailable.
+   Report the test suite, Hub, dashboard, NapCat login, OneBot, QQ channel, and recent errors separately. A running process is not end-to-end proof.
 
-Do not install or start the old `~/.claude-to-im` daemon as part of this flow. This machine's QQ setup is NapCat + OneBot + `/root/Codex-Remote-Contact` controlled by `ncc`.
+Do not install or start the old `~/.claude-to-im` daemon. This machine uses NapCat + OneBot + `/root/Codex-Remote-Contact`.
 
 ## Command Mapping
 

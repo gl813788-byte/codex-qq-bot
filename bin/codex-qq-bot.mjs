@@ -14,7 +14,11 @@ const packageMetadata = JSON.parse(readFileSync(new URL("../package.json", impor
 const result = spawnSync("bash", [installer, ...process.argv.slice(2)], {
   env: {
     ...process.env,
-    CODEX_QQ_BOT_INSTALLER_VERSION: String(packageMetadata.version || "unknown")
+    CODEX_QQ_BOT_INSTALLER_VERSION: String(packageMetadata.version || "unknown"),
+    // The npm entry is the complete one-command path: source preparation is
+    // followed by environment dependencies, npm dependencies and verification.
+    // `--download-only` remains available for callers that only want the source.
+    CODEX_QQ_BOT_PREPARE_AFTER_INSTALL: process.env.CODEX_QQ_BOT_PREPARE_AFTER_INSTALL || "1"
   },
   stdio: "inherit"
 });

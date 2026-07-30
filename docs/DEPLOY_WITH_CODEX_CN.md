@@ -30,7 +30,7 @@ npx -y "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"
 curl -fsSL https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
 ```
 
-命令先通过 `npm view` 在线取得 registry 当前精确版本，再让 npx/pnpm 执行这个不可变版本，避免 `_npx` 仍启动旧包。该中文引导器每次从 GitHub API 刷新仓库默认分支及其最新提交，断点续传该提交对应的源码 ZIP，校验 ZIP 完整性与目录结构，再把项目放到 `/root/Codex-QQ-Bot` 或 `~/Codex-QQ-Bot`，不再等待正式 Release；已存在的旧版 `Codex-Remote-Contact` 目录继续复用。同一提交复用已完成阶段；损坏下载会隔离并完整重下，解压使用干净临时目录。以前由安装器下载的无 Git 项目会保留 `data`、`runtime`、本地配置和额外文件后升级，旧目录完整保存到安装缓存的 `backups/`；Git 工作区、陌生非空目录和其他同名全局 `ncc` 都不会被覆盖。准备完成后会明确提醒运行 `ncc`，首次环境检测、依赖安装、`npm run verify` 和配置填写仍由仓库 `ncc` 状态机完成。`--check` 只解析源码提交信息，不下载或写入项目。
+npm/pnpm 入口会完成源码、环境、官方 Codex CLI、项目依赖和 `npm run verify`；raw `install.sh` 默认准备源码与 `ncc`，追加 `--prepare` 可走完整路径。两者都会保留已有数据与 Git 工作区，并在中断后从已校验阶段继续。平台决策、Termux 受管 PRoot、已有 PRoot、root 规则、NapCat 条件、参数与恢复方法统一放在[一键安装与环境方案](INSTALLATION_CN.md)。
 
 ## 已有源码时的中文入口
 
@@ -41,9 +41,7 @@ chmod +x 一键部署.command
 ./一键部署.command
 ```
 
-该入口会启动仓库版 `ncc`。首次运行时，`scripts/bootstrap-environment.sh` 会通过 brew、apt-get、dnf、yum 或 pacman 补齐基础命令，以校验过摘要的 Node.js 官方 v22 二进制满足 Node 20+，并安装 Codex CLI。apt-get/dnf Linux 还会默认调用 NapCat 官方 Rootless Shell 安装器补齐 LinuxQQ、NapCat、Xvfb 与运行库。随后安装项目依赖、执行完整验证和配置填写；成功后在 `config/local.env` 记录完成状态。首次流程会保留已有 `data/settings.json`、`config/local.env` 与不同的全局 `ncc`。QQ 扫码仍必须由用户本人完成。
-
-最外层 `install.sh` 不依赖 Node、Git 或 zsh，可使用 curl/wget，并会自动安装缺失的 unzip 与 SHA-256 工具。如果 ZIP 的核心脚本完整但中文入口缺失或被解压工具错误处理，它会自动重建 `一键部署.command`，而不是中止部署。
+该入口会启动仓库版 `ncc`，显示所选平台方案，补齐尚未完成的阶段，再进入配置向导。已有 `data/settings.json`、`config/local.env` 与不同的全局 `ncc` 都会保留。QQ 扫码仍必须由用户本人完成。
 
 ## 完整部署提示词
 
@@ -63,7 +61,7 @@ https://github.com/gl813788-byte/codex-qq-bot.git
 1. 检查系统/架构、可用磁盘与内存，以及 git、node、npm、zsh、curl、codex、jq、screen/launchctl（如果适用）、OneBot/NapCat 和 ncc。Node.js 必须为 20+。
 2. 为部署建立简短计划，然后直接执行。只有扫码、秘密值、系统提权、外部下载授权或会改变既有部署方案的选择才问我。
 3. 项目不存在时克隆到稳定目录。Linux root 默认 /root/Codex-QQ-Bot；普通用户默认使用 HOME 下的稳定目录；已有旧版 /root/Codex-Remote-Contact 时继续复用。项目存在时先检查 git status --short --branch、remote 和当前分支。禁止 reset --hard、clean、强制 checkout 或覆盖本地文件。
-4. 阅读 README、docs/DEPLOY_WITH_CODEX*、docs/ARCHITECTURE*、根 AGENTS.md 和适用的 skills/claude-to-im/SKILL.md。
+4. 阅读 README、docs/INSTALLATION*、docs/DEPLOY_WITH_CODEX*、docs/ARCHITECTURE*、根 AGENTS.md 和适用的 skills/claude-to-im/SKILL.md。
 5. 安装依赖并执行 npm run verify。测试或语法失败必须解释并修复；不得跳过。
 6. data/settings.json 缺失时才从 config/settings.example.json 创建。已有 JSON 只做字段级合并。不要提交 data、runtime、config/local.env 或任何 token。
 7. 需要时向我收集主人 QQ 号、群白名单、OneBot 地址和可选搜索 key。输出中对秘密值做掩码。
@@ -98,7 +96,7 @@ npm install
 npm run verify
 ```
 
-`npx`、`pnpm dlx` 和远程 `install.sh` 会解析默认分支当前最新提交，可恢复地取得该提交对应的源码 ZIP、校验、解压并在没有命令冲突时安装 `ncc` 入口，随后提示用户运行 `ncc`。首次部署状态机在仓库 `ncc` 内：它检查工具、创建缺失的本地文件、安装 npm 依赖并运行 `npm run verify`；发现无关全局 `ncc` 时会明确跳过覆盖。成功后 `ncc` 切换为常规控制菜单。
+`npx`、`pnpm dlx` 和远程 `install.sh` 会解析默认分支当前最新提交，可恢复地取得该提交对应的源码 ZIP、校验、解压并在没有命令冲突时安装 `ncc` 入口。npm/pnpm 默认继续运行环境、依赖和验证阶段；raw 安装器默认提示运行 `ncc`，也可用 `--prepare` 一次完成。依赖指纹有效时重试跳过 npm 安装；验证阶段中断则只重跑验证。发现无关全局 `ncc` 时会明确跳过覆盖。成功配置后 `ncc` 切换为常规控制菜单。
 
 ### 3. 配置 Hub
 

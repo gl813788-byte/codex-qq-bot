@@ -14,11 +14,26 @@ resolve_script_path() {
 
 SCRIPT_DIR="$(resolve_script_path "$0")"
 PROJECT_DIR="${GPT_QQ_BOT_HOME:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+ENVIRONMENT_DETECTOR="$PROJECT_DIR/scripts/install-environment.sh"
+TERMUX_PROOT_SCRIPT="$PROJECT_DIR/scripts/termux-proot.command"
+
+if [ -z "${CODEX_QQ_BOT_TERMUX_GUEST_ACTIVE:-}" ] &&
+  [ -f "$ENVIRONMENT_DETECTOR" ] &&
+  [ "$(bash "$ENVIRONMENT_DETECTOR" --platform)" = "termux" ]; then
+  [ -x "$TERMUX_PROOT_SCRIPT" ] || {
+    printf '[ncc] 错误：缺少 Termux PRoot 入口：%s\n' "$TERMUX_PROOT_SCRIPT" >&2
+    exit 1
+  }
+  exec bash "$TERMUX_PROOT_SCRIPT" "$@"
+fi
+
 export PATH="$HOME/.local/share/codex-qq-bot/node/bin:$HOME/.local/bin:$PATH"
 SETTINGS_FILE="$PROJECT_DIR/data/settings.json"
 LOCAL_ENV_FILE="$PROJECT_DIR/config/local.env"
 DEPLOY_SCRIPT="$PROJECT_DIR/scripts/deploy.command"
 SETUP_COMPLETE_KEY="CODEX_REMOTE_CONTACT_NCC_SETUP_COMPLETED"
+ENVIRONMENT_PREPARED_KEY="CODEX_REMOTE_CONTACT_NCC_ENVIRONMENT_PREPARED"
+ENVIRONMENT_SOURCE_KEY="CODEX_REMOTE_CONTACT_NCC_ENVIRONMENT_SOURCE"
 HUB_URL="${GPT_QQ_BOT_HUB_URL:-http://127.0.0.1:3789}"
 LOG_FILE="${CODEX_REMOTE_CONTACT_LOG_FILE:-$PROJECT_DIR/runtime/logs/hub.jsonl}"
 ONEBOT_API_BASE_DEFAULT="http://127.0.0.1:3000"
@@ -117,6 +132,56 @@ env_file_value() {
 
 mark_setup_state() {
   set_env_value "$SETUP_COMPLETE_KEY" "$1"
+}
+
+calculate_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@" | sha256sum | awk '{print $1}'
+  else
+    shasum -a 256 "$@" | shasum -a 256 | awk '{print $1}'
+  fi
+}
+
+dependency_fingerprint() {
+  local files=("$PROJECT_DIR/package.json")
+  [ -f "$PROJECT_DIR/package-lock.json" ] && files+=("$PROJECT_DIR/package-lock.json")
+  calculate_sha256 "${files[@]}"
+}
+
+current_source_id() {
+  local source_marker="$PROJECT_DIR/.codex-qq-bot-install-source"
+  local value=""
+  if [ -r "$source_marker" ]; then
+    value="$(sed -n 's/^archive_sha256=//p' "$source_marker" | head -n 1)"
+    [ -n "$value" ] && {
+      printf 'archive:%s:packages:%s\n' "$value" "$(dependency_fingerprint)"
+      return
+    }
+  fi
+  if command -v git >/dev/null 2>&1 && git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    value="$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || true)"
+    [ -n "$value" ] && {
+      printf 'git:%s:packages:%s\n' "$value" "$(dependency_fingerprint)"
+      return
+    }
+  fi
+  printf 'unmarked\n'
+}
+
+environment_is_prepared() {
+  local prepared=""
+  local prepared_source=""
+  prepared="$(env_file_value "$LOCAL_ENV_FILE" "$ENVIRONMENT_PREPARED_KEY")"
+  prepared_source="$(env_file_value "$LOCAL_ENV_FILE" "$ENVIRONMENT_SOURCE_KEY")"
+  [ "$prepared" = "1" ] || return 1
+  [ -n "$prepared_source" ] || return 1
+  [ "$prepared_source" = "$(current_source_id)" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  command -v npm >/dev/null 2>&1 || return 1
+  command -v codex >/dev/null 2>&1 || return 1
+  [ "$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf '0')" -ge 20 ] || return 1
+  [ -d "$PROJECT_DIR/node_modules" ] || return 1
+  (cd "$PROJECT_DIR" && npm ls --depth=0 --silent >/dev/null 2>&1) || return 1
 }
 
 setup_is_complete() {
@@ -554,9 +619,9 @@ first_run_wizard() {
 Codex QQ Bot 首次部署（ncc）
 
 这是当前安装第一次运行 ncc。接下来会：
-1) 检测系统并自动补齐下载、解压、Git、zsh、Node.js 20+、npm 和 Codex CLI
-2) 在受支持的 Linux 上自动安装 NapCat、LinuxQQ、OneBot 运行库
-3) 安装 npm 依赖并运行 npm run verify
+1) 识别系统、发行版、架构、真实/虚拟 root、WSL/容器/Termux，并选择专用安装方案
+2) 从未完成阶段继续补齐 Node.js 20+、Codex CLI、npm 依赖和项目验证
+3) 仅在受支持的原生 Linux 自动安装 NapCat；Termux/PRoot/WSL/容器复用外部 OneBot
 4) 填写 OneBot、主人 QQ、群白名单、助手名称和联网配置
 
 已有的 data/settings.json、config/local.env 和全局 ncc 不会被整份覆盖。
@@ -567,7 +632,9 @@ WELCOME
   fi
 
   mark_setup_state "0"
-  if [ "${NCC_ENVIRONMENT_PREPARED:-0}" != "1" ]; then
+  if [ "${NCC_ENVIRONMENT_PREPARED:-0}" = "1" ] || environment_is_prepared; then
+    log "npm 安装阶段已完成环境、项目依赖和 verify，直接继续配置向导。"
+  else
     [ -f "$DEPLOY_SCRIPT" ] || die "找不到首次部署脚本：$DEPLOY_SCRIPT"
     zsh "$DEPLOY_SCRIPT" --prepare-only
   fi
@@ -666,6 +733,7 @@ case "${1:-menu}" in
     cat <<EOF
 用法：ncc [menu|first-run|status|codex-login|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full]|branding|search-config|start|open|logs]
 首次直接运行 ncc：自动检测环境、安装依赖、验证并填写配置；完成后再运行为常规功能菜单。
+安装中断后重新运行同一个 ncc，会验证并复用已完成的源码、环境、npm 依赖阶段。
 日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
 项目目录：$PROJECT_DIR
 EOF

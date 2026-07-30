@@ -36,9 +36,9 @@ curl -fsSL https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/ins
 wget -qO- https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
 ```
 
-中文安装器每次都会刷新仓库默认分支的最新提交，再续传或下载该提交对应的源码 ZIP，检查压缩包完整性与目录结构后安装到稳定目录，无需等待 GitHub Release。最外层下载不要求 Node.js、npm、Git 或 zsh，并可在 `curl` 与 `wget` 之间自动选择；缺少解压或校验工具时会先通过系统包管理器补齐。若一个可识别的源码 ZIP 意外缺少 `一键部署.command`，安装器会根据核心部署脚本自动恢复中文入口并继续。同一提交会复用已完成阶段；损坏的下载缓存会被隔离并自动完整重下，解压总是在干净临时目录中完成。root 用户默认使用 `/root/Codex-QQ-Bot`，其他用户默认使用 `~/Codex-QQ-Bot`；已存在的旧版 `Codex-Remote-Contact` 目录会继续复用。准备完成后按提示运行 `ncc`，第一次执行环境自举、项目验证和配置向导，部署完成后再运行就是日常功能菜单。
+npm/pnpm 入口是完整安装路径：下载或升级源码后，识别当前环境，补齐 Node.js 20+ 与官方 Codex CLI，安装项目依赖并运行 `npm run verify`。curl/wget 入口不要求预装 Node、Git 或 zsh，完成后提供可用的 `ncc`；如希望立刻把依赖也装完，可追加 `--prepare`。源码、PRoot、Node/Codex、npm 和验证阶段都有校验与续跑标记，重新运行同一个命令会从第一个未完成阶段继续。Git 工作区、本地修改、运行数据和其他同名全局 `ncc` 都会保留。
 
-如果目标目录是以前由安装器下载的无 Git 项目，新版本会在暂存目录准备升级，保留 `data`、`runtime`、本地配置与额外文件，再切换到最新源码，并把升级前目录完整保存在安装缓存的 `backups/` 中；相同源码不会重复升级。目标是 Git 工作区时不会覆盖分支或本地修改；目录无法识别时也会拒绝覆盖。机器上已有其他同名全局 `ncc` 时不会覆盖，而会显示仓库入口。命令先用 `npm view` 取得 registry 当前精确版本，再让 npx 执行这个不可变版本，可避开旧的 `_npx` 可执行缓存。纯检查可在命令末尾添加 `--check`：它只解析当前默认分支的最新提交，不会下载或修改项目文件。Windows 请在 WSL 中执行。
+探测器覆盖 macOS、原生 Linux、WSL、容器、原生 Termux、已有 Termux PRoot、权限类型、架构和 libc。原生 Termux 的 Android 层只准备 `proot-distro`，Node、Codex、依赖、验证和日常 `ncc` 全部进入受管 Debian；已经位于 PRoot 时直接使用，不再嵌套。Termux/PRoot、WSL 和容器使用外部 OneBot，受支持的原生 apt-get/dnf glibc Linux 才会自动安装 NapCat。完整决策表、参数、缓存、root 规则和恢复方法见[一键安装与环境方案](docs/INSTALLATION_CN.md)。
 
 ## 也可以直接让 Codex 部署
 
@@ -55,7 +55,7 @@ https://github.com/gl813788-byte/codex-qq-bot.git
 请直接执行部署，不要只给我命令清单。按以下要求持续推进到可验证的最终状态：
 1. 先检查操作系统、CPU 架构、Git、Node.js、npm、zsh、curl、Codex CLI、现有 OneBot/NapCat 和现有 ncc；Node.js 必须为 20 或更高。
 2. 如果项目不存在，克隆到稳定目录；Linux root 环境默认用 /root/Codex-QQ-Bot，其他环境选合适的用户目录。如果已存在旧版 /root/Codex-Remote-Contact，继续复用而不要强制迁移。先检查 Git remote、分支和工作区，绝不覆盖本地改动、配置、data 或 runtime。
-3. 阅读仓库 README_CN.md、docs/DEPLOY_WITH_CODEX_CN.md、docs/ARCHITECTURE_CN.md，以及 skills/claude-to-im/SKILL.md（如果适用于当前环境）。
+3. 阅读仓库 README_CN.md、docs/INSTALLATION_CN.md、docs/DEPLOY_WITH_CODEX_CN.md、docs/ARCHITECTURE_CN.md，以及 skills/claude-to-im/SKILL.md（如果适用于当前环境）。
 4. 安装依赖并运行 npm run verify；任何失败都要定位并修复，不能跳过验证。
 5. 如果 data/settings.json 不存在，从 config/settings.example.json 创建；已有文件只做必要的合并，不重置。需要主人 QQ 号、群白名单、OneBot 地址或密钥时再向我询问，并避免在输出中泄露密钥。
 6. 检查当前 ncc 到底是仓库自带快捷配置器还是独立 NapCat 控制器，先运行帮助再使用，不能覆盖一个正在使用的同名控制脚本。仓库自带入口始终可用 npm run ncc -- <command> 调用。
@@ -76,18 +76,16 @@ chmod +x 一键部署.command
 ./一键部署.command
 ```
 
-该文件会进入仓库版 `ncc`，菜单和提示均为中文。第一次运行时，自举器会补齐证书、下载/解压工具、Git、zsh、screen、Node.js 20+、npm、Codex CLI 和项目依赖；Node.js 使用校验过 SHA-256 的官方 v22 二进制安装到用户隔离目录，避免旧发行版仓库装出过低版本。在 apt-get/dnf Linux（x64/arm64）上，默认还会调用 NapCat 官方安装器补齐 LinuxQQ、NapCat、Xvfb 和相关运行库；已有 NapCat/OneBot 会复用。随后运行 `npm run verify`，再引导填写主人 QQ、群白名单、OneBot 地址、助手名称与联网配置。已有 `data/settings.json` 和 `config/local.env` 会被保留，已存在的全局 `ncc` 也不会被覆盖。
-
-仓库不重新分发 QQ/NapCat 二进制，而是在受支持的 Linux 上从 NapCat 官方安装器和腾讯官方地址取得所需文件。首次 QQ 扫码仍需由你本人完成。macOS、Arch 或自定义 OneBot 环境会保留兼容 OneBot 配置入口；若要求 NapCat 必须自动安装，可设置 `CODEX_QQ_BOT_INSTALL_NAPCAT=required` 让不受支持的平台提前明确失败。
+该入口会进入仓库版 `ncc`，显示环境决策，补齐缺失依赖，运行 `npm run verify`，再引导填写主人 QQ、群白名单、OneBot 地址、助手名称与联网配置。已有 `data/settings.json`、`config/local.env` 和其他同名全局 `ncc` 都会保留。仓库不重新分发 QQ/NapCat 二进制，首次 QQ 扫码仍需由你本人完成。
 
 ## 你只需要准备什么
 
 | 项目 | 用途 |
 | --- | --- |
 | Codex | 负责部署、修改、排障和实际调用模型。可使用 Codex CLI、IDE 或桌面端打开项目。 |
-| Bash + 可用包管理器和管理员权限 | 启动自举；其余基础工具会自动安装。Windows 推荐使用 WSL。 |
+| Bash + 可用包管理器 | 启动自举；缺失系统包时使用真实 root、sudo/doas，原生 Termux 使用普通应用用户与 `pkg`。Windows 推荐使用 WSL。 |
 | Node.js 20+、zsh、Codex CLI | 一键部署会自动补齐，不需要预装。 |
-| QQ + OneBot 实现 | apt-get/dnf Linux 默认自动安装官方 NapCat/LinuxQQ；也可以复用兼容 OneBot。 |
+| QQ + OneBot 实现 | 受支持的原生 apt-get/dnf Linux 默认自动安装官方 NapCat/LinuxQQ；Termux/PRoot、WSL、容器等复用外部 OneBot。 |
 | 主人 QQ 号与群号 | 用于权限和群白名单；部署到相应步骤时再提供。 |
 | 约 3GB 可用内存 | 同时运行 QQ、OneBot、Hub 和 Codex 时建议保留。 |
 
@@ -201,6 +199,7 @@ npm run verify
 
 ## 文档导航
 
+- [一键安装与环境方案](docs/INSTALLATION_CN.md)
 - [让 Codex 部署](docs/DEPLOY_WITH_CODEX_CN.md)
 - [架构与目录职责](docs/ARCHITECTURE_CN.md)
 - [配置参考](docs/CONFIGURATION_CN.md)

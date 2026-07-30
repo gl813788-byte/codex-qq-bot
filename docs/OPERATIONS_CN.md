@@ -2,9 +2,7 @@
 
 简体中文 | [English](OPERATIONS.md)
 
-全新安装或更新安装器首选 `npx -y "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"`（或同样精确版本的 `pnpm dlx`），先在线取得 registry 精确版本再执行，避免 `_npx` 复用旧包；也可以让 Codex 按[部署指南](DEPLOY_WITH_CODEX_CN.md)执行并验收。本页用于部署后的日常运行与定位问题。
-
-公共安装器每次刷新默认分支的最新提交，同一提交复用有效缓存；损坏 ZIP 会隔离并重下，解压会从干净临时目录开始。它可使用 curl/wget，并在进入源码前补齐 unzip 与摘要工具；核心脚本完整但中文入口缺失时会自动重建。以前由安装器下载的无 Git 项目会在保留 `data`、`runtime`、本地配置和额外文件后切换到新源码，并在安装缓存 `backups/` 中留下完整旧目录；Git 工作区不会自动覆盖。在没有同名命令冲突时安装器会安装 `ncc` 入口，然后提醒运行 `ncc`。首次运行仓库版 `ncc` 会自动补齐基础工具、隔离的 Node.js 20+、Codex CLI、项目依赖，并在 apt-get/dnf Linux 上通过官方安装器补齐 NapCat/LinuxQQ 运行环境，之后运行验证和配置向导。
+本页从部署完成后开始。首次安装、平台选择、Termux/PRoot、root 规则和中断续跑统一见[一键安装与环境方案](INSTALLATION_CN.md)；需要 Codex 代为执行并验收时见[使用 Codex 部署](DEPLOY_WITH_CODEX_CN.md)。
 
 ```bash
 ./一键部署.command

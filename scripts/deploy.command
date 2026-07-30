@@ -2,6 +2,8 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+ENVIRONMENT_DETECTOR="$PROJECT_DIR/scripts/install-environment.sh"
+TERMUX_PROOT_SCRIPT="$PROJECT_DIR/scripts/termux-proot.command"
 NCC_SOURCE="$PROJECT_DIR/scripts/ncc.command"
 BOOTSTRAP_SCRIPT="$PROJECT_DIR/scripts/bootstrap-environment.sh"
 LOCAL_BIN="$HOME/.local/bin"
@@ -10,6 +12,16 @@ NCC_TARGET_SYSTEM="/usr/local/bin/ncc"
 SETTINGS_FILE="$PROJECT_DIR/data/settings.json"
 LOCAL_ENV_FILE="$PROJECT_DIR/config/local.env"
 SETUP_COMPLETE_KEY="CODEX_REMOTE_CONTACT_NCC_SETUP_COMPLETED"
+ENVIRONMENT_PREPARED_KEY="CODEX_REMOTE_CONTACT_NCC_ENVIRONMENT_PREPARED"
+ENVIRONMENT_SOURCE_KEY="CODEX_REMOTE_CONTACT_NCC_ENVIRONMENT_SOURCE"
+
+if [ -f "$ENVIRONMENT_DETECTOR" ] && [ "$(bash "$ENVIRONMENT_DETECTOR" --platform)" = "termux" ]; then
+  [ -x "$TERMUX_PROOT_SCRIPT" ] || {
+    printf '[deploy] 错误：缺少 Termux PRoot 入口：%s\n' "$TERMUX_PROOT_SCRIPT" >&2
+    exit 1
+  }
+  exec bash "$TERMUX_PROOT_SCRIPT" --prepare-only
+fi
 
 log() {
   printf '[deploy] %s\n' "$*"
@@ -164,6 +176,52 @@ write_local_env_defaults() {
   chmod 600 "$env_file"
 }
 
+set_local_env_value() {
+  local key="$1"
+  local value="$2"
+  mkdir -p "$(dirname "$LOCAL_ENV_FILE")"
+  touch "$LOCAL_ENV_FILE"
+  local tmp="$LOCAL_ENV_FILE.tmp.$$"
+  grep -v "^export ${key}=" "$LOCAL_ENV_FILE" > "$tmp" 2>/dev/null || true
+  printf 'export %s=%q\n' "$key" "$value" >> "$tmp"
+  mv "$tmp" "$LOCAL_ENV_FILE"
+  chmod 600 "$LOCAL_ENV_FILE"
+}
+
+calculate_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@" | sha256sum | awk '{print $1}'
+  else
+    shasum -a 256 "$@" | shasum -a 256 | awk '{print $1}'
+  fi
+}
+
+dependency_fingerprint() {
+  local files=("$PROJECT_DIR/package.json")
+  [ -f "$PROJECT_DIR/package-lock.json" ] && files+=("$PROJECT_DIR/package-lock.json")
+  calculate_sha256 "${files[@]}"
+}
+
+current_source_id() {
+  local source_marker="$PROJECT_DIR/.codex-qq-bot-install-source"
+  local value=""
+  if [ -r "$source_marker" ]; then
+    value="$(sed -n 's/^archive_sha256=//p' "$source_marker" | head -n 1)"
+    [ -n "$value" ] && {
+      printf 'archive:%s:packages:%s\n' "$value" "$(dependency_fingerprint)"
+      return
+    }
+  fi
+  if command -v git >/dev/null 2>&1 && git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    value="$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || true)"
+    [ -n "$value" ] && {
+      printf 'git:%s:packages:%s\n' "$value" "$(dependency_fingerprint)"
+      return
+    }
+  fi
+  printf 'packages:%s\n' "$(dependency_fingerprint)"
+}
+
 mark_fresh_setup_pending() {
   if [ -f "$SETTINGS_FILE" ] && [ -f "$LOCAL_ENV_FILE" ]; then
     return
@@ -178,14 +236,28 @@ mark_fresh_setup_pending() {
 
 ensure_npm_ready() {
   command -v npm >/dev/null 2>&1 || die "未找到 npm，无法安装项目依赖。"
-  log "安装 npm 项目依赖。"
-  if [ -f "$PROJECT_DIR/package-lock.json" ]; then
-    (cd "$PROJECT_DIR" && npm ci --no-audit --no-fund)
+  local fingerprint=""
+  local dependency_marker="$PROJECT_DIR/node_modules/.codex-qq-bot-dependencies"
+  fingerprint="$(dependency_fingerprint)"
+  if [ -f "$dependency_marker" ] &&
+    [ "$(sed -n '1p' "$dependency_marker")" = "$fingerprint" ] &&
+    (cd "$PROJECT_DIR" && npm ls --depth=0 --silent >/dev/null 2>&1); then
+    log "npm 依赖阶段已完成且校验有效，断点续装将跳过重复安装。"
   else
-    (cd "$PROJECT_DIR" && npm install --no-audit --no-fund --no-package-lock)
+    log "安装 npm 项目依赖；npm 下载缓存会在中断后继续复用。"
+    if [ -f "$PROJECT_DIR/package-lock.json" ]; then
+      (cd "$PROJECT_DIR" && npm ci --no-audit --no-fund)
+    else
+      (cd "$PROJECT_DIR" && npm install --no-audit --no-fund --no-package-lock)
+    fi
+    mkdir -p "$PROJECT_DIR/node_modules"
+    printf '%s\n' "$fingerprint" > "${dependency_marker}.tmp.$$"
+    mv "${dependency_marker}.tmp.$$" "$dependency_marker"
   fi
-  log "运行完整项目验证。"
+  log "运行完整项目验证；若这里中断，下次只重跑验证阶段。"
   (cd "$PROJECT_DIR" && npm run verify)
+  set_local_env_value "$ENVIRONMENT_PREPARED_KEY" "1"
+  set_local_env_value "$ENVIRONMENT_SOURCE_KEY" "$(current_source_id)"
 }
 
 install_ncc_shortcut() {

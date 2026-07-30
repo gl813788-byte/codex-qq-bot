@@ -12,6 +12,9 @@ const launcherPath = fileURLToPath(new URL("一键部署.command", new URL("..",
 const nccPath = fileURLToPath(new URL("scripts/ncc.command", new URL("..", import.meta.url)));
 const deployPath = fileURLToPath(new URL("scripts/deploy.command", new URL("..", import.meta.url)));
 const bootstrapPath = fileURLToPath(new URL("scripts/bootstrap-environment.sh", new URL("..", import.meta.url)));
+const environmentDetectorPath = fileURLToPath(new URL("scripts/install-environment.sh", new URL("..", import.meta.url)));
+const prepareEnvironmentPath = fileURLToPath(new URL("scripts/prepare-environment.sh", new URL("..", import.meta.url)));
+const termuxProotPath = fileURLToPath(new URL("scripts/termux-proot.command", new URL("..", import.meta.url)));
 const remoteInstallerPath = fileURLToPath(new URL("install.sh", new URL("..", import.meta.url)));
 const npmInstallerPath = fileURLToPath(new URL("bin/codex-qq-bot.mjs", new URL("..", import.meta.url)));
 const packagePath = fileURLToPath(new URL("package.json", new URL("..", import.meta.url)));
@@ -19,6 +22,9 @@ const packagePath = fileURLToPath(new URL("package.json", new URL("..", import.m
 test("Chinese one-click deployment entry is executable and has valid Bash syntax", async () => {
   await access(launcherPath, constants.X_OK);
   await access(bootstrapPath, constants.X_OK);
+  await access(environmentDetectorPath, constants.X_OK);
+  await access(prepareEnvironmentPath, constants.X_OK);
+  await access(termuxProotPath, constants.X_OK);
   const syntax = spawnSync("bash", ["-n", launcherPath], {
     cwd: projectDir,
     encoding: "utf8"
@@ -29,6 +35,13 @@ test("Chinese one-click deployment entry is executable and has valid Bash syntax
     encoding: "utf8"
   });
   assert.equal(bootstrapSyntax.status, 0, bootstrapSyntax.stderr);
+  for (const script of [environmentDetectorPath, prepareEnvironmentPath, termuxProotPath]) {
+    const result = spawnSync("bash", ["-n", script], {
+      cwd: projectDir,
+      encoding: "utf8"
+    });
+    assert.equal(result.status, 0, result.stderr);
+  }
 });
 
 test("fresh-machine bootstrap plans every required layer without mutating the host", () => {
@@ -51,6 +64,93 @@ test("fresh-machine bootstrap plans every required layer without mutating the ho
   assert.match(result.stdout, /Codex CLI/);
   assert.match(result.stdout, /NapCat 官方安装器/);
   assert.match(result.stdout, /LinuxQQ、NapCat 和运行库/);
+});
+
+test("environment bootstrap selects dedicated Termux, PRoot, WSL and musl plans", () => {
+  const runPlan = (overrides) => spawnSync("bash", [bootstrapPath, "--all"], {
+    cwd: projectDir,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      CODEX_QQ_BOT_BOOTSTRAP_DRY_RUN: "1",
+      CODEX_QQ_BOT_BOOTSTRAP_FORCE_NODE_INSTALL: "1",
+      CODEX_QQ_BOT_BOOTSTRAP_FORCE_NAPCAT_INSTALL: "1",
+      CODEX_QQ_BOT_BOOTSTRAP_FORCE_MISSING: "",
+      ...overrides
+    }
+  });
+
+  const termux = runPlan({
+    CODEX_QQ_BOT_BOOTSTRAP_PLATFORM: "termux",
+    CODEX_QQ_BOT_BOOTSTRAP_PACKAGE_MANAGER: "pkg",
+    CODEX_QQ_BOT_BOOTSTRAP_DISTRO_ID: "termux",
+    CODEX_QQ_BOT_BOOTSTRAP_LIBC: "bionic",
+    CODEX_QQ_BOT_BOOTSTRAP_ROOT_MODE: "termux-user"
+  });
+  assert.equal(termux.status, 0, termux.stderr);
+  assert.match(termux.stdout, /Android 原生 Termux/);
+  assert.match(termux.stdout, /proot-distro/);
+  assert.match(termux.stdout, /PRoot Debian/);
+  assert.match(termux.stdout, /managed-proot/);
+  assert.doesNotMatch(termux.stdout, /基础下载、解压和终端工具已齐全/);
+  assert.doesNotMatch(termux.stdout, /Node\.js 官方发行页/);
+
+  const proot = runPlan({
+    CODEX_QQ_BOT_BOOTSTRAP_PLATFORM: "termux-proot",
+    CODEX_QQ_BOT_BOOTSTRAP_PACKAGE_MANAGER: "apt-get",
+    CODEX_QQ_BOT_BOOTSTRAP_DISTRO_ID: "debian",
+    CODEX_QQ_BOT_BOOTSTRAP_LIBC: "glibc",
+    CODEX_QQ_BOT_BOOTSTRAP_ROOT_MODE: "virtual-root"
+  });
+  assert.equal(proot.status, 0, proot.stderr);
+  assert.match(proot.stdout, /Termux\/PRoot Linux 虚拟环境/);
+  assert.match(proot.stdout, /权限 virtual-root/);
+  assert.match(proot.stdout, /Node\.js 官方发行页/);
+  assert.match(proot.stderr, /Android\/Termux 不自动安装桌面 LinuxQQ\/NapCat/);
+
+  const wsl = runPlan({
+    CODEX_QQ_BOT_BOOTSTRAP_PLATFORM: "wsl",
+    CODEX_QQ_BOT_BOOTSTRAP_PACKAGE_MANAGER: "apt-get",
+    CODEX_QQ_BOT_BOOTSTRAP_DISTRO_ID: "ubuntu",
+    CODEX_QQ_BOT_BOOTSTRAP_LIBC: "glibc",
+    CODEX_QQ_BOT_BOOTSTRAP_ROOT_MODE: "sudo"
+  });
+  assert.equal(wsl.status, 0, wsl.stderr);
+  assert.match(wsl.stdout, /Windows WSL/);
+  assert.match(wsl.stderr, /WSL 不自动安装桌面 LinuxQQ\/NapCat/);
+
+  const alpine = runPlan({
+    CODEX_QQ_BOT_BOOTSTRAP_PLATFORM: "linux",
+    CODEX_QQ_BOT_BOOTSTRAP_PACKAGE_MANAGER: "apk",
+    CODEX_QQ_BOT_BOOTSTRAP_DISTRO_ID: "alpine",
+    CODEX_QQ_BOT_BOOTSTRAP_LIBC: "musl",
+    CODEX_QQ_BOT_BOOTSTRAP_ROOT_MODE: "root"
+  });
+  assert.equal(alpine.status, 0, alpine.stderr);
+  assert.match(alpine.stdout, /通过 apk 安装 nodejs 与 npm/);
+  assert.doesNotMatch(alpine.stdout, /Node\.js 官方发行页/);
+  assert.match(alpine.stderr, /不在 NapCat 官方 Shell 自动安装范围/);
+});
+
+test("Termux wrapper plans one reusable PRoot distro without nesting", () => {
+  const result = spawnSync("bash", [termuxProotPath, "--dry-run", "--prepare-only"], {
+    cwd: projectDir,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      CODEX_QQ_BOT_TERMUX_TEST_MODE: "1",
+      CODEX_QQ_BOT_TERMUX_FORCE_MISSING_PROOT: "1",
+      CODEX_QQ_BOT_TERMUX_DISTRO: "debian",
+      CODEX_QQ_BOT_PROJECT_DIR: projectDir
+    }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /pkg install -y proot-distro/);
+  assert.match(result.stdout, /proot-distro install debian/);
+  assert.match(result.stdout, /CODEX_QQ_BOT_BOOTSTRAP_PLATFORM=termux-proot/);
+  assert.match(result.stdout, /CODEX_QQ_BOT_TERMUX_GUEST_ACTIVE=1/);
+  assert.match(result.stdout, /CODEX_QQ_BOT_INSTALL_NAPCAT=skip/);
+  assert.match(result.stdout, /scripts\/prepare-environment\.sh/);
 });
 
 test("remote and npm installers expose a Chinese no-GitHub-web entry", async () => {
@@ -78,14 +178,96 @@ test("remote and npm installers expose a Chinese no-GitHub-web entry", async () 
 
   const packageMetadata = JSON.parse(await readFile(packagePath, "utf8"));
   assert.equal(packageMetadata.name, "codex-qq-bot");
-  assert.equal(packageMetadata.version, "1.1.8-1");
+  assert.equal(packageMetadata.version, "1.1.9");
   const installerSource = await readFile(remoteInstallerPath, "utf8");
+  const npmInstallerSource = await readFile(npmInstallerPath, "utf8");
   assert.match(installerSource, /\/root\/Codex-QQ-Bot/);
   assert.match(installerSource, /Codex-Remote-Contact/);
   assert.match(installerSource, /--continue-at -/);
   assert.match(installerSource, /command -v wget/);
   assert.match(installerSource, /源码 ZIP 缺少中文一键部署入口/);
   assert.match(installerSource, /下一步请运行/);
+  assert.match(installerSource, /CODEX_QQ_BOT_PREPARE_AFTER_INSTALL/);
+  assert.match(installerSource, /prepare_installed_project/);
+  assert.match(npmInstallerSource, /CODEX_QQ_BOT_PREPARE_AFTER_INSTALL/);
+  assert.match(npmInstallerSource, /"1"/);
+});
+
+test("a piped installer does not execute an unrelated detector from the current directory", async () => {
+  const home = await mkdtemp(join(tmpdir(), "codex-qq-bot-piped-installer-"));
+  try {
+    await mkdir(join(home, "scripts"), { recursive: true });
+    await writeFile(
+      join(home, "scripts", "install-environment.sh"),
+      "#!/usr/bin/env bash\ntouch \"$PWD/detector-ran\"\nprintf 'termux\\n'\n"
+    );
+    const archive = join(home, "local.zip");
+    await writeFile(archive, "");
+    const result = spawnSync("bash", ["-s", "--", "--check", "--archive", archive], {
+      cwd: home,
+      encoding: "utf8",
+      input: await readFile(remoteInstallerPath, "utf8"),
+      env: {
+        ...process.env,
+        CODEX_QQ_BOT_INSTALL_DIR: join(home, "target")
+      }
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /源码就位后会进行完整发行版\/root\/虚拟环境检测/);
+    await assert.rejects(access(join(home, "detector-ran")));
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("dependency preparation resumes after the npm stage and reruns verification only", async () => {
+  const home = await mkdtemp(join(tmpdir(), "codex-qq-bot-deploy-resume-"));
+  try {
+    const fixture = join(home, "project");
+    await mkdir(join(fixture, "scripts"), { recursive: true });
+    await mkdir(join(fixture, "modules"), { recursive: true });
+    await mkdir(join(fixture, "config"), { recursive: true });
+    await writeFile(join(fixture, "package.json"), JSON.stringify({
+      name: "resume-fixture",
+      version: "1.0.0",
+      scripts: {
+        verify: "node -e \"console.log('fixture verify')\""
+      }
+    }));
+    await writeFile(join(fixture, "config", "settings.example.json"), "{}\n");
+    await writeFile(join(fixture, "scripts", "bootstrap-environment.sh"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
+    await writeFile(join(fixture, "scripts", "ncc.command"), "#!/usr/bin/env zsh\nexit 0\n", { mode: 0o755 });
+    await writeFile(
+      join(fixture, "modules", "install-launchd-plist.command"),
+      "#!/usr/bin/env zsh\nexit 0\n",
+      { mode: 0o755 }
+    );
+    await writeFile(join(fixture, "scripts", "deploy.command"), await readFile(deployPath), { mode: 0o755 });
+
+    const first = spawnSync("zsh", [join(fixture, "scripts", "deploy.command"), "--prepare-only"], {
+      cwd: fixture,
+      encoding: "utf8",
+      env: { ...process.env, PATH: process.env.PATH }
+    });
+    assert.equal(first.status, 0, first.stderr);
+    assert.match(first.stdout, /安装 npm 项目依赖/);
+    assert.match(first.stdout, /fixture verify/);
+
+    const second = spawnSync("zsh", [join(fixture, "scripts", "deploy.command"), "--prepare-only"], {
+      cwd: fixture,
+      encoding: "utf8",
+      env: { ...process.env, PATH: process.env.PATH }
+    });
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(second.stdout, /npm 依赖阶段已完成且校验有效/);
+    assert.match(second.stdout, /若这里中断，下次只重跑验证阶段/);
+    assert.match(second.stdout, /fixture verify/);
+    const localEnv = await readFile(join(fixture, "config", "local.env"), "utf8");
+    assert.match(localEnv, /CODEX_REMOTE_CONTACT_NCC_ENVIRONMENT_PREPARED=1/);
+    assert.match(localEnv, /CODEX_REMOTE_CONTACT_NCC_ENVIRONMENT_SOURCE=/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test("remote installer repairs a missing Chinese launcher in an otherwise valid ZIP", async (t) => {
