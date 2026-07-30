@@ -30,7 +30,7 @@ Without Node.js, run:
 curl -fsSL https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
 ```
 
-The command first uses `npm view` to resolve the registry's exact current version and then asks npx/pnpm to execute that immutable version, bypassing a stale `_npx` executable cache. This Chinese bootstrap refreshes the repository default branch and exact latest commit through the GitHub API on every run, resumes that commit-pinned source ZIP download, validates the ZIP integrity and structure, and places the project in `/root/Codex-QQ-Bot` or `~/Codex-QQ-Bot`; it does not wait for a formal Release, and an existing legacy `Codex-Remote-Contact` directory is reused. Completed stages for the same commit are reused, damaged downloads are quarantined and fetched again, and extraction uses a clean temporary directory. A prior archive install without Git is upgraded while preserving `data`, `runtime`, local configuration, and extra files, with the complete old directory retained under the install cache's `backups/`; Git worktrees, unrelated non-empty directories, and different global `ncc` commands are not overwritten. After preparation it explicitly asks the user to run `ncc`, whose state machine performs environment checks, dependency installation, `npm run verify`, and guided configuration. `--check` resolves source metadata without downloading or writing project files.
+The npm/pnpm entry completes source, environment, official Codex CLI, project dependencies, and `npm run verify`; raw `install.sh` prepares source and `ncc`, or accepts `--prepare` for the complete path. Both preserve existing data and Git worktrees and resume from validated checkpoints after interruption. Platform decisions, Termux managed PRoot, existing-PRoot behavior, root rules, NapCat eligibility, flags, and recovery are centralized in [One-click installation and environment plans](INSTALLATION.md).
 
 ## Chinese entry for existing source
 
@@ -41,9 +41,7 @@ chmod +x 一键部署.command
 ./一键部署.command
 ```
 
-The launcher enters the repository `ncc`. On first run, `scripts/bootstrap-environment.sh` fills base commands through brew, apt-get, dnf, yum, or pacman, installs a checksum-verified official Node.js v22 binary when Node 20+ is absent, and installs Codex CLI. apt-get/dnf Linux also invokes NapCat's official rootless Shell installer by default to provide LinuxQQ, NapCat, Xvfb, and runtime libraries. It then installs project dependencies, runs full verification, and guides configuration. The flow preserves existing `data/settings.json`, `config/local.env`, and unrelated global `ncc` commands. The user must still complete the QQ QR scan.
-
-The outer `install.sh` does not require Node, Git, or zsh. It can use curl or wget and installs missing unzip/SHA-256 tooling. If a ZIP contains the core scripts but its Chinese launcher is absent or was mishandled by an extractor, the installer reconstructs `一键部署.command` instead of aborting.
+The launcher enters repository `ncc`, reports the selected platform plan, completes missing stages, and then guides configuration. Existing `data/settings.json`, `config/local.env`, and unrelated global `ncc` commands are preserved. The user must still complete the QQ QR scan.
 
 ## Full deployment prompt
 
@@ -63,7 +61,7 @@ Execution requirements:
 1. Inspect the OS/architecture, free disk and memory, git, node, npm, zsh, curl, codex, jq, screen/launchctl when applicable, OneBot/NapCat, and ncc. Require Node.js 20+.
 2. Make a short plan and execute it. Ask me only for a QR scan, secret values, elevated/system changes, external-download approval, or a choice that changes the existing deployment strategy.
 3. Clone into a stable path when absent. Use /root/Codex-QQ-Bot for a Linux root environment; otherwise choose a stable path under HOME; reuse an existing legacy /root/Codex-Remote-Contact installation. For an existing repository, inspect git status --short --branch, remotes, and the current branch first. Never use reset --hard, clean, forced checkout, or overwrite local files.
-4. Read the README, docs/DEPLOY_WITH_CODEX*, docs/ARCHITECTURE*, root AGENTS.md, and skills/claude-to-im/SKILL.md when applicable.
+4. Read the README, docs/INSTALLATION*, docs/DEPLOY_WITH_CODEX*, docs/ARCHITECTURE*, root AGENTS.md, and skills/claude-to-im/SKILL.md when applicable.
 5. Install dependencies and run npm run verify. Explain and fix syntax or test failures; do not skip verification.
 6. Create data/settings.json from config/settings.example.json only when missing. Merge an existing file at field level. Never commit data, runtime, config/local.env, or tokens.
 7. Ask for owner QQ ids, allowed groups, OneBot address, and optional search keys only when needed. Mask secrets in output.
@@ -90,7 +88,7 @@ npm install
 npm run verify
 ```
 
-The `npx`, `pnpm dlx`, and remote `install.sh` entries resolve the default branch's current head, resumably obtain its commit-pinned source ZIP, verify and extract it, and install an `ncc` entry only when no command conflict exists. They then tell the user to run `ncc`. The repository `ncc` owns the first-run state machine: it checks tools, creates missing local files, installs npm dependencies, runs `npm run verify`, and explicitly avoids replacing an unrelated global `ncc`. After success, `ncc` becomes the normal daily control menu.
+The `npx`, `pnpm dlx`, and remote `install.sh` entries resolve the default branch's current head, resumably obtain its commit-pinned source ZIP, verify and extract it, and install an `ncc` entry only when no command conflict exists. npm/pnpm proceeds through environment, dependencies, and verification; raw install defaults to a later `ncc` but accepts `--prepare`. A valid dependency fingerprint skips repeated npm installation, while an interrupted verification reruns only verification. An unrelated global `ncc` is preserved. After successful configuration, `ncc` becomes the normal daily control menu.
 
 ### 3. Configure the Hub
 

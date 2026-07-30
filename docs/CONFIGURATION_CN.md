@@ -118,13 +118,22 @@ npm run ncc -- setup
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `CODEX_QQ_BOT_INSTALL_NAPCAT` | `auto` | `auto` 在 apt-get/dnf Linux 自动安装，`required` 在不受支持平台提前失败，`skip` 复用外部 OneBot |
-| `CODEX_QQ_BOT_NODE_MAJOR` | `22` | 自动安装的 Node.js 官方主版本；最终必须满足 Node 20+ |
-| `CODEX_QQ_BOT_BOOTSTRAP_CACHE_DIR` | `~/.cache/codex-qq-bot/bootstrap` | Node/NapCat 自举下载缓存 |
+| `CODEX_QQ_BOT_INSTALL_DIR` | root 为 `/root/Codex-QQ-Bot`，其他用户为 `~/Codex-QQ-Bot` | 源码安装目录；已有旧版 `Codex-Remote-Contact` 会继续复用 |
+| `CODEX_QQ_BOT_INSTALL_STATE_DIR` | `<安装目录>.install-cache` | 源码阶段、损坏下载隔离和无 Git 升级备份 |
+| `CODEX_QQ_BOT_SOURCE_BRANCH` | 仓库默认分支 | 显式指定源码分支 |
+| `CODEX_QQ_BOT_NCC_BIN` | 第一个安全可写的 bin 目录 | 显式指定全局 `ncc` 包装器位置 |
+| `CODEX_QQ_BOT_INSTALL_NAPCAT` | `auto` | `auto` 只在受支持的原生 apt-get/dnf glibc Linux 自动安装；Termux/PRoot、WSL、容器、macOS 和其他平台复用外部 OneBot；`required` 在不支持时提前失败 |
+| `CODEX_QQ_BOT_NODE_MAJOR` | `22` | 兼容平台自动安装的 Node.js 官方主版本；原生 Termux 使用受管 PRoot，musl 使用发行版包；最终都必须满足 Node 20+ |
+| `CODEX_QQ_BOT_USER_PREFIX` | `~/.local` | Node/Codex 的用户隔离命令前缀 |
+| `CODEX_QQ_BOT_BOOTSTRAP_CACHE_DIR` | `~/.cache/codex-qq-bot/bootstrap` | Node/NapCat 自举下载与断点阶段缓存 |
 | `CODEX_QQ_BOT_MANAGED_NODE_HOME` | `~/.local/share/codex-qq-bot/node` | 项目自管 Node.js 目录 |
 | `CODEX_QQ_BOT_NAPCAT_HOME` | `~/Napcat` | NapCat 官方 Rootless Shell 安装目录 |
+| `CODEX_QQ_BOT_TERMUX_DISTRO` | `debian` | 原生 Termux 自动安装/复用的 PRoot 发行版；已经位于 PRoot 时不会嵌套 |
+| `CODEX_QQ_BOT_TERMUX_GUEST_PROJECT_DIR` | `/opt/codex-qq-bot` | 项目在受管 PRoot 中的绑定路径，真实文件仍保存在 Termux 用户目录 |
+| `CODEX_QQ_BOT_TERMUX_STATE_DIR` | `~/.local/state/codex-qq-bot` | 受管 PRoot 准备状态 |
+| `CODEX_QQ_BOT_PREPARE_AFTER_INSTALL` | npm 入口为 `1`，raw `install.sh` 为 `0` | 源码就位后是否继续完成平台依赖、Codex、npm 依赖与 `verify`；命令行 `--prepare` / `--download-only` 可覆盖 |
 
-`--dry-run` 可在不修改机器的情况下查看冷启动安装计划；`--check` 只报告当前环境。测试专用的 `CODEX_QQ_BOT_BOOTSTRAP_FORCE_*` 变量不属于用户配置接口。
+具体行为与决策矩阵见[一键安装与环境方案](INSTALLATION_CN.md)。测试专用的 `CODEX_QQ_BOT_BOOTSTRAP_FORCE_*` 变量不属于用户配置接口。
 
 ## 核心环境变量
 

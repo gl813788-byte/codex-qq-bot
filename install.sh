@@ -2,6 +2,11 @@
 
 set -Eeuo pipefail
 
+INSTALLER_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+  INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+fi
+ENVIRONMENT_DETECTOR="${INSTALLER_DIR:+$INSTALLER_DIR/scripts/install-environment.sh}"
 REPOSITORY="${CODEX_QQ_BOT_REPOSITORY:-gl813788-byte/codex-qq-bot}"
 REPOSITORY_API_URL="${CODEX_QQ_BOT_REPOSITORY_API_URL:-https://api.github.com/repos/${REPOSITORY}}"
 COMMIT_API_URL="${CODEX_QQ_BOT_COMMIT_API_URL:-}"
@@ -15,6 +20,7 @@ STOP_AFTER="${CODEX_QQ_BOT_INSTALL_STOP_AFTER:-}"
 INSTALLER_VERSION="${CODEX_QQ_BOT_INSTALLER_VERSION:-remote}"
 CHECK_ONLY=0
 LAUNCH_AFTER=0
+PREPARE_AFTER="${CODEX_QQ_BOT_PREPARE_AFTER_INSTALL:-0}"
 CHECK_WORK_DIR=""
 NCC_READY=0
 EXISTING_INSTALL=0
@@ -37,6 +43,8 @@ usage() {
   cat <<'EOF'
 Codex QQ Bot 中文安装器
 
+不需要打开 GitHub 网页；中文首次部署、依赖准备和断点续装都在当前终端完成。
+
 推荐命令：
   npx -y "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"
   pnpm dlx "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"
@@ -47,12 +55,15 @@ Codex QQ Bot 中文安装器
 安装器每次都会刷新 GitHub 默认分支的最新提交并下载对应源码 ZIP，不必等待 Release。
 同一提交会复用已完成的下载和校验；损坏缓存会隔离后完整重下，解压始终在干净临时目录完成。
 由本安装器下载的旧项目会保留 data、runtime、本地配置和额外文件后升级，并留下完整回滚备份；
-Git 工作区不会被覆盖。下载准备完成后，请运行 ncc 继续中文首次部署；整个过程不需要打开 GitHub 网页。
+Git 工作区不会被覆盖。npm 包入口还会继续完成平台依赖、Node/Codex、npm 依赖与 verify；
+原生 Termux 会使用受管 PRoot Debian，已有 PRoot/WSL/容器会采用各自方案。整个过程支持按阶段续跑。
 
 选项：
   --check                 只检查最新版本和下载地址，不安装
   --install-dir <目录>    指定项目安装目录
   --archive <ZIP>         从本地 ZIP 安装，适合离线或测试
+  --prepare               源码安装后继续完成环境、npm 依赖和 verify
+  --download-only         只准备/升级源码，不继续安装运行依赖
   --launch                准备完成后立即进入 ncc（默认只提示下一步）
   --no-launch             兼容旧命令；与当前默认行为相同
   -h, --help              显示本帮助
@@ -62,6 +73,7 @@ Git 工作区不会被覆盖。下载准备完成后，请运行 ncc 继续中�
   CODEX_QQ_BOT_INSTALL_STATE_DIR  断点续装缓存目录
   CODEX_QQ_BOT_NCC_BIN            自定义 ncc 入口路径
   CODEX_QQ_BOT_SOURCE_BRANCH      指定源码分支；默认读取仓库默认分支
+  CODEX_QQ_BOT_TERMUX_DISTRO      原生 Termux 使用的 PRoot 发行版（默认 debian）
 EOF
 }
 
@@ -81,6 +93,14 @@ while [ "$#" -gt 0 ]; do
       ARCHIVE_FILE="$2"
       shift 2
       ;;
+    --prepare)
+      PREPARE_AFTER=1
+      shift
+      ;;
+    --download-only)
+      PREPARE_AFTER=0
+      shift
+      ;;
     --launch)
       LAUNCH_AFTER=1
       shift
@@ -98,6 +118,45 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+detect_installer_platform() {
+  if [ -n "$ENVIRONMENT_DETECTOR" ] && [ -f "$ENVIRONMENT_DETECTOR" ]; then
+    bash "$ENVIRONMENT_DETECTOR" --platform
+    return
+  fi
+  if [ -n "${TERMUX_VERSION:-}" ] || [ -n "${TERMUX_APP__APP_VERSION_NAME:-}" ]; then
+    printf 'termux\n'
+    return
+  fi
+  case "${PREFIX:-}" in
+    /data/data/*com.termux*/files/usr|/data/user/*/*com.termux*/files/usr)
+      printf 'termux\n'
+      return
+      ;;
+  esac
+  local kernel_text=""
+  kernel_text="$(cat /proc/sys/kernel/osrelease /proc/version 2>/dev/null || true)"
+  if { [ -d /data/data/com.termux/files/usr ] || [ -d /data/user/0/com.termux/files/usr ]; } &&
+    [ -r /etc/os-release ]; then
+    printf 'termux-proot\n'
+  elif [ -n "${WSL_DISTRO_NAME:-}" ] || [[ "$kernel_text" == *Microsoft* ]] || [[ "$kernel_text" == *microsoft* ]]; then
+    printf 'wsl\n'
+  elif [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then
+    printf 'container\n'
+  else
+    case "$(uname -s 2>/dev/null || true)" in
+      Darwin) printf 'macos\n' ;;
+      Linux) printf 'linux\n' ;;
+      Android) printf 'android\n' ;;
+      *) printf 'unknown\n' ;;
+    esac
+  fi
+}
+
+INSTALL_PLATFORM="$(detect_installer_platform)"
+if [ "$CHECK_ONLY" != "1" ] && [ "$INSTALL_PLATFORM" = "termux" ] && [ "$(id -u)" -eq 0 ]; then
+  die "检测到 Android 真 root。请退出 su/root，回到普通 Termux 用户后重新运行；PRoot 会在普通用户下提供隔离的虚拟 root。"
+fi
 
 if [ -z "$INSTALL_DIR" ]; then
   if [ "$(id -u)" -eq 0 ]; then
@@ -130,6 +189,8 @@ run_privileged() {
     "$@"
   elif command -v sudo >/dev/null 2>&1; then
     sudo "$@"
+  elif command -v doas >/dev/null 2>&1; then
+    doas "$@"
   else
     return 1
   fi
@@ -137,7 +198,9 @@ run_privileged() {
 
 install_system_package() {
   local package="$1"
-  if command -v brew >/dev/null 2>&1; then
+  if [ "$INSTALL_PLATFORM" = "termux" ] && command -v pkg >/dev/null 2>&1; then
+    pkg install -y "$package"
+  elif command -v brew >/dev/null 2>&1; then
     brew install "$package"
   elif command -v apt-get >/dev/null 2>&1; then
     run_privileged apt-get update && run_privileged apt-get install -y "$package"
@@ -145,8 +208,12 @@ install_system_package() {
     run_privileged dnf install -y "$package"
   elif command -v yum >/dev/null 2>&1; then
     run_privileged yum install -y "$package"
+  elif command -v apk >/dev/null 2>&1; then
+    run_privileged apk add --no-cache "$package"
   elif command -v pacman >/dev/null 2>&1; then
     run_privileged pacman -Sy --needed --noconfirm "$package"
+  elif command -v zypper >/dev/null 2>&1; then
+    run_privileged zypper --non-interactive install -y "$package"
   else
     return 1
   fi
@@ -570,11 +637,15 @@ wrapper_matches_project() {
 write_ncc_wrapper() {
   local destination="$1"
   local wrapper_tmp="$STATE_ROOT/ncc-wrapper"
+  local entry_script="$INSTALL_DIR/一键部署.command"
+  if [ "$INSTALL_PLATFORM" = "termux" ] && [ -f "$INSTALL_DIR/scripts/termux-proot.command" ]; then
+    entry_script="$INSTALL_DIR/scripts/termux-proot.command"
+  fi
   mkdir -p "$STATE_ROOT"
   {
     printf '#!/usr/bin/env bash\n'
     printf '# CODEX_QQ_BOT_NCC=%s\n' "$INSTALL_DIR"
-    printf 'exec bash %q "$@"\n' "$INSTALL_DIR/一键部署.command"
+    printf 'exec bash %q "$@"\n' "$entry_script"
   } > "$wrapper_tmp"
   chmod 755 "$wrapper_tmp"
 
@@ -594,7 +665,14 @@ write_ncc_wrapper() {
 }
 
 install_ncc_entry() {
-  chmod +x "$INSTALL_DIR/一键部署.command" "$INSTALL_DIR/scripts/ncc.command" "$INSTALL_DIR/scripts/deploy.command" 2>/dev/null || true
+  chmod +x \
+    "$INSTALL_DIR/一键部署.command" \
+    "$INSTALL_DIR/scripts/ncc.command" \
+    "$INSTALL_DIR/scripts/deploy.command" \
+    "$INSTALL_DIR/scripts/bootstrap-environment.sh" \
+    "$INSTALL_DIR/scripts/install-environment.sh" \
+    "$INSTALL_DIR/scripts/prepare-environment.sh" \
+    "$INSTALL_DIR/scripts/termux-proot.command" 2>/dev/null || true
 
   if [ -n "$NCC_BIN_OVERRIDE" ]; then
     write_ncc_wrapper "$NCC_BIN_OVERRIDE" || die "无法写入指定的 ncc 入口：$NCC_BIN_OVERRIDE"
@@ -646,11 +724,37 @@ install_ncc_entry() {
   warn "无法安装 ncc 快捷入口，请使用：$INSTALL_DIR/一键部署.command"
 }
 
+prepare_installed_project() {
+  [ "$PREPARE_AFTER" = "1" ] || return 0
+  log "继续环境与项目依赖阶段；已完成的阶段会先校验再跳过。"
+  if [ "$INSTALL_PLATFORM" = "termux" ]; then
+    [ -x "$INSTALL_DIR/scripts/termux-proot.command" ] ||
+      die "源码缺少 Termux PRoot 安装入口，无法完成 Android 专用准备。"
+    bash "$INSTALL_DIR/scripts/termux-proot.command" --prepare-only
+  elif [ -x "$INSTALL_DIR/scripts/prepare-environment.sh" ]; then
+    bash "$INSTALL_DIR/scripts/prepare-environment.sh"
+  else
+    [ -x "$INSTALL_DIR/scripts/bootstrap-environment.sh" ] ||
+      die "源码缺少环境自举器，无法继续依赖安装。"
+    bash "$INSTALL_DIR/scripts/bootstrap-environment.sh" --base-only
+    command -v zsh >/dev/null 2>&1 || die "基础环境准备后仍找不到 zsh。"
+    zsh "$INSTALL_DIR/scripts/deploy.command" --prepare-only
+  fi
+  log "平台依赖、Node.js、Codex CLI、npm 依赖和 npm run verify 已完成。"
+}
+
 print_next_step() {
   log "项目${INSTALL_ACTION}、校验和准备已经完成。"
   if [ "$NCC_READY" = "1" ]; then
     printf '\n下一步请运行：\n\n  ncc\n\n'
-    printf '首次运行会检测环境、安装依赖并引导填写配置；中断后再次运行 ncc 即可继续。\n'
+    if [ "$PREPARE_AFTER" = "1" ]; then
+      printf 'npm 安装阶段已完成环境依赖和项目验证；首次运行 ncc 会直接继续登录/QQ 配置。\n'
+    else
+      printf '首次运行会按当前系统继续安装依赖并引导填写配置；中断后再次运行 ncc 即可续跑。\n'
+    fi
+    if [ "$INSTALL_PLATFORM" = "termux" ]; then
+      printf '已为原生 Termux 配置 PRoot 入口；ncc 会自动进入 %s，QQ 使用外部 OneBot。\n' "${CODEX_QQ_BOT_TERMUX_DISTRO:-debian}"
+    fi
   else
     printf '\n当前机器已有其他同名 ncc，因此没有覆盖它。请运行：\n\n  "%s"\n\n' "$INSTALL_DIR/一键部署.command"
   fi
@@ -667,6 +771,12 @@ launch_ncc_if_requested() {
 }
 
 log "安装器版本：${INSTALLER_VERSION}。无需打开 GitHub 网页；安装器支持中断后从已完成阶段继续。"
+if [ -n "$ENVIRONMENT_DETECTOR" ] && [ -f "$ENVIRONMENT_DETECTOR" ]; then
+  log "安装环境识别结果："
+  bash "$ENVIRONMENT_DETECTOR" --report
+else
+  log "安装环境：$INSTALL_PLATFORM（源码就位后会进行完整发行版/root/虚拟环境检测）。"
+fi
 
 if [ "$CHECK_ONLY" = "1" ]; then
   if [ -n "$ARCHIVE_FILE" ]; then
@@ -694,6 +804,7 @@ if existing_project_is_valid; then
     warn "目标目录是 Git 工作区，安装器不会覆盖分支或本地改动；请在该仓库中使用安全的 Git 升级流程。"
     INSTALL_ACTION="检查"
     install_ncc_entry
+    prepare_installed_project
     print_next_step
     launch_ncc_if_requested
     exit 0
@@ -793,6 +904,7 @@ if [ "$EXISTING_INSTALL" = "1" ] && installed_source_matches "$archive_sha256"; 
   log "发现已有项目，且安装源码与最新版本一致；无需重复解压或覆盖。"
   INSTALL_ACTION="检查"
   install_ncc_entry
+  prepare_installed_project
   print_next_step
   launch_ncc_if_requested
   exit 0
@@ -832,5 +944,6 @@ else
 fi
 maybe_stop_after install
 install_ncc_entry
+prepare_installed_project
 print_next_step
 launch_ncc_if_requested

@@ -2,9 +2,7 @@
 
 [简体中文](OPERATIONS_CN.md) | English
 
-For a fresh install or installer update, prefer `npx -y "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"` (or the same exact-version pattern with `pnpm dlx`) so npm resolves the registry version first instead of reusing an old `_npx` executable, or let Codex execute and validate the [deployment guide](DEPLOY_WITH_CODEX.md). This page covers routine operation after deployment.
-
-The public installer refreshes the latest commit on the repository's default branch every time and reuses only valid stages for the same commit. It can use curl or wget, installs missing unzip/checksum tools before source extraction, quarantines damaged ZIPs, and reconstructs a missing Chinese launcher when the core deployment scripts are valid. A prior archive install without Git is replaced with prepared new source while carrying forward `data`, `runtime`, local configuration, and extra files; the full old directory remains under the install cache's `backups/`, while Git worktrees are not overwritten. The first repository-`ncc` run fills base tools, isolated Node.js 20+, Codex CLI, and project dependencies; apt-get/dnf Linux also retrieves the NapCat/LinuxQQ runtime through NapCat's official installer. It then verifies and guides configuration. Later runs open the normal menu.
+This page starts after deployment. For installation, platform selection, Termux/PRoot, root rules, and interrupted-run recovery, use [One-click installation and environment plans](INSTALLATION.md). To have Codex execute and validate the work, use [Deploy with Codex](DEPLOY_WITH_CODEX.md).
 
 ```bash
 ./一键部署.command

@@ -36,9 +36,9 @@ curl -fsSL https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/ins
 wget -qO- https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
 ```
 
-The Chinese installer refreshes the repository default branch and exact latest commit on every run, resumes or downloads that commit's source ZIP, validates it, and installs it into a stable directory without waiting for a GitHub Release. The outer download does not require Node.js, npm, Git, or zsh, can use either `curl` or `wget`, and installs missing extraction/checksum tools through the host package manager. If an otherwise valid source ZIP unexpectedly lacks `一键部署.command`, the installer reconstructs that launcher from the core deployment scripts and continues. Completed stages for the same commit are reused; damaged cached downloads are quarantined and fetched again, and extraction always uses a clean temporary directory. The default is `/root/Codex-QQ-Bot` for root and `~/Codex-QQ-Bot` for other users; an existing legacy `Codex-Remote-Contact` directory is reused. When preparation finishes, run `ncc` as prompted: its first run bootstraps the environment, verifies the project, and guides configuration; later runs open the normal daily menu.
+The npm/pnpm entry is the complete path: it installs or upgrades source, detects the host, prepares Node.js 20+ and the official Codex CLI, installs project dependencies, and runs `npm run verify`. The raw curl/wget entry needs neither Node, Git, nor zsh and leaves a ready `ncc`; add `--prepare` when it should complete dependencies immediately. Every source, PRoot, Node/Codex, npm, and verification stage is validated and resumable, so repeating the same command continues from the first unfinished stage. Git worktrees, local changes, runtime data, and a different global `ncc` are preserved.
 
-A prior archive installation without Git is upgraded through a prepared replacement that carries forward `data`, `runtime`, local configuration, and extra files, then retains the complete pre-upgrade directory under the install cache's `backups/` directory. Identical source is not reinstalled. A Git worktree and an unrelated occupied directory are never overwritten, nor is a different existing global `ncc`; in that conflict case the repository launcher is printed instead. The command resolves the registry's exact current version with `npm view` before asking npx to execute that immutable version, bypassing a stale `_npx` executable cache. Add `--check` to the end for a read-only preflight that resolves the current default-branch commit without downloading or changing project files. On Windows, run the installer inside WSL.
+Detection covers macOS, native Linux, WSL, containers, native Termux, existing Termux PRoot guests, privilege mode, architecture, and libc. Native Termux runs only `proot-distro` on Android and puts Node, Codex, dependencies, verification, and daily `ncc` inside managed Debian; an existing PRoot is used directly and never nested. Termux/PRoot, WSL, and containers use an external OneBot, while supported native apt-get/dnf glibc Linux can install NapCat automatically. See [One-click installation and environment plans](docs/INSTALLATION.md) for the decision table, flags, caches, root rules, and recovery steps.
 
 ## Alternatively, let Codex deploy it
 
@@ -55,7 +55,7 @@ Goal: connect QQ / OneBot to the current Codex CLI login and start a locally acc
 Execute the deployment instead of only giving me a command list. Continue until the result is verifiable:
 1. Inspect the OS, CPU architecture, Git, Node.js, npm, zsh, curl, Codex CLI, any existing OneBot/NapCat installation, and any existing ncc command. Require Node.js 20 or newer.
 2. Clone into a stable directory when the project is absent. Use /root/Codex-QQ-Bot for a Linux root environment; otherwise choose an appropriate user directory. Reuse an existing legacy /root/Codex-Remote-Contact installation instead of forcing a migration. Inspect the remote, branch, and worktree first. Never overwrite local changes, configuration, data, or runtime state.
-3. Read README.md, docs/DEPLOY_WITH_CODEX.md, docs/ARCHITECTURE.md, and skills/claude-to-im/SKILL.md when that skill matches the environment.
+3. Read README.md, docs/INSTALLATION.md, docs/DEPLOY_WITH_CODEX.md, docs/ARCHITECTURE.md, and skills/claude-to-im/SKILL.md when that skill matches the environment.
 4. Install dependencies and run npm run verify. Diagnose and fix failures instead of skipping verification.
 5. Create data/settings.json from config/settings.example.json only when it is missing. Merge only necessary fields into an existing file. Ask me for owner QQ ids, allowed group ids, OneBot address, or secrets only when needed, and never print secrets back in full.
 6. Determine whether ncc is the repository's setup helper or a separate NapCat controller by running its help first. Do not replace a working command with another command of the same name. The repository helper is always available as npm run ncc -- <command>.
@@ -76,18 +76,16 @@ chmod +x 一键部署.command
 ./一键部署.command
 ```
 
-The launcher enters the repository `ncc`, whose menus and prompts are in Chinese. On the first run, the bootstrap installs certificates, download/extraction tools, Git, zsh, screen, Node.js 20+, npm, Codex CLI, and project dependencies. Node uses a SHA-256-verified official v22 binary in an isolated user directory, avoiding obsolete distribution packages. On apt-get/dnf Linux (x64/arm64), it also invokes the official NapCat installer for LinuxQQ, NapCat, Xvfb, and runtime libraries by default; existing NapCat/OneBot installations are reused. It then runs `npm run verify` and guides owner QQ, allowlist, OneBot, branding, and web-lookup configuration. Existing `data/settings.json`, `config/local.env`, and unrelated global `ncc` commands are preserved.
-
-The repository does not redistribute QQ/NapCat binaries; supported Linux hosts retrieve them through NapCat's official installer and Tencent's official download. The initial QQ QR scan still requires the user. macOS, Arch, and custom OneBot hosts retain the compatible manual OneBot path. Set `CODEX_QQ_BOT_INSTALL_NAPCAT=required` to fail early when mandatory automatic NapCat installation is unsupported.
+The launcher enters the repository `ncc`, reports its environment decision, prepares missing dependencies, runs `npm run verify`, and guides owner QQ, allowlist, OneBot, branding, and web-lookup configuration. Existing `data/settings.json`, `config/local.env`, and unrelated global `ncc` commands are preserved. The repository does not redistribute QQ/NapCat binaries, and the initial QQ QR scan still requires the user.
 
 ## What you need
 
 | Requirement | Purpose |
 | --- | --- |
 | Codex | Performs deployment, changes, diagnosis, and model work. Open the project with Codex CLI, the IDE extension, or the desktop app. |
-| Bash plus a supported package manager and administrator access | Starts bootstrap; remaining base tools are installed automatically. WSL is recommended on Windows. |
+| Bash plus a supported package manager | Starts bootstrap. Missing system packages use real root or sudo/doas; native Termux uses its normal app user and `pkg`. WSL is recommended on Windows. |
 | Node.js 20+, zsh, and Codex CLI | Installed automatically by one-click deployment. |
-| QQ plus a OneBot implementation | apt-get/dnf Linux installs official NapCat/LinuxQQ by default; compatible existing OneBot bridges are reused. |
+| QQ plus a OneBot implementation | Supported native apt-get/dnf Linux installs official NapCat/LinuxQQ by default; Termux/PRoot, WSL, and containers reuse an external OneBot. |
 | Owner QQ id and allowed group ids | Used for authority and group allowlisting; provide them when deployment reaches that step. |
 | About 3GB free memory | Recommended when QQ, OneBot, the Hub, and Codex run together. |
 
@@ -201,6 +199,7 @@ Run `npm run verify` for every behavioral change. Configuration, initial state, 
 
 ## Documentation
 
+- [One-click installation and environment plans](docs/INSTALLATION.md)
 - [Deploy with Codex](docs/DEPLOY_WITH_CODEX.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Configuration](docs/CONFIGURATION.md)

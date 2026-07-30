@@ -116,13 +116,22 @@ These variables control installation only; they are not Hub runtime configuratio
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `CODEX_QQ_BOT_INSTALL_NAPCAT` | `auto` | `auto` installs on apt-get/dnf Linux, `required` rejects unsupported hosts, and `skip` reuses an external OneBot |
-| `CODEX_QQ_BOT_NODE_MAJOR` | `22` | Official Node.js major installed automatically; the result must satisfy Node 20+ |
-| `CODEX_QQ_BOT_BOOTSTRAP_CACHE_DIR` | `~/.cache/codex-qq-bot/bootstrap` | Node/NapCat bootstrap download cache |
+| `CODEX_QQ_BOT_INSTALL_DIR` | `/root/Codex-QQ-Bot` for root, otherwise `~/Codex-QQ-Bot` | Source installation directory; an existing legacy `Codex-Remote-Contact` is reused |
+| `CODEX_QQ_BOT_INSTALL_STATE_DIR` | `<install-directory>.install-cache` | Source checkpoints, quarantined downloads, and archive-upgrade backups |
+| `CODEX_QQ_BOT_SOURCE_BRANCH` | Repository default branch | Explicit source branch override |
+| `CODEX_QQ_BOT_NCC_BIN` | First safe writable bin directory | Explicit global `ncc` wrapper destination |
+| `CODEX_QQ_BOT_INSTALL_NAPCAT` | `auto` | `auto` installs only on supported native apt-get/dnf glibc Linux; Termux/PRoot, WSL, containers, macOS, and other hosts reuse an external OneBot; `required` fails early when unsupported |
+| `CODEX_QQ_BOT_NODE_MAJOR` | `22` | Official Node.js major on compatible hosts; native Termux uses managed PRoot and musl uses distribution packages; every result must satisfy Node 20+ |
+| `CODEX_QQ_BOT_USER_PREFIX` | `~/.local` | User-isolated Node/Codex command prefix |
+| `CODEX_QQ_BOT_BOOTSTRAP_CACHE_DIR` | `~/.cache/codex-qq-bot/bootstrap` | Node/NapCat download and resumable-stage cache |
 | `CODEX_QQ_BOT_MANAGED_NODE_HOME` | `~/.local/share/codex-qq-bot/node` | Project-managed Node.js directory |
 | `CODEX_QQ_BOT_NAPCAT_HOME` | `~/Napcat` | NapCat official rootless Shell directory |
+| `CODEX_QQ_BOT_TERMUX_DISTRO` | `debian` | PRoot distribution installed/reused from native Termux; an existing PRoot guest is never nested |
+| `CODEX_QQ_BOT_TERMUX_GUEST_PROJECT_DIR` | `/opt/codex-qq-bot` | Bind path inside managed PRoot; real files remain under the Termux user's project directory |
+| `CODEX_QQ_BOT_TERMUX_STATE_DIR` | `~/.local/state/codex-qq-bot` | Managed PRoot preparation state |
+| `CODEX_QQ_BOT_PREPARE_AFTER_INSTALL` | `1` for npm, `0` for raw `install.sh` | Whether source installation continues through platform dependencies, Codex, npm dependencies, and `verify`; `--prepare` / `--download-only` override it |
 
-Use `--dry-run` to inspect the fresh-host plan without mutations and `--check` to report the current environment. Test-only `CODEX_QQ_BOT_BOOTSTRAP_FORCE_*` variables are not a user configuration interface.
+The behavior and decision matrix live in [One-click installation and environment plans](INSTALLATION.md). Test-only `CODEX_QQ_BOT_BOOTSTRAP_FORCE_*` variables are not a user configuration interface.
 
 ## Core environment
 
