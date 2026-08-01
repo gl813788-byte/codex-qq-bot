@@ -1,6 +1,17 @@
 const markerPattern = /\[\[qq_style_review:(\{[^\n]*?\})\]\]/g;
 const anyMarkerPattern = /\[\[qq_style_review:[\s\S]*?\]\]/g;
 
+export const qqStyleReviewOutputSchema = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "detail", "guidance"],
+  properties: {
+    summary: { type: "string" },
+    detail: { type: "string" },
+    guidance: { type: "array", items: { type: "string" } }
+  }
+});
+
 export function extractQqStyleReviewMarkers(value) {
   const reviews = [];
   const visibleText = String(value || "").replace(markerPattern, (_, json) => {

@@ -4,6 +4,8 @@ export const QQ_CODEX_SESSION_MODES = Object.freeze({
   AUTO: "auto"
 });
 
+export const QQ_CODEX_SESSION_PROTOCOL_VERSION = 2;
+
 const validModes = new Set(Object.values(QQ_CODEX_SESSION_MODES));
 const maxStoredThreads = 64;
 
@@ -43,7 +45,7 @@ export function normalizeQqCodexSessionSettings(value) {
 
 export function createEmptyQqCodexSessionStore() {
   return {
-    version: 1,
+    version: 2,
     updatedAt: null,
     threads: Object.create(null)
   };
@@ -59,7 +61,7 @@ export function normalizeQqCodexSessionStore(value) {
   const threads = Object.create(null);
   for (const entry of entries) threads[entry.scopeId] = entry;
   return {
-    version: 1,
+    version: 2,
     updatedAt: normalizeIso(source.updatedAt),
     threads
   };
@@ -115,6 +117,7 @@ export function upsertQqCodexSessionThread(store, {
   model,
   reasoningEffort,
   lastContextAt,
+  protocolVersion = QQ_CODEX_SESSION_PROTOCOL_VERSION,
   now = new Date().toISOString()
 } = {}) {
   const normalized = normalizeQqCodexSessionStore(store);
@@ -129,7 +132,8 @@ export function upsertQqCodexSessionThread(store, {
     updatedAt: normalizeIso(now) || new Date().toISOString(),
     lastContextAt: normalizeIso(lastContextAt) || previous?.lastContextAt || null,
     model: String(model || previous?.model || "").slice(0, 160),
-    reasoningEffort: String(reasoningEffort || previous?.reasoningEffort || "").slice(0, 40)
+    reasoningEffort: String(reasoningEffort || previous?.reasoningEffort || "").slice(0, 40),
+    protocolVersion: normalizeProtocolVersion(protocolVersion)
   };
   return pruneQqCodexSessionThreads(normalized);
 }
@@ -150,7 +154,7 @@ export function pruneQqCodexSessionThreads(store, limit = maxStoredThreads) {
   const threads = Object.create(null);
   for (const entry of entries) threads[entry.scopeId] = entry;
   return {
-    version: 1,
+    version: 2,
     updatedAt: new Date().toISOString(),
     threads
   };
@@ -168,8 +172,14 @@ function normalizeThreadRecord(scopeId, value) {
     updatedAt: normalizeIso(source.updatedAt) || normalizeIso(source.createdAt),
     lastContextAt: normalizeIso(source.lastContextAt),
     model: String(source.model || "").slice(0, 160),
-    reasoningEffort: String(source.reasoningEffort || "").slice(0, 40)
+    reasoningEffort: String(source.reasoningEffort || "").slice(0, 40),
+    protocolVersion: normalizeProtocolVersion(source.protocolVersion)
   };
+}
+
+function normalizeProtocolVersion(value) {
+  const version = Number(value);
+  return Number.isInteger(version) && version > 0 ? version : 1;
 }
 
 function countRecentEntries(entries, cutoffMs) {

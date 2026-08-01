@@ -94,6 +94,17 @@ export function createEnvironmentConfig(env = process.env) {
     codexCliPath: env.CODEX_CLI_PATH || "/Applications/Codex.app/Contents/Resources/codex",
     codexModel: env.CODEX_REMOTE_CONTACT_CODEX_MODEL || "gpt-5.4-mini",
     codexReasoningEffort: env.CODEX_REMOTE_CONTACT_REASONING_EFFORT || "low",
+    codexReasoningSummary: enumValue(
+      env.CODEX_REMOTE_CONTACT_REASONING_SUMMARY,
+      ["auto", "concise", "detailed", "none"],
+      "auto"
+    ),
+    codexPersonality: enumValue(
+      env.CODEX_REMOTE_CONTACT_CODEX_PERSONALITY,
+      ["none", "friendly", "pragmatic"],
+      "none"
+    ),
+    codexServiceTier: serviceTierValue(env.CODEX_REMOTE_CONTACT_CODEX_SERVICE_TIER),
     codexMaxConcurrency,
     codexMaxPending,
     codexQuotaCacheTtlMs,
@@ -229,6 +240,16 @@ export function createEnvironmentConfig(env = process.env) {
 
 function numberOrDefault(value, defaultValue) {
   return Number(value || defaultValue);
+}
+
+function enumValue(value, allowed, fallback) {
+  const normalized = String(value ?? fallback).trim().toLowerCase();
+  return allowed.includes(normalized) ? normalized : fallback;
+}
+
+function serviceTierValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(normalized) ? normalized : "";
 }
 
 function boundedInteger(value, { defaultValue, min, max }) {

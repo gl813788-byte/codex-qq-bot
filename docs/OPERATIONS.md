@@ -63,6 +63,8 @@ ncc connect
 
 `ncc all` starts NapCat and Hub. After the user scans QQ, Codex runs `ncc connect`. Do not mix arguments between the global and repository controllers.
 
+On this configured machine the global controller starts QQ from the stable `NAPCAT_WORK_DIR` (default `/root/.local/share/napcat`). Relative QQ cache databases therefore stay outside whichever repository or shell directory invoked `ncc`; an explicit environment override may select another persistent directory.
+
 Session mode can be managed from the QQ menu or `ncc`:
 
 ```bash
@@ -74,6 +76,26 @@ npm run ncc -- session-mode inherit GROUP_ID
 ```
 
 On supporting machine-specific controllers, use `ncc session` and `ncc session-mode ...`. Omitting scope changes the default; a group ID or `private:QQ_ID` changes an override. A running Hub persists through `/api/qq/session-mode`; offline control safely updates `data/settings.json` for the next start.
+
+Owners and Bot administrators can use cross-session operations directly in QQ:
+
+```text
+/跨会话 列表 [filter]
+/跨会话 查看 group:GROUP_ID 最近30
+/跨会话 发送 private:QQ_ID | message
+```
+
+The native Agent may also select a session focus for one turn; compatible history, memory, knowledge and QQ tools then operate on that target until focus changes or clears. Only Hub-known sessions resolve, ambiguous bare numbers are rejected, and a real send requires an explicit owner/administrator request.
+
+Only the owner manages administrators:
+
+```text
+/Bot管理员
+/Bot管理员 添加 QQ_ID
+/Bot管理员 删除 QQ_ID
+```
+
+Administrators receive the full menu and Agent but cannot change the administrator list. Their file requests are judged and refused when they delete important files, overwrite critical source/config/data/credentials, damage `.git`, dependencies or runtime state, or request another ambiguous unrecoverable destructive action.
 
 ## Manual AI task center
 
@@ -145,6 +167,8 @@ npm run ncc -- logs --errors --since 30m --summary
 npm run ncc -- logs --category interest --group GROUP_ID --tail 100
 npm run ncc -- logs --category search --verbose --tail 100
 npm run ncc -- logs --trace TRACE_ID --all
+npm run ncc -- logs --scope private:QQ_ID --operation session
+npm run ncc -- logs --operation agent.tool --slow 1000 --summary
 npm run ncc -- logs -f
 ```
 
@@ -153,9 +177,10 @@ Use `ncc help` for filters supported by the machine-specific controller. API exa
 ```bash
 curl -fsS 'http://127.0.0.1:3789/api/logs?limit=100&level=error,warn' | jq .
 curl -fsS 'http://127.0.0.1:3789/api/logs?category=interest&group=GROUP_ID' | jq .
+curl -fsS 'http://127.0.0.1:3789/api/logs?scope=private:QQ_ID&operation=session' | jq .
 ```
 
-Useful categories include `system`, `web`, `onebot`, `qq`, `codex`, `search`, `interest`, `learning`, `memory` and `lifecycle`. Start with a trace to follow one reply through routing, judging, search, Codex and delivery. Follow-up fusion uses the `qq` category and the same colored localized presentation for entry into the resettable five-second buffer, direct old-turn interruption and replacement, and replacement of an already-completed draft before delivery. Verbose details show trigger sources, raw and compacted counts, selected context, image count, interrupted/replacement turn ids, and a bounded preview. Lifecycle details also expose delivered and failed bubble counts; a separate QQ warning confirms when a failed receipt was retained for the next model turn. Locate these events with `--group`, `--trace`, or `--search fusion`.
+Useful categories include `system`, `web`, `onebot`, `qq`, `codex`, `search`, `interest`, `learning`, `memory` and `lifecycle`. New schema-v3 entries remain readable alongside old logs. Agent turns/tools, cross-session sends, friend/group additions, administrator changes and settings writes share operation/outcome, actor, source/target session, tool, duration and error-code fields; tool arguments and cross-session message bodies are omitted. Start with a trace, then narrow cross-session or tool work with `--scope` and `--operation`; summaries also count operations and outcomes. Follow-up fusion uses the `qq` category and the same colored localized presentation for entry into the resettable five-second buffer, direct old-turn interruption and replacement, and replacement of an already-completed draft before delivery. Native Agent commentary and plan updates are bounded debug diagnostics under `codex`; the removed text progress/budget protocol no longer creates separate QQ control rounds. Lifecycle details also expose delivered and failed bubble counts; a separate QQ warning confirms when a failed receipt was retained for the next model turn.
 
 The dashboard separates Overview, Channels, Intelligence, Memory, Live Logs and Settings instead of stacking every feature on one page. Channels only manages connections, allowlists and contacts. Intelligence displays and persistently controls the Bot enhancer, web lookup, proactive interest, model provider and judge tuning, with safe diagnostics for the selected provider key, search provider, safe-download mode, active generations and pending replies. Behavior state uses independent desktop columns so a tall persona card does not leave a large hole in the other column, then returns to a natural single-column order on narrow screens.
 
@@ -214,7 +239,7 @@ Do not pull directly over local changes; let Codex assess conflicts and update s
 | Proactive interest stays silent | Empty cycle, disabled/failed judge, low interest or stale result | Inspect `interest` logs, the selected provider credential/model, judge policy and group activity |
 | QQ images report `URL_PRIVATE_ADDRESS` and DNS returns `198.18/15` | Proxy software uses Fake-IP DNS and strict safe-download mode blocks the reserved address | Keep private-address protection and set `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE=proxy-compatible`, then restart only Hub; literal private IPs and other reserved ranges remain blocked |
 | An unrelated text reply logs `image download returned HTTP 400` | A persisted incidental context image kept an expired Tencent download URL | Current/quoted images remain eligible, but context-image collection now excludes references older than two hours or without a timestamp; confirm the running Hub has the current source |
-| Active friend-add logs an argument assertion or native code 20 | The installed QQ moved friend verification/submission to `AddBuddyService`, while the NapCat type declaration still describes the old BuddyService call | Confirm bridge health is v7 or newer and `/inspect-friend` reports `inspection_api: add-buddy-service`; if it reports `verification_message_required`, retry the command with `验证=...` |
+| Active friend-add produces no reply, an argument assertion, or `native_timeout` | An old bridge can wait forever on a QQ native call, or the installed QQ exposes a different native signature | Deploy bridge v8, then confirm `/health` reports `preferredFriendSubmitApi: buddy-service-uin`. UID/preflight failures are non-blocking; a stuck submission now returns HTTP 504 and names the native API. If preflight reports `verification_message_required`, retry with `验证=...` |
 | Web lookup fails | Credential, provider, network or timeout | Inspect maintenance provider attempts and `search` logs |
 | `ncc` rejects a documented command | Wrong same-name controller | Inspect `command -v ncc`, `readlink -f`, `ncc help`; use `npm run ncc --` for repository commands |
 | Dead screen socket | Previous abnormal exit | Confirm no live process, run `screen -wipe`, then restart |

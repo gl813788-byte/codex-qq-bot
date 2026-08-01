@@ -65,6 +65,41 @@ test("QQ social action logs expose safe diagnostic fields in Chinese", () => {
   });
 });
 
+test("Agent, cross-session, administrator, and persistence logs share unified Chinese fields", () => {
+  assert.equal(formatLogMessage("QQ native Agent tool completed"), "QQ 原生 Agent 工具调用完成");
+  assert.equal(formatLogMessage("QQ cross-session message completed"), "QQ 跨会话消息发送完成");
+  assert.equal(formatLogMessage("Settings persistence completed"), "配置持久化完成");
+  assert.deepEqual(localizeLogDetails({
+    operation: "agent.tool",
+    outcome: "success",
+    actorRole: "administrator",
+    actorUserId: "10001",
+    sourceScopeId: "20002",
+    targetScopeId: "private:30003",
+    targetType: "private",
+    toolNamespace: "qq_session",
+    toolName: "manage",
+    toolAction: "send",
+    toolRound: 2,
+    durationMs: 18,
+    errorCode: null
+  }), {
+    操作: "Agent 工具调用",
+    结果: "成功",
+    操作者角色: "Bot 管理员",
+    "操作者 QQ": "10001",
+    来源会话: "20002",
+    目标会话: "private:30003",
+    目标类型: "私聊",
+    工具命名空间: "qq_session",
+    工具名: "manage",
+    工具动作: "send",
+    工具轮次: 2,
+    耗时: 18,
+    错误代码: null
+  });
+});
+
 test("two-model proactive and complex review details are fully localized", () => {
   assert.deepEqual(localizeLogDetails({
     proactiveKind: "cold_group_chatter",

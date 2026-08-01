@@ -12,9 +12,24 @@ export function runCodexAppServerTurn({
   env,
   model,
   reasoningEffort,
+  reasoningSummary = null,
+  personality = null,
+  serviceTier = null,
   prompt,
   resumePrompt = null,
   imagePaths = [],
+  developerInstructions = null,
+  baseInstructions = null,
+  dynamicTools = [],
+  outputSchema = null,
+  config = null,
+  webSearchMode = null,
+  sandbox = "read-only",
+  sandboxPolicy = null,
+  permissions = null,
+  runtimeWorkspaceRoots = [],
+  approvalPolicy = "never",
+  experimentalApi = null,
   threadId: requestedThreadId = null,
   ephemeral = true,
   timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -27,6 +42,11 @@ export function runCodexAppServerTurn({
   onSpawn,
   onReady,
   onRestarted,
+  onDynamicToolCall,
+  onServerRequest,
+  onNotification,
+  onItem,
+  onProgress,
   onExit
 } = {}) {
   return new Promise((resolve, reject) => {
@@ -65,7 +85,9 @@ export function runCodexAppServerTurn({
     let deadlineRenewalCount = 0;
     const normalizedTimeoutMs = normalizePositiveInteger(timeoutMs, DEFAULT_TIMEOUT_MS);
     const pendingRequests = new Map();
+    const dynamicToolCalls = new Map();
     const agentMessages = [];
+    const completedItems = [];
     const supersededTurnIds = new Set();
 
     const notifyExit = () => {
@@ -154,6 +176,16 @@ export function runCodexAppServerTurn({
       });
     };
 
+    const respond = (id, result) => send({ id, result });
+
+    const respondError = (id, error) => send({
+      id,
+      error: {
+        code: Number.isInteger(error?.protocolCode) ? error.protocolCode : -32000,
+        message: String(error?.message || error || "Codex QQ Bot tool request failed")
+      }
+    });
+
     const recordAgentMessage = (item) => {
       if (item?.type !== "agentMessage" || typeof item.text !== "string") return;
       agentMessages.push({
@@ -172,7 +204,36 @@ export function runCodexAppServerTurn({
       return String(final?.text || "");
     };
 
+    const notifyObserver = (observer, value) => {
+      try {
+        observer?.(value);
+      } catch {
+        // Observers must not change the turn outcome.
+      }
+    };
+
     const handleNotification = (message) => {
+      notifyObserver(onNotification, message);
+      if (message.method === "item/started" || message.method === "item/completed") {
+        const item = message.params?.item;
+        if (message.method === "item/completed" && item) completedItems.push(item);
+        notifyObserver(onItem, {
+          method: message.method,
+          threadId: message.params?.threadId || threadId,
+          turnId: message.params?.turnId || turnId,
+          item
+        });
+        if (item?.type === "agentMessage" && item.phase === "commentary") {
+          notifyObserver(onProgress, { type: "commentary", text: String(item.text || ""), item });
+        }
+      }
+      if (message.method === "turn/plan/updated") {
+        notifyObserver(onProgress, {
+          type: "plan",
+          explanation: message.params?.explanation || "",
+          plan: Array.isArray(message.params?.plan) ? message.params.plan : []
+        });
+      }
       if (message.method === "item/completed") {
         recordAgentMessage(message.params?.item);
         return;
@@ -207,11 +268,64 @@ export function runCodexAppServerTurn({
         threadId: message.params?.threadId || threadId,
         turnId: completedTurn?.id || turnId,
         status,
-        resumed
+        resumed,
+        items: completedItems
       });
     };
 
+    const normalizeDynamicToolResult = (result) => {
+      if (result && typeof result === "object" && Array.isArray(result.contentItems)) {
+        return {
+          contentItems: result.contentItems,
+          success: result.success !== false
+        };
+      }
+      const text = typeof result === "string"
+        ? result
+        : JSON.stringify(result ?? { ok: true });
+      return {
+        contentItems: [{ type: "inputText", text }],
+        success: result?.ok !== false && result?.success !== false
+      };
+    };
+
+    const handleServerRequest = async (message) => {
+      try {
+        if (message.method === "item/tool/call") {
+          if (typeof onDynamicToolCall !== "function") {
+            throw createProtocolError(`No handler registered for dynamic tool ${message.params?.tool || "unknown"}`);
+          }
+          const callId = String(message.params?.callId || message.id);
+          let call = dynamicToolCalls.get(callId);
+          if (!call) {
+            call = Promise.resolve(onDynamicToolCall({
+              ...message.params,
+              threadId: message.params?.threadId || threadId,
+              turnId: message.params?.turnId || turnId
+            })).then(normalizeDynamicToolResult);
+            dynamicToolCalls.set(callId, call);
+          }
+          respond(message.id, await call);
+          return;
+        }
+        if (typeof onServerRequest === "function") {
+          const handled = await onServerRequest(message);
+          if (handled !== undefined) {
+            respond(message.id, handled);
+            return;
+          }
+        }
+        respond(message.id, defaultServerRequestResponse(message.method));
+      } catch (error) {
+        respondError(message.id, error);
+      }
+    };
+
     const handleProtocolMessage = (message) => {
+      if (message?.method && Object.hasOwn(message, "id")) {
+        void handleServerRequest(message);
+        return;
+      }
       if (message && Object.hasOwn(message, "id")) {
         const pending = pendingRequests.get(message.id);
         if (!pending) return;
@@ -345,13 +459,21 @@ export function runCodexAppServerTurn({
         interruptionCompleted = true;
         if (settled || !threadId) throw createTurnInactiveError();
         agentMessages.length = 0;
-        const nextTurn = await request("turn/start", {
+        const nextTurn = await request("turn/start", buildTurnStartParams({
           threadId,
           input: normalizeUserInput(input),
           cwd,
-          model: model || null,
-          effort: reasoningEffort || null
-        });
+          model,
+          reasoningEffort,
+          reasoningSummary,
+          personality,
+          serviceTier,
+          outputSchema,
+          sandboxPolicy,
+          permissions,
+          runtimeWorkspaceRoots,
+          approvalPolicy
+        }));
         turnId = nextTurn?.turn?.id || null;
         if (!turnId) throw createProtocolError("Codex app-server did not return a replacement turn id");
         turnActive = true;
@@ -444,7 +566,13 @@ export function runCodexAppServerTurn({
           clientInfo: {
             name: "codex_qq_bot",
             title: "Codex QQ Bot",
-            version: "1"
+            version: "2"
+          },
+          capabilities: {
+            experimentalApi: experimentalApi == null
+              ? Boolean(dynamicTools.length || permissions || runtimeWorkspaceRoots.length)
+              : Boolean(experimentalApi),
+            requestAttestation: false
           }
         });
         send({ method: "initialized", params: {} });
@@ -452,43 +580,70 @@ export function runCodexAppServerTurn({
         const existingThreadId = String(requestedThreadId || "").trim();
         if (existingThreadId) {
           try {
-            thread = await request("thread/resume", {
+            thread = await request("thread/resume", buildThreadParams({
               threadId: existingThreadId,
               cwd,
-              model: model || null,
-              approvalPolicy: "never",
-              sandbox: "read-only",
-              config: reasoningEffort ? { model_reasoning_effort: reasoningEffort } : null
-            });
+              model,
+              reasoningEffort,
+              developerInstructions,
+              baseInstructions,
+              dynamicTools,
+              config,
+              webSearchMode,
+              sandbox,
+              permissions,
+              runtimeWorkspaceRoots,
+              approvalPolicy,
+              personality,
+              serviceTier
+            }));
             resumed = true;
-          } catch {
+          } catch (error) {
+            if (!isStaleThreadProtocolError(error)) throw error;
             thread = null;
           }
         }
         if (!thread) {
-          thread = await request("thread/start", {
+          thread = await request("thread/start", buildThreadParams({
             cwd,
-            model: model || null,
-            approvalPolicy: "never",
-            sandbox: "read-only",
+            model,
+            reasoningEffort,
+            developerInstructions,
+            baseInstructions,
+            dynamicTools,
+            config,
+            webSearchMode,
+            sandbox,
+            permissions,
+            runtimeWorkspaceRoots,
+            approvalPolicy,
+            personality,
+            serviceTier,
             ephemeral: Boolean(ephemeral),
-            config: reasoningEffort ? { model_reasoning_effort: reasoningEffort } : null
-          });
+          }));
           resumed = false;
         }
         threadId = thread?.thread?.id || null;
         if (!threadId) throw createProtocolError("Codex app-server did not return a thread id");
         const turnInputText = resumed && resumePrompt != null ? String(resumePrompt) : String(prompt || "");
-        const turn = await request("turn/start", {
+        const turn = await request("turn/start", buildTurnStartParams({
           threadId,
           input: normalizeUserInput([
             { type: "text", text: turnInputText },
             ...normalizeImagePaths(imagePaths)
           ]),
           cwd,
-          model: model || null,
-          effort: reasoningEffort || null
-        });
+          model,
+          reasoningEffort,
+          reasoningSummary,
+          personality,
+          serviceTier,
+          outputSchema,
+          sandboxPolicy,
+          permissions,
+          runtimeWorkspaceRoots,
+          approvalPolicy
+        }));
         turnId = turn?.turn?.id || null;
         if (!turnId) throw createProtocolError("Codex app-server did not return a turn id");
         turnActive = true;
@@ -502,6 +657,101 @@ export function runCodexAppServerTurn({
       }
     })();
   });
+}
+
+function buildThreadParams({
+  threadId,
+  cwd,
+  model,
+  reasoningEffort,
+  developerInstructions,
+  baseInstructions,
+  dynamicTools,
+  config,
+  webSearchMode,
+  sandbox,
+  permissions,
+  runtimeWorkspaceRoots,
+  approvalPolicy,
+  personality,
+  serviceTier,
+  ephemeral
+}) {
+  const mergedConfig = {
+    ...(config && typeof config === "object" ? config : {}),
+    ...(reasoningEffort ? { model_reasoning_effort: reasoningEffort } : {}),
+    ...(webSearchMode ? { web_search: webSearchMode } : {})
+  };
+  return compactObject({
+    threadId,
+    cwd,
+    model: model || null,
+    serviceTier: serviceTier || null,
+    approvalPolicy: approvalPolicy || "never",
+    ...(permissions ? { permissions } : { sandbox: sandbox || "read-only" }),
+    runtimeWorkspaceRoots: normalizeAbsolutePathList(runtimeWorkspaceRoots),
+    config: Object.keys(mergedConfig).length ? mergedConfig : null,
+    baseInstructions: baseInstructions || null,
+    developerInstructions: developerInstructions || null,
+    personality: personality || null,
+    dynamicTools: Array.isArray(dynamicTools) && dynamicTools.length ? dynamicTools : undefined,
+    ephemeral
+  });
+}
+
+function buildTurnStartParams({
+  threadId,
+  input,
+  cwd,
+  model,
+  reasoningEffort,
+  reasoningSummary,
+  personality,
+  serviceTier,
+  outputSchema,
+  sandboxPolicy,
+  permissions,
+  runtimeWorkspaceRoots,
+  approvalPolicy
+}) {
+  return compactObject({
+    threadId,
+    input,
+    cwd,
+    runtimeWorkspaceRoots: normalizeAbsolutePathList(runtimeWorkspaceRoots),
+    approvalPolicy: approvalPolicy || "never",
+    ...(permissions ? { permissions } : {}),
+    ...(!permissions && sandboxPolicy ? { sandboxPolicy } : {}),
+    model: model || null,
+    serviceTier: serviceTier || null,
+    effort: reasoningEffort || null,
+    summary: reasoningSummary || null,
+    personality: personality || null,
+    outputSchema: outputSchema || null
+  });
+}
+
+function compactObject(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
+}
+
+function normalizeAbsolutePathList(paths) {
+  const normalized = [...new Set((Array.isArray(paths) ? paths : [])
+    .map((path) => String(path || "").trim())
+    .filter((path) => path.startsWith("/")))];
+  return normalized.length ? normalized : undefined;
+}
+
+function defaultServerRequestResponse(method) {
+  if (method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval") {
+    return { decision: "decline" };
+  }
+  if (method === "item/permissions/requestApproval") {
+    return { permissions: { network: null, fileSystem: null }, scope: "turn" };
+  }
+  if (method === "item/tool/requestUserInput") return { answers: {} };
+  if (method === "mcpServer/elicitation/request") return { action: "decline", content: null };
+  throw createProtocolError(`Unsupported Codex app-server request: ${method || "unknown"}`);
 }
 
 function normalizeUserInput(value) {
@@ -539,6 +789,12 @@ function createProtocolError(message, protocolCode = null) {
 function isNoActiveTurnProtocolError(error) {
   return error?.code === "CODEX_APP_SERVER_PROTOCOL"
     && /no active turn|turn (?:is )?not active|already completed/i.test(String(error?.message || ""));
+}
+
+function isStaleThreadProtocolError(error) {
+  return error?.code === "CODEX_APP_SERVER_PROTOCOL"
+    && /thread.*(?:not found|does not exist|unknown|missing|archived)|missing thread|rollout.*(?:not found|missing)|no rollout/i
+      .test(String(error?.message || ""));
 }
 
 function createTurnInactiveError() {

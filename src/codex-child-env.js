@@ -2,6 +2,14 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const profileAuthKeys = ["OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL"];
+const codexRuntimeEnvKeys = new Set([
+  "HOME", "USER", "LOGNAME", "PATH", "SHELL", "TMPDIR", "TMP", "TEMP", "TZ", "TERM",
+  "LANG", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+  "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+  "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+  "CODEX_HOME", "CODEX_CONFIG_PATH", "CODEX_ENV_FILE",
+  ...profileAuthKeys
+]);
 
 export function buildCodexChildEnv({
   baseEnv = process.env,
@@ -20,6 +28,20 @@ export function buildCodexChildEnv({
   const matchingProfileEnv = findMatchingProfileEnv(configPath, dirname(profileEnvPath));
   for (const key of profileAuthKeys) {
     if (matchingProfileEnv?.[key]) env[key] = matchingProfileEnv[key];
+  }
+  return env;
+}
+
+export function buildIsolatedCodexChildEnv(options = {}) {
+  const overrides = options?.overrides && typeof options.overrides === "object"
+    ? options.overrides
+    : {};
+  const source = buildCodexChildEnv(options);
+  const env = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (codexRuntimeEnvKeys.has(key) || key.startsWith("LC_") || Object.hasOwn(overrides, key)) {
+      env[key] = value;
+    }
   }
   return env;
 }

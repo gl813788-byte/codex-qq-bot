@@ -56,6 +56,15 @@ export const qqCommandCatalog = [
     aliases: ["会话模式", "长期会话", "临时会话", "自动会话", "session", "session-mode"]
   },
   {
+    key: "crossSession",
+    defaultPublic: false,
+    configurable: false,
+    menuLine: "/跨会话",
+    category: "conversation",
+    description: "列出、读取其他会话，或向目标群/私聊发送",
+    aliases: ["跨会话", "会话列表", "其他会话", "cross-session"]
+  },
+  {
     key: "interest",
     defaultPublic: false,
     configurable: true,
@@ -65,7 +74,7 @@ export const qqCommandCatalog = [
     aliases: ["兴趣", "兴趣配置", "主动配置", "兴趣间隔", "兴趣模型", "interest", "proactive"]
   },
   { key: "model", defaultPublic: false, configurable: true, menuLine: "/模型", category: "intelligence", description: "查看或切换当前可用模型", aliases: ["模型", "qq模型", "切模型", "切换模型"] },
-  { key: "reasoning", defaultPublic: false, configurable: true, menuLine: "/思考强度", category: "intelligence", description: "调整当前模型的推理强度", aliases: ["智能等级", "智能", "思考强度", "qq智能等级"] },
+  { key: "reasoning", defaultPublic: false, configurable: true, menuLines: ["/思考强度", "/推理摘要", "/人格", "/服务档位"], category: "intelligence", description: "调整 Codex 推理、摘要、人格与服务档位", aliases: ["智能等级", "智能", "思考强度", "qq智能等级", "推理摘要", "人格", "服务档位"] },
   {
     key: "allowlist",
     defaultPublic: false,
@@ -85,7 +94,16 @@ export const qqCommandCatalog = [
     aliases: ["群管理", "禁言", "解禁言", "解除禁言", "踢人", "全员禁言", "群禁言列表"]
   },
   { key: "ban", defaultPublic: false, configurable: true, menuLine: "/ban @用户", category: "operations", description: "管理 Bot 侧用户封禁名单", aliases: ["ban", "封禁", "拉黑", "unban", "解禁", "banlist"] },
-  { key: "permissions", defaultPublic: false, configurable: false, menuLine: "/菜单权限", category: "authority", description: "设置非主人可见且可执行的命令", aliases: ["菜单权限", "权限菜单", "公开指令", "允许指令", "禁用指令"] }
+  { key: "permissions", defaultPublic: false, configurable: false, menuLine: "/菜单权限", category: "authority", description: "设置非主人可见且可执行的命令", aliases: ["菜单权限", "权限菜单", "公开指令", "允许指令", "禁用指令"] },
+  {
+    key: "botAdmins",
+    defaultPublic: false,
+    configurable: false,
+    menuLine: "/Bot管理员",
+    category: "authority",
+    description: "查看 Bot 管理员；仅主人可添加或移除",
+    aliases: ["Bot管理员", "机器人管理员", "助手管理员", "agent管理员"]
+  }
 ];
 
 export const defaultQqPublicCommands = Object.fromEntries(

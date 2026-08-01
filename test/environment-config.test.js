@@ -15,7 +15,10 @@ test("builds one normalized configuration object from environment values", () =>
     CODEX_REMOTE_CONTACT_QQ_WEB_TIMEOUT_MS: "10000",
     CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE: "proxy",
     CODEX_REMOTE_CONTACT_CODEX_REPLY_TIMEOUT_MS: "45000",
-    CODEX_REMOTE_CONTACT_CODEX_IMAGE_GENERATION_TIMEOUT_MS: "99999999"
+    CODEX_REMOTE_CONTACT_CODEX_IMAGE_GENERATION_TIMEOUT_MS: "99999999",
+    CODEX_REMOTE_CONTACT_REASONING_SUMMARY: "detailed",
+    CODEX_REMOTE_CONTACT_CODEX_PERSONALITY: "friendly",
+    CODEX_REMOTE_CONTACT_CODEX_SERVICE_TIER: "priority"
   });
 
   assert.equal(config.hubPort, 4500);
@@ -29,6 +32,9 @@ test("builds one normalized configuration object from environment values", () =>
   assert.equal(config.safeFetchMode, "proxy-compatible");
   assert.equal(config.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_REPLY], 45_000);
   assert.equal(config.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_IMAGE_GENERATION], 60 * 60_000);
+  assert.equal(config.codexReasoningSummary, "detailed");
+  assert.equal(config.codexPersonality, "friendly");
+  assert.equal(config.codexServiceTier, "priority");
   assert.equal("imessageImageDelivery" in config, false);
   assert.equal("remoteExecutionModel" in config, false);
   assert.equal("proxyShortcutName" in config, false);
@@ -41,6 +47,9 @@ test("uses stable defaults and rejects invalid listener ports", () => {
 
   assert.equal(defaults.hubPort, 3789);
   assert.equal(defaults.codexMaxConcurrency, 2);
+  assert.equal(defaults.codexReasoningSummary, "auto");
+  assert.equal(defaults.codexPersonality, "none");
+  assert.equal(defaults.codexServiceTier, "");
   assert.equal(defaults.qqBubbleSeparator, "|||");
   assert.equal(defaults.qqBubbleMaxChars, 900);
   assert.equal(defaults.qqBubbleMaxCount, 24);

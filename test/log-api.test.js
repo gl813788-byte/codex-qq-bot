@@ -83,3 +83,35 @@ test("log API filters complete traces and returns aggregate diagnostics", async 
   assert.equal(slow.filters.groupId, "123");
   assert.equal(slow.filters.minDurationMs, 2000);
 });
+
+test("log API filters unified operations across source and target sessions", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-qq-log-api-operation-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = join(directory, "hub.jsonl");
+  const logger = createLogger({ filePath, consoleOutput: false });
+  logger.success("QQ cross-session message completed", {
+    operation: "session.send",
+    outcome: "success",
+    actorRole: "administrator",
+    actorUserId: "10001",
+    sourceScopeId: "20002",
+    targetScopeId: "private:30003",
+    targetType: "private",
+    durationMs: 18
+  }, "qq");
+  logger.debug("QQ native Agent tool completed", {
+    operation: "agent.tool",
+    outcome: "success",
+    sourceScopeId: "20002",
+    targetScopeId: "20002"
+  }, "codex");
+  await logger.flush();
+
+  const response = await buildLogsResponse(filePath, new URLSearchParams("scope=private:30003&operation=session"));
+  assert.equal(response.matched, 1);
+  assert.equal(response.filters.scopeId, "private:30003");
+  assert.equal(response.filters.operation, "session");
+  assert.equal(response.entries[0].detailsZh["操作者角色"], "Bot 管理员");
+  assert.deepEqual(response.summary.byOperation, { "session.send": 1 });
+  assert.deepEqual(response.summary.byOutcome, { success: 1 });
+});

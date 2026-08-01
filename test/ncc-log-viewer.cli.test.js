@@ -210,6 +210,21 @@ test("ncc log viewer follows a trace, finds slow operations, and prints a summar
       message: "unrelated failure",
       traceId: "trace-other",
       details: { groupId: "999", durationMs: 9000 }
+    },
+    {
+      ts: "2026-07-13T10:00:04.000Z",
+      level: "success",
+      category: "qq",
+      message: "QQ cross-session message completed",
+      traceId: "trace-cross-session",
+      details: {
+        operation: "session.send",
+        outcome: "success",
+        sourceScopeId: "123",
+        targetScopeId: "private:30003",
+        actorRole: "administrator",
+        durationMs: 20
+      }
     }
   ];
   await writeFile(`${filePath}.1`, `${JSON.stringify({
@@ -251,4 +266,17 @@ test("ncc log viewer follows a trace, finds slow operations, and prints a summar
   ]);
   assert.match(slow.stdout, /QQ 回复流程完成/);
   assert.doesNotMatch(slow.stdout, /QQ 回复流程开始|unrelated failure/);
+
+  const scoped = await execFileAsync(process.execPath, [
+    viewerPath.pathname,
+    filePath,
+    "--plain",
+    "--scope",
+    "private:30003",
+    "--operation",
+    "session"
+  ]);
+  assert.match(scoped.stdout, /QQ 跨会话消息发送完成/);
+  assert.match(scoped.stdout, /目标会话: private:30003/);
+  assert.doesNotMatch(scoped.stdout, /QQ 回复流程完成|unrelated failure/);
 });

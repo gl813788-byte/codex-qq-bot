@@ -3,6 +3,16 @@ import {
   compactConsecutiveQqMessages
 } from "./qq-message-run-compaction.js";
 
+export const qqKnowledgeDeletionReviewOutputSchema = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["delete", "reason"],
+  properties: {
+    delete: { type: "boolean" },
+    reason: { type: "string" }
+  }
+});
+
 function compactText(value, maxLength = 400) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength);
 }

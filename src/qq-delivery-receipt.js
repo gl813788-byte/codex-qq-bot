@@ -37,6 +37,7 @@ export function createQqDeliveryFailureMemoryEntry(event = {}, receipt = {}) {
     senderLabel: event.senderLabel || event.senderName || "群友",
     senderName: event.senderName || "",
     isOwner: Boolean(event.isOwner),
+    isBotAdmin: Boolean(event.isBotAdmin),
     deliveryFailure: true,
     attemptedBubbleCount: Math.max(0, Number(receipt.attemptedBubbleCount || 0)),
     deliveredBubbleCount: Math.max(0, Number(receipt.deliveredBubbleCount || 0)),

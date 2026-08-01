@@ -127,7 +127,15 @@ export function normalizeCodexModels(models) {
       supportedReasoningEfforts: (Array.isArray(item.supportedReasoningEfforts) ? item.supportedReasoningEfforts : [])
         .map((option) => typeof option === "string" ? option : option?.reasoningEffort)
         .filter(Boolean)
-        .map(String)
+        .map(String),
+      defaultServiceTier: typeof item.defaultServiceTier === "string" ? item.defaultServiceTier : null,
+      serviceTiers: (Array.isArray(item.serviceTiers) ? item.serviceTiers : [])
+        .map((tier) => ({
+          id: String(tier?.id || "").trim(),
+          name: String(tier?.name || tier?.id || "").trim(),
+          description: String(tier?.description || "").trim()
+        }))
+        .filter((tier) => tier.id)
     }))
     .filter((item) => {
       if (seen.has(item.model)) return false;

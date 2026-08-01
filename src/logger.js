@@ -31,7 +31,7 @@ export function createLogger({
   async function write(entry) {
     const normalized = normalizeEntry({
       ...entry,
-      schemaVersion: entry?.schemaVersion || 2,
+      schemaVersion: entry?.schemaVersion || 3,
       id: entry?.id || crypto.randomUUID()
     });
     if (shouldPersist(normalized.level, minimumLevel)) {
@@ -133,6 +133,8 @@ export async function readLogEntries(filePath, {
   query = "",
   groupId = "",
   senderId = "",
+  scopeId = "",
+  operation = "",
   since = "",
   until = "",
   minDurationMs = 0
@@ -145,6 +147,8 @@ export async function readLogEntries(filePath, {
     query: String(query || "").trim().toLowerCase(),
     groupId: String(groupId || "").trim(),
     senderId: String(senderId || "").trim(),
+    scopeId: String(scopeId || "").trim().toLowerCase(),
+    operations: normalizeFilterSet(operation),
     sinceMs: normalizeTimestamp(since, { relativeFromNow: true }),
     untilMs: normalizeTimestamp(until),
     minDurationMs: Math.max(0, Number(minDurationMs) || 0)
@@ -198,6 +202,8 @@ export function summarizeLogEntries(entries = []) {
   const list = Array.isArray(entries) ? entries : [];
   const byLevel = {};
   const byCategory = {};
+  const byOperation = {};
+  const byOutcome = {};
   const durations = [];
   const traces = new Set();
   for (const entry of list) {
@@ -205,6 +211,10 @@ export function summarizeLogEntries(entries = []) {
     const category = String(entry?.category || "system");
     byLevel[level] = Number(byLevel[level] || 0) + 1;
     byCategory[category] = Number(byCategory[category] || 0) + 1;
+    const operation = String(entry?.details?.operation || "").trim();
+    const outcome = String(entry?.details?.outcome || "").trim();
+    if (operation) byOperation[operation] = Number(byOperation[operation] || 0) + 1;
+    if (outcome) byOutcome[outcome] = Number(byOutcome[outcome] || 0) + 1;
     if (entry?.traceId) traces.add(String(entry.traceId));
     const duration = getEntryDurationMs(entry);
     if (duration != null) durations.push(duration);
@@ -214,6 +224,8 @@ export function summarizeLogEntries(entries = []) {
     total: list.length,
     byLevel,
     byCategory,
+    byOperation,
+    byOutcome,
     traceCount: traces.size,
     firstAt: list[0]?.ts || null,
     lastAt: list.at(-1)?.ts || null,
@@ -246,8 +258,11 @@ function matchesLogFilters(entry, filters) {
   if (filters.levels.size > 0 && !filters.levels.has(String(entry.level || "").toLowerCase())) return false;
   if (filters.categories.size > 0 && !filters.categories.has(String(entry.category || "").toLowerCase())) return false;
   if (filters.traceId && !String(entry.traceId || "").toLowerCase().startsWith(filters.traceId)) return false;
-  if (filters.groupId && String(entry.details?.groupId ?? "") !== filters.groupId) return false;
-  if (filters.senderId && String(entry.details?.senderId ?? "") !== filters.senderId) return false;
+  if (filters.operations.size > 0 && !matchesOperation(entry.details?.operation, filters.operations)) return false;
+  const scopeIds = getLogScopeIds(entry.details);
+  if (filters.scopeId && !matchesScopeId(scopeIds, filters.scopeId)) return false;
+  if (filters.groupId && !matchesGroupId(entry.details, scopeIds, filters.groupId)) return false;
+  if (filters.senderId && !matchesSenderId(entry.details, scopeIds, filters.senderId)) return false;
   const timestamp = Date.parse(String(entry.ts || ""));
   if (filters.sinceMs != null && (!Number.isFinite(timestamp) || timestamp < filters.sinceMs)) return false;
   if (filters.untilMs != null && (!Number.isFinite(timestamp) || timestamp > filters.untilMs)) return false;
@@ -263,6 +278,49 @@ function matchesLogFilters(entry, filters) {
     if (!searchable.includes(filters.query)) return false;
   }
   return true;
+}
+
+function matchesOperation(value, operations) {
+  const operation = String(value || "").trim().toLowerCase();
+  return Boolean(operation && [...operations].some((filter) => (
+    operation === filter || operation.startsWith(`${filter}.`)
+  )));
+}
+
+function getLogScopeIds(details = {}) {
+  return [
+    details.scopeId,
+    details.sourceScopeId,
+    details.targetScopeId,
+    details.groupId ? String(details.groupId) : "",
+    details.senderId ? `private:${details.senderId}` : ""
+  ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
+}
+
+function matchesScopeId(scopeIds, filter) {
+  const candidates = expandScopeId(filter);
+  return scopeIds.some((scopeId) => [...expandScopeId(scopeId)].some((candidate) => candidates.has(candidate)));
+}
+
+function expandScopeId(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  const output = new Set(normalized ? [normalized] : []);
+  if (normalized.startsWith("group:")) output.add(normalized.slice("group:".length));
+  else if (/^[1-9][0-9]{4,12}$/.test(normalized)) output.add(`group:${normalized}`);
+  return output;
+}
+
+function matchesGroupId(details, scopeIds, groupId) {
+  const normalized = String(groupId || "");
+  return String(details?.groupId ?? "") === normalized
+    || matchesScopeId(scopeIds.filter((scopeId) => !scopeId.startsWith("private:")), normalized);
+}
+
+function matchesSenderId(details, scopeIds, senderId) {
+  const normalized = String(senderId || "");
+  return [details?.senderId, details?.actorUserId, details?.targetUserId]
+    .some((value) => String(value ?? "") === normalized)
+    || scopeIds.includes(`private:${normalized}`.toLowerCase());
 }
 
 function getEntryDurationMs(entry) {

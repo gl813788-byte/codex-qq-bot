@@ -83,4 +83,14 @@ test("task center and QQ menu use readable visual sections", () => {
   assert.match(menu, /💬 会话与上下文/);
   assert.match(menu, /🧠 AI 与学习/);
   assert.match(menu, /\/新对话  ◦ 公开/);
+
+  const administratorMenu = formatQqVisualMenu({
+    administrator: true,
+    assistantName: "小星",
+    model: "gpt-5.5",
+    commands: [{ category: "authority", menuLine: "/Bot管理员", description: "查看管理员" }]
+  });
+  assert.match(administratorMenu, /🛡️/);
+  assert.match(administratorMenu, /身份：Bot 管理员/);
+  assert.match(administratorMenu, /\/Bot管理员/);
 });

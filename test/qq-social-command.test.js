@@ -62,6 +62,10 @@ test("formats actionable verification failures", () => {
     error: "answer_required",
     question: "项目口令"
   }, 409), /主动加群 987654 答案=正确答案/);
+  assert.match(formatQqActiveAddFailure("friend", "123456", {
+    error: "native_timeout",
+    native_api: "BuddyService.reqToAddFriends\(uin,message\)"
+  }, 504), /没有在限定时间内返回/);
 });
 
 test("parses text, image-only and mixed QQ Zone publish commands", () => {

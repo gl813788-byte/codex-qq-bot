@@ -24,6 +24,9 @@ export function createInitialState({
       provider: "codex-cli",
       model: config.codexModel || "default",
       reasoningEffort: config.codexReasoningEffort,
+      reasoningSummary: config.codexReasoningSummary || "auto",
+      personality: config.codexPersonality || "none",
+      serviceTier: config.codexServiceTier || "",
       workspace: codexWorkspaceDir
     },
     channels: {
@@ -33,6 +36,7 @@ export function createInitialState({
       groupMode: "mention-only",
       allowedGroups: [],
       ownerUserIds: [],
+      adminUserIds: [],
       bannedUserIds: [],
       bannedUntilByUserId: createRecord(),
       enhancer: {

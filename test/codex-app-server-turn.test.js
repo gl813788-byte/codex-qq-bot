@@ -203,12 +203,19 @@ test("fails a silent replacement early and exposes its accepted input for fresh-
 
 test("resumes a persistent thread and falls back to a new one when it is stale", async () => {
   const resumedServer = createFakeAppServer({ resume: "ok" });
+  const resumedTools = [{
+    type: "function",
+    name: "qq_runtime",
+    description: "current-turn tools",
+    inputSchema: { type: "object", properties: {} }
+  }];
   let resumedReady;
   const resumedReadyPromise = new Promise((resolve) => { resumedReady = resolve; });
   const resumedResult = runCodexAppServerTurn({
     prompt: "full fallback context",
     resumePrompt: "merged follow-up delta",
     threadId: "thread-old",
+    dynamicTools: resumedTools,
     ephemeral: false,
     timeoutMs: 5_000,
     spawnProcess: resumedServer.spawn,
@@ -218,6 +225,10 @@ test("resumes a persistent thread and falls back to a new one when it is stale",
   resumedServer.complete("continued");
   assert.equal((await resumedResult).resumed, true);
   assert.ok(resumedServer.messages.some((message) => message.method === "thread/resume"));
+  assert.deepEqual(
+    resumedServer.messages.find((message) => message.method === "thread/resume").params.dynamicTools,
+    resumedTools
+  );
   assert.equal(resumedServer.messages.some((message) => message.method === "thread/start"), false);
   assert.equal(
     resumedServer.messages.find((message) => message.method === "turn/start").params.input[0].text,
@@ -247,6 +258,96 @@ test("resumes a persistent thread and falls back to a new one when it is stale",
   );
 });
 
+test("handles dynamic tools as server requests and forwards native turn settings", async () => {
+  const server = createFakeAppServer();
+  const calls = [];
+  const progress = [];
+  let ready;
+  const readyPromise = new Promise((resolve) => { ready = resolve; });
+  const outputSchema = { type: "object", properties: { text: { type: "string" } } };
+  const dynamicTools = [{
+    type: "function",
+    name: "qq_history",
+    description: "read history",
+    inputSchema: { type: "object", properties: {} }
+  }];
+  const resultPromise = runCodexAppServerTurn({
+    prompt: "native turn",
+    cwd: "/tmp/qq-task",
+    developerInstructions: "native agent instructions",
+    dynamicTools,
+    outputSchema,
+    webSearchMode: "live",
+    sandbox: "workspace-write",
+    sandboxPolicy: {
+      type: "workspaceWrite",
+      writableRoots: ["/tmp/qq-task"],
+      networkAccess: false,
+      excludeTmpdirEnvVar: true,
+      excludeSlashTmp: true
+    },
+    runtimeWorkspaceRoots: ["/tmp/qq-task"],
+    reasoningSummary: "auto",
+    timeoutMs: 5_000,
+    spawnProcess: server.spawn,
+    onReady: ready,
+    onDynamicToolCall: async (call) => {
+      calls.push(call);
+      return { ok: true, rows: ["one", "two"] };
+    },
+    onProgress: (item) => progress.push(item)
+  });
+  await readyPromise;
+
+  const first = await server.requestTool({
+    requestId: 900,
+    callId: "tool-call-1",
+    namespace: "qq_context",
+    tool: "history",
+    arguments: { query: "recent" }
+  });
+  const duplicate = await server.requestTool({
+    requestId: 901,
+    callId: "tool-call-1",
+    namespace: "qq_context",
+    tool: "history",
+    arguments: { query: "recent" }
+  });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(first.result, duplicate.result);
+  assert.equal(first.result.success, true);
+  assert.match(first.result.contentItems[0].text, /"rows"/);
+
+  server.notify({
+    method: "item/completed",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: { id: "commentary-1", type: "agentMessage", phase: "commentary", text: "正在核对" }
+    }
+  });
+  server.notify({
+    method: "turn/plan/updated",
+    params: { turnId: "turn-1", explanation: "计划", plan: [{ step: "完成", status: "completed" }] }
+  });
+  server.complete('{"text":"done"}');
+  const result = await resultPromise;
+
+  const initialize = server.messages.find((message) => message.method === "initialize");
+  const threadStart = server.messages.find((message) => message.method === "thread/start");
+  const turnStart = server.messages.find((message) => message.method === "turn/start");
+  assert.equal(initialize.params.capabilities.experimentalApi, true);
+  assert.equal(threadStart.params.developerInstructions, "native agent instructions");
+  assert.deepEqual(threadStart.params.dynamicTools, dynamicTools);
+  assert.equal(threadStart.params.config.web_search, "live");
+  assert.deepEqual(turnStart.params.outputSchema, outputSchema);
+  assert.deepEqual(turnStart.params.sandboxPolicy.writableRoots, ["/tmp/qq-task"]);
+  assert.deepEqual(turnStart.params.runtimeWorkspaceRoots, ["/tmp/qq-task"]);
+  assert.equal(progress.some((item) => item.type === "commentary"), true);
+  assert.equal(progress.some((item) => item.type === "plan"), true);
+  assert.ok(result.items.some((item) => item.id === "commentary-1"));
+});
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -256,6 +357,7 @@ function createFakeAppServer({ resume = "ok", interrupt = "ok" } = {}) {
   let child;
   let currentTurnId = null;
   let turnCount = 0;
+  const serverResponses = new Map();
 
   const send = (message) => {
     queueMicrotask(() => child.stdout.write(`${JSON.stringify(message)}\n`));
@@ -270,6 +372,11 @@ function createFakeAppServer({ resume = "ok", interrupt = "ok" } = {}) {
         for (const line of String(chunk).split(/\r?\n/).filter(Boolean)) {
           const message = JSON.parse(line);
           messages.push(message);
+          if (!message.method && Object.hasOwn(message, "id") && serverResponses.has(message.id)) {
+            serverResponses.get(message.id)(message);
+            serverResponses.delete(message.id);
+            continue;
+          }
           if (message.method === "initialize") {
             send({ id: message.id, result: { userAgent: "test" } });
           } else if (message.method === "thread/start") {
@@ -314,6 +421,25 @@ function createFakeAppServer({ resume = "ok", interrupt = "ok" } = {}) {
   return {
     messages,
     spawn,
+    notify(message) {
+      send(message);
+    },
+    requestTool({ requestId, callId, namespace, tool, arguments: args }) {
+      const response = new Promise((resolve) => serverResponses.set(requestId, resolve));
+      send({
+        method: "item/tool/call",
+        id: requestId,
+        params: {
+          threadId: "thread-1",
+          turnId: currentTurnId,
+          callId,
+          namespace,
+          tool,
+          arguments: args
+        }
+      });
+      return response;
+    },
     complete(text) {
       send({
         method: "item/completed",

@@ -15,7 +15,9 @@ test("normalizes visible Codex models and their reasoning efforts", () => {
       supportedReasoningEfforts: [
         { reasoningEffort: "low", description: "Fast" },
         { reasoningEffort: "medium", description: "Balanced" }
-      ]
+      ],
+      defaultServiceTier: null,
+      serviceTiers: [{ id: "fast", name: "Fast", description: "Higher speed" }]
     },
     { id: "hidden", model: "hidden", hidden: true }
   ]);
@@ -27,7 +29,9 @@ test("normalizes visible Codex models and their reasoning efforts", () => {
     description: "Current model",
     isDefault: true,
     defaultReasoningEffort: "medium",
-    supportedReasoningEfforts: ["low", "medium"]
+    supportedReasoningEfforts: ["low", "medium"],
+    defaultServiceTier: null,
+    serviceTiers: [{ id: "fast", name: "Fast", description: "Higher speed" }]
   }]);
 });
 

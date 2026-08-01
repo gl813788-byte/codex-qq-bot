@@ -8,6 +8,17 @@ test("QQ menu excludes channel shutdown", () => {
   assert.equal(qqCommandCatalog.some((command) => /关闭QQ/i.test(command.menuLine || "")), false);
 });
 
+test("Bot administrators are persisted as a distinct role with full menu routing", async () => {
+  assert.ok(qqCommandCatalog.some((command) => command.key === "botAdmins"));
+  assert.ok(qqCommandCatalog.some((command) => command.key === "crossSession"));
+  const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  assert.match(source, /function hasQqPrivilegedAccess\(event\)/);
+  assert.match(source, /event\?\.isOwner \|\| event\?\.isBotAdmin/);
+  assert.match(source, /if \(!event\?\.isOwner\).*只有.*能添加或移除 Bot 管理员/s);
+  assert.match(source, /state\.qq\.adminUserIds = adding/);
+  assert.match(source, /beforeSend: saveSettings/);
+});
+
 test("QQ menu settings are persisted before a reply send begins", async () => {
   const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
   assert.equal(source.includes("afterSend: saveSettings"), false);

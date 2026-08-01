@@ -3,6 +3,67 @@ import {
   compactConsecutiveQqMessages
 } from "./qq-message-run-compaction.js";
 
+const stringArraySchema = Object.freeze({ type: "array", items: { type: "string" } });
+
+export const qqSelfPersonaScopeOutputSchema = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "topics", "botInterests", "botDislikes", "interactionStyle", "knowledge"],
+  properties: {
+    summary: { type: "string" },
+    topics: stringArraySchema,
+    botInterests: stringArraySchema,
+    botDislikes: stringArraySchema,
+    interactionStyle: stringArraySchema,
+    knowledge: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind", "title", "content", "scope", "userId", "userName", "replacesTitle"],
+        properties: {
+          kind: { type: "string", enum: ["slang", "note"] },
+          title: { type: "string" },
+          content: { type: "string" },
+          scope: { type: "string", enum: ["group", "group-member", "member"] },
+          userId: { type: "string" },
+          userName: { type: "string" },
+          replacesTitle: { type: "string" }
+        }
+      }
+    }
+  }
+});
+
+export const qqSelfPersonaGlobalOutputSchema = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["name", "selfDescription", "traits", "interestKeywords", "interestParagraph", "interests", "dislikes", "proactiveTopics", "conversationStyle"],
+  properties: {
+    name: { type: "string" },
+    selfDescription: { type: "string" },
+    traits: stringArraySchema,
+    interestKeywords: stringArraySchema,
+    interestParagraph: { type: "string" },
+    interests: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["topic", "weight", "description"],
+        properties: {
+          topic: { type: "string" },
+          weight: { type: "number", minimum: 0, maximum: 100 },
+          description: { type: "string" }
+        }
+      }
+    },
+    dislikes: stringArraySchema,
+    proactiveTopics: stringArraySchema,
+    conversationStyle: stringArraySchema
+  }
+});
+
 const personaVersion = 1;
 const maxScopes = 500;
 const hourMs = 60 * 60 * 1000;

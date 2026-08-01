@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 3,
   "updatedAt": null,
   "network": {
     "allowLanAccess": false,
@@ -9,6 +9,7 @@
   "qq": {
     "allowedGroups": [],
     "ownerUserIds": [],
+    "adminUserIds": [],
     "bannedUserIds": [],
     "bannedUntilByUserId": {},
     "enhancer": {
@@ -73,7 +74,10 @@
   },
   "ai": {
     "model": "gpt-5.4-mini",
-    "reasoningEffort": "low"
+    "reasoningEffort": "low",
+    "reasoningSummary": "auto",
+    "personality": "none",
+    "serviceTier": ""
   },
   "unifiedMemory": {
     "autoWriteOnSkillRecall": false,
