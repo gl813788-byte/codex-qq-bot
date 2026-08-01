@@ -114,6 +114,10 @@ export function formatQqActiveAddFailure(kind, targetId, result, httpStatus) {
   if (error === "group_full") return "该群人数已满，当前无法加入。";
   if (error === "group_not_found") return `没有找到群 ${targetId}，请确认群号及该群是否允许被搜索。`;
   if (error === "risk_control_required") return "QQ 风控要求在客户端完成安全验证；Bot 没有绕过风控，也没有伪报申请成功。";
+  if (error === "native_timeout") {
+    const nativeApi = String(result?.native_api || "QQ 原生接口");
+    return `${nativeApi} 没有在限定时间内返回；本次没有伪报成功，请检查 NapCat 社交桥日志后重试。`;
+  }
   return `发起申请失败：${error || result?.message || `HTTP ${httpStatus || "未知"}`}`;
 }
 

@@ -21,13 +21,16 @@ environment + runtime paths
  infrastructure -------------> Codex CLI, files, processes, logs
 ```
 
-`src/server.js` is the composition root. It wires dependencies, starts the HTTP listener and owns process shutdown. It is still a transitional monolith, not the intended home for new subsystems. New parsing, policy and persistence logic belongs in a focused module and is only wired from the composition root.
+`src/server.js` is the composition root. It wires dependencies, starts the HTTP listener and owns process shutdown. It remains transitional legacy orchestration, but Codex Agent execution, native tool/output boundaries, runtime-setting policy, settings snapshots/repository, file-Agent policy, and the HTTP server adapter now live in focused modules. New parsing, policy and persistence logic belongs in a focused module and is only wired from the composition root.
 
 ## Source layout
 
 | Path | Responsibility | Change here when... |
 | --- | --- | --- |
 | `src/app/` | Application state and startup composition | changing global state shape or startup lifecycle |
+| `src/app/qq-codex-runtime-settings.js` | Native Codex turn-setting command policy | changing reasoning summary/personality/service-tier validation or persistence actions |
+| `src/app/qq-file-agent-turn.js` | Owner/administrator/public file-Agent capability policy | changing file-task roots, sandboxing, administrator destructive-operation refusal, or task instructions |
+| `src/channels/http/hub-http-server.js` | HTTP request dispatch and safe error boundary | changing API/asset routing or OneBot webhook limiting |
 | `src/channels/qq/` | Single QQ and OneBot message transport boundary | parsing or validating incoming QQ events |
 | `src/config/` | Environment normalization and runtime defaults | adding an environment variable or changing a deployment default |
 | `src/qq-enhancer/` | Optional QQ reply behavior | changing context images, proactive interest or reply style |
@@ -36,6 +39,12 @@ environment + runtime paths
 | `src/qq-proactive-cycle-state.js` | In-memory ordinary-interest cycle state | counting pending messages, resetting at confirmed Bot delivery, and superseding an in-flight pre-delivery judge without consuming later messages |
 | `src/qq-message-run-compaction.js` | Model-context repeat-run compaction | semantic identity, count merging, and Chinese count annotations for adjacent duplicate messages |
 | `src/codex-app-server-turn.js` | One-turn Codex app-server client | `thread/start`/`thread/resume`, `turn/start`, in-flight control, direct interrupt-and-restart, inactive-turn race recovery, timeout, and interruption |
+| `src/infrastructure/codex/qq-turn-runner.js` | QQ App Server lifecycle adapter | limits, isolated child environment, native turn settings, diagnostics, fused-turn recovery, cancellation and quota refresh |
+| `src/infrastructure/codex/qq-native-tools.js` | Dynamic QQ tool surface | mapping structured App Server calls to existing authenticated Hub operations |
+| `src/qq-cross-session.js` | Cross-session catalog and event rebinding | listing/resolving group/private selectors or safely rebinding a verified role to a target session |
+| `src/qq-operation-log.js` | Unified QQ operation-log fields | aligning actor and source/target scope fields across Agent, administrator, social and cross-session work |
+| `src/infrastructure/codex/qq-agent-output.js` | Structured QQ final-output boundary | reply/silence/addressing/attachment schema and delivery compatibility translation |
+| `src/infrastructure/storage/settings-repository.js` | Atomic settings I/O | loading or persisting `data/settings.json` without embedding filesystem code in the composition root |
 | `src/qq-codex-turn-recovery.js` | Fused-turn failure isolation | detecting a stalled replacement and rebuilding one fresh-thread attempt from the original prompt plus accepted fused input |
 | `src/qq-reply-steering.js` | QQ follow-up fusion scheduler | a five-second quiet window reset by every new follow-up, snapshot consumption, direct replacement-turn start, completed-draft replacement, failure retention, and active-turn identity checks |
 | `src/qq-context-relevance.js` | Distant-chat semantic scoring | cached local semantic profiles and relevance scoring for older human/Bot transcript fragments |
@@ -89,11 +98,11 @@ process environment / config/local.env
 
 - **HTTP:** the dashboard and management API expose public state, maintenance status and logs. Non-loopback access is rejected unless remote binding and authentication are explicitly configured.
 - **OneBot:** webhook payloads are authenticated or restricted to loopback, size-limited, normalized and deduplicated before QQ policy runs.
-- **Codex:** ordinary QQ replies run through controllable app-server turns. After a follow-up batch stays quiet for five seconds, the Hub sends `turn/interrupt` directly and starts one replacement user-input segment in the same thread with `turn/start`. An app-server “old turn already inactive” race is treated as permission to start the replacement rather than a reason to retain the batch. The task-type base deadline is scaled by the current reasoning effort (`low/medium/high/xhigh/max/ultra = ×1/×1.5/×2/×3/×4/×5`); the low-effort ordinary-text base is two minutes. Every accepted steer or replacement turn renews a full task-and-effort-specific deadline instead of inheriting only the old turn's remaining time. A replacement with no protocol activity for 60 seconds is isolated and retried once from the original complete prompt plus accepted fused input in a fresh app-server thread; ordinary non-fused timeouts are not retried. If a turn finishes while a follow-up batch is still waiting, its unsent draft is discarded and the batch immediately starts a replacement turn instead of waiting or delivering stale text. Persistent scopes resume the same local thread from a fresh controlled app-server process. Every child still receives the controlled environment, concurrency limits, and current QQ model settings.
+- **Codex:** every main reply, owner/public file task, chat summary, persona/style summary, and complex knowledge review runs through App Server; the legacy `codex exec` reply controller has been removed. Codex owns native multi-turn tool use, plans, context compaction, Web Search, file operations and shell execution. The Hub exposes QQ-specific dynamic tools through `item/tool/call`, handles them under the original sender's permissions, and requires strict structured final output. Follow-up replacement, renewed task/effort deadlines and one fresh-thread recovery retain the existing semantics. Persistent scopes resume the same thread while refreshing current dynamic-tool definitions. Every child receives an isolated allowlisted environment, concurrency limits, and current model, effort, summary, personality and service-tier settings.
 - **QQ context:** after adjacent-repeat compaction, one contiguous recent window is always sent in full (group 20, explicit group 30, expanded group 48; private 30 or expanded 60). Semantic selection runs only over the older retained transcript and covers both human and Bot messages. Current text, quote and fused follow-ups form one query that is also reused across short-term, knowledge, impression and unified-memory recall.
 - **QQ delivery:** the main model decides from full context whether a turn is casual or a substantive deliverable; problem solving, code, writing, summaries, and short task continuations use completion rather than the casual length hint. Before OneBot delivery, `src/qq-reply-chunks.js` splits text above the per-message safety limit into ordered bubbles at paragraph/sentence boundaries, avoiding both the old 900-character reply cut and one oversized send. Multi-sender fused turns expose bounded participants to the main model; every candidate can be selected for quote or mention, while a missing/invalid marker safely falls back to plain delivery. Single-sender turns still use the relationship-based quote/mention/plain policy. OneBot bubble results are converted into delivery receipts; only delivered text enters sent-message memory, while failures are retained separately for the next model turn.
 - **Model responsibilities:** the configured OpenRouter, DeepSeek, or custom OpenAI-compatible interest model is the lightweight background-decision and miscellaneous-triage plane. Provider adaptation is isolated in `src/interest-model-provider.js`; secrets stay in environment configuration while provider/model selection is persisted. It handles only bounded triggers, classification, risk labels, and simple review. The main Codex model owns conversation, summaries, tool research, topic selection, knowledge extraction, complex reasoning, and final replies.
-- **Storage:** settings, memory and social state are local files. The QQ-scope-to-Codex-thread map is atomically stored in `data/qq-codex-sessions.json` without duplicating thread content. `qq-knowledge-base` already uses a repository for safe loading and atomic writes; malformed input preserves the original file and enables read-only protection. Other load/save paths should move behind repositories incrementally.
+- **Storage:** settings, memory and social state are local files. `data/settings.json` is loaded and atomically replaced through `src/infrastructure/storage/settings-repository.js`; the pure snapshot includes all native Codex runtime parameters. The QQ-scope-to-Codex-thread map is atomically stored in `data/qq-codex-sessions.json` without duplicating thread content. `qq-knowledge-base` preserves malformed input and enables read-only protection. Other memory load/save paths should move behind repositories incrementally.
 - **Recurring and manual work:** `src/wall-clock-scheduler.js` only wakes domain checks. Due times stay in domain stores: ordinary-interest cycles and short-term memory use `data/qq-memory.json`, knowledge-frequency review uses `data/qq-knowledge-base.json`, and adaptive/persona clocks remain in their persona files. Startup and channel restoration run one immediate catch-up pass, and completed work establishes the next clock anchor. `/api/qq/ai-tasks`, QQ `/AI任务`, and NCC reuse the same summary/review functions, scope validation, and concurrency locks; force mode bypasses only scheduling and normal sample conditions. Automatic and manual low-frequency knowledge review both use the `qq-enhancer` structured channel for bounded interest triage, then start the main Codex model for full-evidence final review.
 
 ## Adding a feature
@@ -108,10 +117,10 @@ process environment / config/local.env
 
 The remaining `src/server.js` code should be reduced in behavior-preserving slices:
 
-1. Move dashboard/API route handlers into `src/channels/http/` with explicit service dependencies.
+1. Continue moving individual dashboard/API route handlers behind the new `src/channels/http/hub-http-server.js` boundary.
 2. Move OneBot API calls and QQ reply delivery into `src/channels/qq/`.
-3. Move Codex CLI execution and quota discovery into `src/infrastructure/codex/`.
-4. Move settings and memory persistence into repositories under `src/infrastructure/storage/`.
+3. Move the remaining Codex quota discovery into `src/infrastructure/codex/`; Agent turn execution is already extracted.
+4. Move the remaining memory persistence into repositories under `src/infrastructure/storage/`; settings are already extracted.
 
 Each slice should keep the public API stable and land with its own regression tests. Avoid a single large file-move commit: it makes behavioral review and rollback harder.
 

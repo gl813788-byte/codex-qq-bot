@@ -89,6 +89,8 @@ function parseArgs(args) {
     query: "",
     groupId: "",
     senderId: "",
+    scopeId: "",
+    operation: "",
     sinceMs: null,
     untilMs: null,
     minDurationMs: 0,
@@ -125,6 +127,10 @@ function parseArgs(args) {
       output.groupId = String(args[++index] || "");
     } else if (arg === "--sender") {
       output.senderId = String(args[++index] || "");
+    } else if (arg === "--scope") {
+      output.scopeId = String(args[++index] || "").toLowerCase();
+    } else if (arg === "--operation" || arg === "--op") {
+      output.operation = String(args[++index] || "").toLowerCase();
     } else if (arg === "--since") {
       output.sinceMs = parseTimeFilter(args[++index], { relativeFromNow: true });
     } else if (arg === "--until") {
@@ -149,7 +155,7 @@ function parseArgs(args) {
 }
 
 async function printExisting(options) {
-  const hasDiagnosticFilter = Boolean(options.traceId || options.query || options.groupId || options.senderId
+  const hasDiagnosticFilter = Boolean(options.traceId || options.query || options.groupId || options.senderId || options.scopeId || options.operation
     || options.sinceMs != null || options.untilMs != null || options.minDurationMs > 0);
   const body = await readLogHistory(options.file, Math.max(hasDiagnosticFilter ? 1024 * 1024 : 256 * 1024, options.tail * 8192)).catch((error) => {
     if (error.code === "ENOENT") return "";
@@ -279,8 +285,11 @@ function matchesViewerFilters(entry, options) {
   if (options.level && !splitFilter(options.level).has(String(entry.level || "").toLowerCase())) return false;
   if (options.category && !splitFilter(options.category).has(String(entry.category || "").toLowerCase())) return false;
   if (options.traceId && !String(entry.traceId || "").toLowerCase().startsWith(options.traceId)) return false;
-  if (options.groupId && String(entry.details?.groupId ?? "") !== options.groupId) return false;
-  if (options.senderId && String(entry.details?.senderId ?? "") !== options.senderId) return false;
+  if (options.operation && !matchesOperation(entry.details?.operation, splitFilter(options.operation))) return false;
+  const scopeIds = getLogScopeIds(entry.details);
+  if (options.scopeId && !matchesScopeId(scopeIds, options.scopeId)) return false;
+  if (options.groupId && !matchesGroupId(entry.details, scopeIds, options.groupId)) return false;
+  if (options.senderId && !matchesSenderId(entry.details, scopeIds, options.senderId)) return false;
   const timestamp = Date.parse(String(entry.ts || ""));
   if (options.sinceMs != null && (!Number.isFinite(timestamp) || timestamp < options.sinceMs)) return false;
   if (options.untilMs != null && (!Number.isFinite(timestamp) || timestamp > options.untilMs)) return false;
@@ -291,10 +300,51 @@ function matchesViewerFilters(entry, options) {
   }
   const level = String(entry.level || "info").toLowerCase();
   const hasExplicitFilter = Boolean(options.level || options.category || options.traceId || options.query || options.groupId
-    || options.senderId || options.sinceMs != null || options.untilMs != null || options.minDurationMs > 0);
+    || options.senderId || options.scopeId || options.operation || options.sinceMs != null || options.untilMs != null || options.minDurationMs > 0);
   if (!options.verbose && level === "debug" && !hasExplicitFilter) return false;
   if (!options.verbose && !options.all && !hasExplicitFilter && !isDefaultVisible(entry, level)) return false;
   return true;
+}
+
+function matchesOperation(value, operations) {
+  const operation = String(value || "").trim().toLowerCase();
+  return Boolean(operation && [...operations].some((filter) => operation === filter || operation.startsWith(`${filter}.`)));
+}
+
+function getLogScopeIds(details = {}) {
+  return [
+    details.scopeId,
+    details.sourceScopeId,
+    details.targetScopeId,
+    details.groupId ? String(details.groupId) : "",
+    details.senderId ? `private:${details.senderId}` : ""
+  ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
+}
+
+function matchesScopeId(scopeIds, filter) {
+  const candidates = expandScopeId(filter);
+  return scopeIds.some((scopeId) => [...expandScopeId(scopeId)].some((candidate) => candidates.has(candidate)));
+}
+
+function expandScopeId(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  const output = new Set(normalized ? [normalized] : []);
+  if (normalized.startsWith("group:")) output.add(normalized.slice("group:".length));
+  else if (/^[1-9][0-9]{4,12}$/.test(normalized)) output.add(`group:${normalized}`);
+  return output;
+}
+
+function matchesGroupId(details, scopeIds, groupId) {
+  const normalized = String(groupId || "");
+  return String(details?.groupId ?? "") === normalized
+    || matchesScopeId(scopeIds.filter((scopeId) => !scopeId.startsWith("private:")), normalized);
+}
+
+function matchesSenderId(details, scopeIds, senderId) {
+  const normalized = String(senderId || "");
+  return [details?.senderId, details?.actorUserId, details?.targetUserId]
+    .some((value) => String(value ?? "") === normalized)
+    || scopeIds.includes(`private:${normalized}`.toLowerCase());
 }
 
 function renderEntry(entry, options) {
@@ -454,7 +504,9 @@ function formatInterestDetails(details, options) {
 function formatGenericDetails(details, options) {
   const compactKeys = new Set([
     "durationMs", "totalDurationMs", "modelDurationMs", "modelTemperature", "deadlineRenewalCount", "resultCount", "status", "outcome", "code", "error", "reason", "url",
-    "source", "action", "operation", "scopeType", "scopeId", "entryId", "variantId", "title", "titles", "matchedTerms",
+    "source", "action", "operation", "scopeType", "scopeId", "sourceScopeId", "targetScopeId", "targetType",
+    "actorRole", "actorUserId", "toolNamespace", "toolName", "toolAction", "toolCallId", "toolRound", "errorCode",
+    "entryId", "variantId", "title", "titles", "matchedTerms",
     "appliedCount", "rejectedCount", "removedCount", "entryCount", "scopeCount", "titleCount", "slangCount", "variantCount",
     "matchedTitleCount", "recordedHitCount", "contextExtendedCount", "hitCount", "totalHits", "recentHits", "retainedOccurrenceCount",
     "deleted", "modelDecision", "modelOutput", "outputChars", "outputTruncated",
@@ -682,11 +734,17 @@ function parseTimeFilter(value, { relativeFromNow = false } = {}) {
 function renderSummary(entries, options) {
   const byLevel = {};
   const byCategory = {};
+  const byOperation = {};
+  const byOutcome = {};
   const durations = [];
   const traces = new Set();
   for (const entry of entries) {
     byLevel[entry.level] = Number(byLevel[entry.level] || 0) + 1;
     byCategory[entry.category] = Number(byCategory[entry.category] || 0) + 1;
+    const operation = String(entry.details?.operation || "").trim();
+    const outcome = String(entry.details?.outcome || "").trim();
+    if (operation) byOperation[operation] = Number(byOperation[operation] || 0) + 1;
+    if (outcome) byOutcome[outcome] = Number(byOutcome[outcome] || 0) + 1;
     if (entry.traceId) traces.add(entry.traceId);
     const duration = getEntryDurationMs(entry);
     if (duration > 0) durations.push(duration);
@@ -695,9 +753,11 @@ function renderSummary(entries, options) {
   const p95 = durations.length ? durations[Math.max(0, Math.ceil(durations.length * 0.95) - 1)] : 0;
   const levels = Object.entries(byLevel).map(([key, count]) => `${levelNames[key] || key} ${count}`).join(" / ") || "无";
   const categories = Object.entries(byCategory).map(([key, count]) => `${categoryNames[key] || key} ${count}`).join(" / ") || "无";
+  const operations = Object.entries(byOperation).map(([key, count]) => `${key} ${count}`).join(" / ");
   const durationText = durations.length ? `；耗时样本 ${durations.length}，P95 ${formatMs(p95)}，最慢 ${formatMs(durations.at(-1))}` : "";
-  const summary = `日志摘要：${entries.length} 条，${traces.size} 条链路；级别 ${levels}；分类 ${categories}${durationText}`;
-  if (options.json) return JSON.stringify({ summary, total: entries.length, traces: traces.size, byLevel, byCategory, p95Ms: p95 || null });
+  const operationText = operations ? `；操作 ${operations}` : "";
+  const summary = `日志摘要：${entries.length} 条，${traces.size} 条链路；级别 ${levels}；分类 ${categories}${operationText}${durationText}`;
+  if (options.json) return JSON.stringify({ summary, total: entries.length, traces: traces.size, byLevel, byCategory, byOperation, byOutcome, p95Ms: p95 || null });
   if (options.plain) return summary;
   const coloredLevels = Object.entries(byLevel)
     .map(([key, count]) => color(`${levelNames[key] || key} ${count}`, colorForLevel(key), options))
@@ -708,7 +768,8 @@ function renderSummary(entries, options) {
   const coloredDuration = durations.length
     ? `；${color(`耗时样本 ${durations.length}`, "cyan", options)}，P95 ${color(formatMs(p95), colorForDuration(formatMs(p95)), options)}，最慢 ${color(formatMs(durations.at(-1)), colorForDuration(formatMs(durations.at(-1))), options)}`
     : "";
-  return `${color("日志摘要", "brightWhite", options)}：${color(`${entries.length} 条`, "brightCyan", options)}，${color(`${traces.size} 条链路`, "brightMagenta", options)}；级别 ${coloredLevels}；分类 ${coloredCategories}${coloredDuration}`;
+  const coloredOperations = operations ? `；操作 ${color(operations, "cyan", options)}` : "";
+  return `${color("日志摘要", "brightWhite", options)}：${color(`${entries.length} 条`, "brightCyan", options)}，${color(`${traces.size} 条链路`, "brightMagenta", options)}；级别 ${coloredLevels}；分类 ${coloredCategories}${coloredOperations}${coloredDuration}`;
 }
 
 function pushPart(parts, label, value) {
@@ -722,5 +783,5 @@ function color(text, colorName, options) {
 }
 
 function usage() {
-  process.stderr.write("用法: ncc-log-viewer.mjs LOG_FILE [--tail N] [-f] [--level LEVELS|--errors] [--category CATEGORIES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--plain|--color] [--verbose|--compact]\n");
+  process.stderr.write("用法: ncc-log-viewer.mjs LOG_FILE [--tail N] [-f] [--level LEVELS|--errors] [--category CATEGORIES] [--trace ID] [--scope ID] [--operation NAME] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--plain|--color] [--verbose|--compact]\n");
 }

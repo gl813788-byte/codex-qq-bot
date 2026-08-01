@@ -21,12 +21,16 @@ test("creates isolated application state from normalized configuration", () => {
   });
 
   assert.equal(first.ai.workspace, "/tmp/workspace");
+  assert.equal(first.ai.reasoningSummary, "auto");
+  assert.equal(first.ai.personality, "none");
+  assert.equal(first.ai.serviceTier, "");
   assert.equal(first.qq.enhancer.enabled, false);
   assert.equal(first.qq.proactive.enabled, false);
   assert.equal(first.qq.memory.perGroupLimit, 25);
   assert.equal(first.qq.proactive.judge.provider, "openrouter");
   assert.equal(first.qq.proactive.judge.model, "openrouter/free");
   assert.equal(first.qq.codexSession.settings.defaultMode, "auto");
+  assert.deepEqual(first.qq.adminUserIds, []);
   assert.equal(Object.getPrototypeOf(first.qq.codexSession.settings.scopes), null);
   assert.equal(Object.getPrototypeOf(first.qq.codexSession.store.threads), null);
   assert.equal(Object.getPrototypeOf(first.qq.memory.deliveryFailures), null);

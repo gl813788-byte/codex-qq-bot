@@ -67,6 +67,8 @@ ncc connect
 
 `ncc all` 启动 NapCat 与 Hub；QQ 扫码完成后由 Codex执行 `ncc connect`。不要把仓库辅助脚本的参数传给这个全局控制器，反之亦然。
 
+本机全局控制器会从固定的 `NAPCAT_WORK_DIR`（默认 `/root/.local/share/napcat`）启动 QQ。这样 QQ 的相对路径缓存数据库不会再落进调用 `ncc` 时所在的仓库或 shell 目录；需要时可用环境变量改成其他持久目录。
+
 会话模式可从 QQ 菜单或 `ncc` 调整：
 
 ```bash
@@ -78,6 +80,26 @@ npm run ncc -- session-mode inherit 群号
 ```
 
 支持该功能的全局控制器使用 `ncc session` / `ncc session-mode ...`。省略 scope 修改默认模式；指定群号或 `private:QQ号` 修改覆盖。运行中的 Hub 通过 `/api/qq/session-mode` 立即持久化，Hub 停止时则安全修改 `data/settings.json`，下次启动生效。
+
+主人和 Bot 管理员可直接在 QQ 使用跨会话能力：
+
+```text
+/跨会话 列表 [筛选]
+/跨会话 查看 group:群号 最近30
+/跨会话 发送 private:QQ号 | 消息
+```
+
+原生 Agent 还可在一轮中选择会话焦点，之后兼容的聊天记录、记忆、知识和 QQ 工具都会作用于该目标，直到清除或切换。只允许选择 Hub 已知会话，裸数字歧义时会拒绝；真实发送要求主人/管理员明确提出。
+
+只有主人能维护管理员：
+
+```text
+/Bot管理员
+/Bot管理员 添加 QQ号
+/Bot管理员 删除 QQ号
+```
+
+管理员拥有完整菜单和 Agent，但不能修改管理员列表。管理员文件请求若涉及删除重要文件、覆盖关键源码/配置/数据/凭据、损坏 `.git`、依赖或运行状态，或其他含糊且不可恢复的破坏性操作，Bot 会自行判断并拒绝。
 
 ## AI 手动任务中心
 
@@ -149,6 +171,8 @@ npm run ncc -- logs --errors --since 30m --summary
 npm run ncc -- logs --category interest --group 群号 --tail 100
 npm run ncc -- logs --category search --verbose --tail 100
 npm run ncc -- logs --trace TRACE_ID --all
+npm run ncc -- logs --scope private:QQ号 --operation session
+npm run ncc -- logs --operation agent.tool --slow 1000 --summary
 npm run ncc -- logs -f
 ```
 
@@ -157,9 +181,10 @@ npm run ncc -- logs -f
 ```bash
 curl -fsS 'http://127.0.0.1:3789/api/logs?limit=100&level=error,warn' | jq .
 curl -fsS 'http://127.0.0.1:3789/api/logs?category=interest&group=群号' | jq .
+curl -fsS 'http://127.0.0.1:3789/api/logs?scope=private:QQ号&operation=session' | jq .
 ```
 
-常用分类：`system`、`web`、`onebot`、`qq`、`codex`、`search`、`interest`、`learning`、`memory` 和 `lifecycle`。优先按 trace 追踪一条完整回复，再看各阶段耗时和上游错误。融合追问使用 `qq` 分类，中文彩色标题依次显示进入可重置的 5 秒缓冲、引导进活跃 turn、引导失败后截断并开始替代回答，以及旧草稿完成后在发送前直接开启替代轮次；详细字段包含触发来源、原始/压缩条数、补充语境数、图片数、引导失败原因、被截断/替代轮次和限长预览。复杂任务的进度投递与预算批准/拒绝也使用 `qq` 分类，并记录当前单轮时限、循环轮数和已申请次数。生命周期还会显示成功/失败气泡数；失败回执为下一轮主模型保留时会另记一条 QQ 警告。可用 `--group`、`--trace`、`--search 融合` 或 `--search 任务预算` 定位。
+常用分类：`system`、`web`、`onebot`、`qq`、`codex`、`search`、`interest`、`learning`、`memory` 和 `lifecycle`。新日志使用兼容旧条目的 schema v3；Agent 轮次/工具、跨会话发送、好友/加群、管理员变更和设置落盘统一带 `operation`、`outcome`、操作者角色/QQ、来源/目标会话、工具名、耗时和错误代码。动态工具参数及跨会话消息正文不会写日志。优先按 trace 追踪一条完整回复，再用 `--scope` 或 `--operation` 缩小跨会话与工具范围；摘要会额外统计操作和结果。融合追问使用 `qq` 分类，中文彩色标题依次显示进入可重置的 5 秒缓冲、引导进活跃 turn、引导失败后截断并开始替代回答，以及旧草稿完成后在发送前直接开启替代轮次。原生 Agent commentary 与 plan 更新会以有界 `codex` debug 诊断记录；已删除的文字进度/预算协议不再额外制造 QQ 控制轮。生命周期还会显示成功/失败气泡数；失败回执为下一轮主模型保留时会另记一条 QQ 警告。
 
 仪表盘不再把所有功能堆在同一页，而是分成总览、通道、智能行为、记忆、实时日志和设置六个视图。通道页只处理连接、白名单和联系人；智能行为页显示并持久化 Bot 增强、联网、主动兴趣、模型厂商与判定参数，同时提供当前厂商 key、搜索 provider、安全下载模式、活动生成和待回复数量等安全诊断信息。行为状态采用独立双列流，较长的人设卡不会在另一列制造大片空白；窄屏恢复为自然单列顺序。
 
@@ -220,7 +245,7 @@ npm run verify
 | 主动兴趣不回复 | 周期为空、judge 关闭/失败、兴趣不足、结果过时 | `interest` 日志、当前厂商对应 key、模型参数和群活跃状态 |
 | QQ 图片提示 `URL_PRIVATE_ADDRESS` 且解析到 `198.18/15` | 代理软件使用 Fake-IP DNS，严格下载模式按保留地址拦截 | 保持私网保护，设置 `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE=proxy-compatible` 后只重启 Hub；字面私网 IP 和其他保留地址仍会拒绝 |
 | 无关文字回复出现 `image download returned HTTP 400` | 持久化的附带上下文图片保留了已过期的腾讯下载地址 | 当前/明确引用图片仍可用；附带上下文图片会排除超过两小时或无时间戳的引用，确认运行中的 Hub 已加载当前源码 |
-| 主动加好友出现参数断言或原生 `code=20` | 当前 QQ 已把好友预检/提交迁到 `AddBuddyService`，NapCat 类型声明仍描述旧 BuddyService 调用 | 确认好友/群桥健康版本不低于 v7，且 `/inspect-friend` 返回 `inspection_api: add-buddy-service`；若返回 `verification_message_required`，请带 `验证=...` 重试命令 |
+| 主动加好友无回复、出现参数断言或返回 `native_timeout` | 旧桥可能无限等待 QQ 原生调用，或当前 QQ 暴露了不同的原生参数签名 | 部署好友桥 v8，并确认 `/health` 返回 `preferredFriendSubmitApi: buddy-service-uin`。UID/预检失败不会阻止提交；提交卡住会返回 HTTP 504 并指出原生接口。若预检返回 `verification_message_required`，请带 `验证=...` 重试 |
 | 联网失败 | key、provider、网络或超时 | `/api/maintenance` 的 provider attempts，`search` 日志 |
 | `ncc` 命令不认识参数 | 调用了另一套同名控制器 | `command -v ncc`、`readlink -f`、`ncc help`；仓库命令改用 `npm run ncc --` |
 | dead screen session | 异常退出留下 socket | 确认没有活进程后 `screen -wipe`，再启动 |

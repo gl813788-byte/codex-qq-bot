@@ -45,10 +45,11 @@ Minimal configuration:
 
 ```json
 {
-  "version": 1,
+  "version": 3,
   "qq": {
     "allowedGroups": ["QQ-group-id"],
     "ownerUserIds": ["owner-QQ-id"],
+    "adminUserIds": ["Bot-administrator-QQ-id"],
     "bannedUserIds": [],
     "bannedUntilByUserId": {},
     "enhancer": { "enabled": true },
@@ -78,7 +79,10 @@ Minimal configuration:
   },
   "ai": {
     "model": "gpt-5.4-mini",
-    "reasoningEffort": "low"
+    "reasoningEffort": "low",
+    "reasoningSummary": "auto",
+    "personality": "none",
+    "serviceTier": ""
   },
   "branding": {
     "assistantName": "assistant",
@@ -92,6 +96,7 @@ Minimal configuration:
 | --- | --- |
 | `qq.allowedGroups` | QQ group allowlist, stored as string IDs |
 | `qq.ownerUserIds` | QQ IDs with absolute owner authority |
+| `qq.adminUserIds` | Owner-granted Bot administrators with full menu/Agent/cross-session access but no administrator delegation or owner impersonation |
 | `qq.bannedUserIds` / `bannedUntilByUserId` | Permanent and temporary bans |
 | `qq.enhancer.enabled` | QQ media, style and interest enhancements |
 | `qq.webLookup.enabled` | Runtime QQ web-lookup switch, persistently editable from the dashboard |
@@ -99,14 +104,14 @@ Minimal configuration:
 | `qq.commandPermissions` | Public and user-specific non-owner command access |
 | `qq.codexSession.defaultMode` | Default `auto`, `persistent`, or `temporary` mode for scopes without an override |
 | `qq.codexSession.scopes` | Per-group or `private:QQ-id` mode overrides; thread IDs are not stored in settings |
-| `ai.*` | QQ model and reasoning effort |
+| `ai.*` | QQ model, reasoning effort/summary, Codex personality, and model-advertised service tier |
 | `unifiedMemory.*` | Automatic writes and manual handoff behavior |
 | `branding.*` | Assistant name, owner label and mention aliases |
 | `network.allowLanAccess` | Persistent dashboard LAN switch |
 | `network.publicTunnelEnabled` | Persistent desired state for the temporary Cloudflare Quick Tunnel; defaults to `false` |
 | `network.apiToken` | Generated remote-management token; keep the real value only in untracked local settings or the environment |
 
-The dashboard Intelligence view can persist the enhancer, web lookup, proactive-interest and judge switches plus message/minute cadence, judge model, idle timeout and recent-context size. Explicit @Bot replies do not depend on proactive interest. Switch models only to entries currently advertised by the active Codex login.
+The dashboard Intelligence view can persist the enhancer, web lookup, proactive-interest and judge switches plus message/minute cadence, judge model, idle timeout and recent-context size. Explicit @Bot replies do not depend on proactive interest. Switch models only to entries currently advertised by the active Codex login. Owners can inspect or change native turn parameters with `/思考强度`, `/推理摘要`, `/人格`, and `/服务档位`; service tiers are read from the selected model catalog (for example `fast`) instead of hard-coded. The Hub saves these changes atomically before acknowledging success, and App Server applies them on the next turn.
 
 Owners can use `/会话模式` and `/会话模式 自动|长期|临时` in QQ for the current scope. The management endpoint is `POST /api/qq/session-mode` with `{"mode":"auto|persistent|temporary","scopeId":"optional group-id or private:QQ-id"}`; use `inherit` with a scope to remove its override. Repository control uses `npm run ncc -- session` and `npm run ncc -- session-mode MODE [SCOPE]`; a machine-specific global controller may expose the same commands. Actual mappings live separately in `data/qq-codex-sessions.json`. `/新对话` stops reuse of the current mapping without deleting Codex CLI's historical files.
 
@@ -154,6 +159,9 @@ A non-loopback listener requires explicit remote allowance and a token. Wildcard
 | `CODEX_CLI_PATH` | path inside the macOS app | Codex executable; set it or expose `codex` on other platforms |
 | `CODEX_REMOTE_CONTACT_CODEX_MODEL` | `gpt-5.4-mini` | QQ startup model |
 | `CODEX_REMOTE_CONTACT_REASONING_EFFORT` | `low` | QQ startup reasoning effort |
+| `CODEX_REMOTE_CONTACT_REASONING_SUMMARY` | `auto` | Detail of the App Server's displayable reasoning summary: `auto`, `concise`, `detailed`, or `none`; it is not the model's full internal reasoning and does not change reasoning effort |
+| `CODEX_REMOTE_CONTACT_CODEX_PERSONALITY` | `none` | App Server personality: `none`, `friendly`, or `pragmatic` |
+| `CODEX_REMOTE_CONTACT_CODEX_SERVICE_TIER` | empty | Model-advertised service-tier id such as `fast`; invalid ids are cleared against the live catalog |
 | `CODEX_REMOTE_CONTACT_CODEX_MAX_CONCURRENCY` | `2` | Active jobs, bounded 1–8 |
 | `CODEX_REMOTE_CONTACT_CODEX_MAX_PENDING` | `32` | Pending jobs, bounded 0–256 |
 | `CODEX_REMOTE_CONTACT_QUOTA_CACHE_TTL_MS` | `30000` | Quota cache lifetime |
@@ -164,7 +172,7 @@ A non-loopback listener requires explicit remote allowance and a token. Wildcard
 | `CODEX_REMOTE_CONTACT_CODEX_FILE_TASK_TIMEOUT_MS` | `300000` | Owner local-file task limit |
 | `CODEX_REMOTE_CONTACT_CODEX_IMAGE_GENERATION_TIMEOUT_MS` | `600000` | Image-generation limit; configurable up to 60 minutes |
 
-The Hub classifies each Codex task and scales its base deadline by the current reasoning effort: `low ×1`, `medium ×1.5`, `high ×2`, `xhigh ×3`, `max ×4`, and `ultra ×5`. Ordinary text replies therefore start at two minutes for `low` and rise by effort, while vision, summary, file, and image tasks retain distinct bases. Values are milliseconds. Effective normal-task deadlines are capped at 30 minutes and image generation at 60 minutes. When an active QQ turn accepts steered follow-up input or a fused follow-up starts a replacement turn, it receives a fresh full task-specific window; a complete lifecycle with replacements can therefore exceed the per-round value above. `/详细配置`, `/api/maintenance`, and structured Codex logs expose the effort, multiplier, base/effective policy, or the task type, limit, and renewal count selected for a run.
+The Hub classifies each Codex task and scales its base deadline by the current reasoning effort: `low ×1`, `medium ×1.5`, `high ×2`, `xhigh ×3`, `max ×4`, and `ultra ×5`. Ordinary text replies therefore start at two minutes for `low` and rise by effort, while vision, summary, file, and image tasks retain distinct bases. Values are milliseconds. Effective normal-task deadlines are capped at 30 minutes and image generation at 60 minutes. App Server owns native multi-turn tools and context compaction; the removed text budget/continue protocol no longer changes these limits. When an active QQ turn accepts steered follow-up input or a fused follow-up starts a replacement turn, it receives a fresh full task-specific window. `/详细配置`, `/api/state`, `/api/maintenance`, and structured Codex logs expose current native settings and task timing.
 
 ### OneBot
 

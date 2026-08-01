@@ -1,3 +1,6 @@
+const friendLookupTimeoutMs = 2500;
+const friendSubmitTimeoutMs = 5000;
+
 export async function plugin_init(ctx) {
   ctx.router.getNoAuth("/health", (req, res) => {
     if (!isLoopbackRequest(req)) return res.status(403).json({ ok: false, error: "loopback_only" });
@@ -5,12 +8,14 @@ export async function plugin_init(ctx) {
       ok: true,
       status: "ok",
       plugin: ctx.pluginName,
-      version: 7,
+      version: 8,
       capabilities: [
         "friend-verification",
         "friend-preflight",
         "friend-modern-api",
         "friend-api-signature-adapter",
+        "friend-forced-uin-submit",
+        "friend-native-timeout",
         "group-join-verification",
         "group-api-signature-adapter"
       ],
@@ -19,6 +24,10 @@ export async function plugin_init(ctx) {
         getBuddySettingArity: methodArity(getAddBuddyService(ctx), "getBuddySetting"),
         addBuddyArity: methodArity(getAddBuddyService(ctx), "addBuddy"),
         reqToAddFriendsArity: methodArity(ctx.core.context.session.getBuddyService(), "reqToAddFriends"),
+        preferredFriendSubmitApi: selectFriendSubmissionApi(
+          ctx.core.context.session.getBuddyService(),
+          getAddBuddyService(ctx)
+        ),
         reqToJoinGroupArity: methodArity(ctx.core.context.session.getGroupService(), "reqToJoinGroup"),
         joinGroupArity: methodArity(ctx.core.context.session.getGroupService(), "joinGroup")
       }
@@ -37,13 +46,15 @@ export async function plugin_init(ctx) {
         && typeof buddyService?.reqToAddFriends !== "function") {
         return res.status(501).json({ ok: false, error: "add_friend_unavailable" });
       }
-      const inspection = await inspectFriendTarget(ctx, buddyService, targetId, addBuddyService);
+      const inspection = await inspectFriendTargetWithinBudget(ctx, buddyService, targetId, addBuddyService);
       return res.json({
         ok: true,
         status: inspection.alreadyFriend ? "already_friend" : "ready",
         target_id: targetId,
         uid_available: Boolean(inspection.uid),
+        inspection_timed_out: Boolean(inspection.timedOut),
         inspection_api: inspection.requirements.api,
+        submission_api: selectFriendSubmissionApi(buddyService, addBuddyService),
         verification_setting: inspection.requirements.setting ?? null,
         verification_mode: inspection.requirements.setting == null
           ? "未知（提交时由 QQ 决定）"
@@ -73,7 +84,7 @@ export async function plugin_init(ctx) {
         && typeof buddyService?.reqToAddFriends !== "function") {
         return res.status(501).json({ ok: false, error: "add_friend_unavailable" });
       }
-      const inspection = await inspectFriendTarget(ctx, buddyService, targetId, addBuddyService);
+      const inspection = await inspectFriendTargetWithinBudget(ctx, buddyService, targetId, addBuddyService);
       if (inspection.alreadyFriend) {
         return res.json({ ok: true, status: "already_friend", target_id: targetId });
       }
@@ -249,7 +260,11 @@ async function readFriendRequirements(buddyService, targetId, ctx) {
   for (const [method, args] of attempts) {
     if (typeof buddyService?.[method] !== "function") continue;
     try {
-      const result = await Promise.resolve(buddyService[method](...args));
+      const result = await withNativeTimeout(
+        buddyService[method](...args),
+        `BuddyService.${method}`,
+        friendLookupTimeoutMs
+      );
       const candidate = result?.data || result?.setting || result;
       const setting = normalizeOptionalInteger(candidate?.addFriendSetting ?? candidate?.setting, 0, 99);
       if (setting !== undefined) {
@@ -268,7 +283,11 @@ async function readFriendRequirements(buddyService, targetId, ctx) {
 async function inspectFriendTarget(ctx, buddyService, targetId, addBuddyService) {
   let uid = "";
   try {
-    uid = String(await ctx.core.apis.UserApi.getUidByUinV2(targetId) || "");
+    uid = String(await withNativeTimeout(
+      ctx.core.apis.UserApi.getUidByUinV2(targetId),
+      "UserApi.getUidByUinV2",
+      friendLookupTimeoutMs
+    ) || "");
   } catch (error) {
     // QQ can accept a UIN directly. UID lookup often fails for strangers, so it
     // must never prevent a valid friend request from reaching the native API.
@@ -281,7 +300,11 @@ async function inspectFriendTarget(ctx, buddyService, targetId, addBuddyService)
   let alreadyFriend = false;
   if (uid && typeof ctx.core.apis.FriendApi?.isBuddy === "function") {
     try {
-      alreadyFriend = Boolean(await ctx.core.apis.FriendApi.isBuddy(uid));
+      alreadyFriend = Boolean(await withNativeTimeout(
+        ctx.core.apis.FriendApi.isBuddy(uid),
+        "FriendApi.isBuddy",
+        friendLookupTimeoutMs
+      ));
     } catch (error) {
       ctx.logger.info("Unable to inspect existing QQ friendship", {
         targetId,
@@ -303,6 +326,28 @@ async function inspectFriendTarget(ctx, buddyService, targetId, addBuddyService)
   };
 }
 
+async function inspectFriendTargetWithinBudget(ctx, buddyService, targetId, addBuddyService) {
+  try {
+    return await withNativeTimeout(
+      inspectFriendTarget(ctx, buddyService, targetId, addBuddyService),
+      "friend preflight",
+      friendLookupTimeoutMs
+    );
+  } catch (error) {
+    if (error?.code !== "native_timeout") throw error;
+    ctx.logger.info("QQ friend preflight timed out; forcing submission by UIN", {
+      targetId,
+      timeoutMs: friendLookupTimeoutMs
+    });
+    return {
+      uid: "",
+      alreadyFriend: false,
+      timedOut: true,
+      requirements: { api: "timed-out", setting: undefined, questions: [] }
+    };
+  }
+}
+
 function getAddBuddyService(ctx) {
   if (typeof ctx?.core?.context?.session?.getAddBuddyService !== "function") return null;
   try {
@@ -316,14 +361,18 @@ async function readFriendRequirementsWithModernFallback(addBuddyService, buddySe
   if (typeof addBuddyService?.getBuddySetting === "function") {
     try {
       const targetInfo = friendAccountInfo(targetId, uid);
-      const result = await Promise.resolve(addBuddyService.getBuddySetting(
-        "CodexRemoteContact",
-        {
-          targetInfo,
-          sourceSubId: 0
-        },
-        []
-      ));
+      const result = await withNativeTimeout(
+        addBuddyService.getBuddySetting(
+          "CodexRemoteContact",
+          {
+            targetInfo,
+            sourceSubId: 0
+          },
+          []
+        ),
+        "AddBuddyService.getBuddySetting",
+        friendLookupTimeoutMs
+      );
       const candidate = unwrapModernFriendPayload(result);
       const failure = nativeFailure(result?.result) || nativeFailure(candidate);
       if (failure) throw new Error(`modern_friend_preflight_failed:${failure.code}:${failure.message}`);
@@ -453,7 +502,18 @@ function sendNativeFailure(res, failure) {
 
 function sendCaughtFailure(res, error) {
   const message = String(error?.message || error || "unknown_error");
-  if (message === "reqToJoinGroup_unavailable") return res.status(501).json({ ok: false, error: message });
+  if (error?.code === "native_timeout") {
+    return res.status(504).json({
+      ok: false,
+      error: "native_timeout",
+      native_api: String(error.nativeApi || "unknown"),
+      timeout_ms: Number(error.timeoutMs) || undefined,
+      native_message: message
+    });
+  }
+  if (message === "reqToJoinGroup_unavailable" || message === "add_friend_unavailable") {
+    return res.status(501).json({ ok: false, error: message });
+  }
   if (isRiskControlError(message)) return res.status(409).json({ ok: false, error: "risk_control_required", native_message: message });
   return res.status(500).json({ ok: false, error: message });
 }
@@ -510,10 +570,52 @@ function methodArity(target, method) {
 }
 
 async function submitFriendRequest(addBuddyService, buddyService, request) {
+  const verificationText = request.addFriendSetting === 2 || request.addFriendSetting === 3
+    ? request.answer
+    : request.verifyInfo;
+
+  // The stable native interface accepts UIN + verification text and does not
+  // depend on resolving a stranger UID. Prefer it over AddBuddyService, whose
+  // request shape varies across QQ/NapCat releases and may never settle.
+  if (typeof buddyService?.reqToAddFriends === "function") {
+    const apiArity = methodArity(buddyService, "reqToAddFriends");
+    if (apiArity === 1) {
+      return {
+        result: await withNativeTimeout(
+          buddyService.reqToAddFriends(request),
+          "BuddyService.reqToAddFriends(request)",
+          friendSubmitTimeoutMs
+        ),
+        apiShape: "request-object",
+        apiArity
+      };
+    }
+
+    try {
+      return {
+        result: await withNativeTimeout(
+          buddyService.reqToAddFriends(request.buddyUin, verificationText),
+          "BuddyService.reqToAddFriends(uin,message)",
+          friendSubmitTimeoutMs
+        ),
+        apiShape: "uin-message",
+        apiArity
+      };
+    } catch (error) {
+      if (!isNativeArgumentCountError(error, 1)) throw error;
+      return {
+        result: await withNativeTimeout(
+          buddyService.reqToAddFriends(request),
+          "BuddyService.reqToAddFriends(request)",
+          friendSubmitTimeoutMs
+        ),
+        apiShape: "request-object",
+        apiArity
+      };
+    }
+  }
+
   if (typeof addBuddyService?.addBuddy === "function") {
-    const verificationText = request.addFriendSetting === 2 || request.addFriendSetting === 3
-      ? request.answer
-      : request.verifyInfo;
     const modernRequest = {
       targetInfo: friendAccountInfo(request.buddyUin, request.buddyUid),
       sourceId: request.sourceID,
@@ -530,38 +632,45 @@ async function submitFriendRequest(addBuddyService, buddyService, request) {
       myFriendGroupId: request.defaultCatgory
     };
     return {
-      result: await Promise.resolve(addBuddyService.addBuddy(
-        "CodexRemoteContact",
-        modernRequest,
-        []
-      )),
+      result: await withNativeTimeout(
+        addBuddyService.addBuddy("CodexRemoteContact", modernRequest, []),
+        "AddBuddyService.addBuddy",
+        friendSubmitTimeoutMs
+      ),
       apiShape: "add-buddy-service",
       apiArity: methodArity(addBuddyService, "addBuddy")
     };
   }
 
-  const apiArity = methodArity(buddyService, "reqToAddFriends");
-  if (apiArity < 2) {
-    try {
-      return {
-        result: await Promise.resolve(buddyService.reqToAddFriends(request)),
-        apiShape: "request-object",
-        apiArity
-      };
-    } catch (error) {
-      if (!isNativeArgumentCountError(error, 2)) throw error;
-    }
-  }
+  const error = new Error("add_friend_unavailable");
+  error.code = "unsupported";
+  throw error;
+}
 
-  // Native wrappers may hide their arity as 0. NapCat 4.18.13 currently
-  // requires one request object; retry the older two-argument adapter only when
-  // the native layer explicitly asserts that it needs two arguments.
-  const verificationText = request.addFriendSetting === 2 || request.addFriendSetting === 3
-    ? request.answer
-    : request.verifyInfo;
-  return {
-    result: await Promise.resolve(buddyService.reqToAddFriends(request.buddyUin, verificationText)),
-    apiShape: "uin-message",
-    apiArity
-  };
+function selectFriendSubmissionApi(buddyService, addBuddyService) {
+  if (typeof buddyService?.reqToAddFriends === "function") {
+    return methodArity(buddyService, "reqToAddFriends") === 1
+      ? "buddy-service-request-object"
+      : "buddy-service-uin";
+  }
+  if (typeof addBuddyService?.addBuddy === "function") return "add-buddy-service";
+  return "unavailable";
+}
+
+export async function withNativeTimeout(value, nativeApi, timeoutMs) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(`${nativeApi} timed out after ${timeoutMs}ms`);
+      error.code = "native_timeout";
+      error.nativeApi = nativeApi;
+      error.timeoutMs = timeoutMs;
+      reject(error);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([Promise.resolve(value), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

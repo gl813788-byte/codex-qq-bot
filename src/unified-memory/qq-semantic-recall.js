@@ -106,7 +106,7 @@ export async function recallQqSemanticMemory({
         minScore: query ? 0.06 : 0
       }
     },
-    event.isOwner
+    (event.isOwner || event.isBotAdmin)
       ? {
         name: "unified",
         options: {

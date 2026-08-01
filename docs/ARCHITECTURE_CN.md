@@ -21,22 +21,30 @@
        基础设施 -----------> Codex CLI、文件、进程、日志
 ```
 
-`src/server.js` 是组合根，负责连接依赖、启动 HTTP 监听和关闭进程。它仍是渐进拆分中的大文件，不是新增子系统的默认位置。新的解析、校验、策略和持久化逻辑应放入职责明确的模块，只在组合根中接线。
+`src/server.js` 是组合根，负责连接依赖、启动 HTTP 监听和关闭进程。它仍包含待拆的旧编排，但 Codex Agent 执行、原生工具/输出边界、运行参数策略、设置快照/仓库、文件 Agent 策略和 HTTP server 适配器都已移入职责明确的模块。新的解析、校验、策略和持久化逻辑仍只应在组合根接线。
 
 ## 目录地图
 
 | 路径 | 职责 | 适合在这里修改 |
 | --- | --- | --- |
 | `src/app/` | 应用状态和启动组合 | 全局状态结构、启动生命周期 |
+| `src/app/qq-codex-runtime-settings.js` | Codex 原生轮次参数指令策略 | 推理摘要、人格、服务档位校验或持久化动作 |
+| `src/app/qq-file-agent-turn.js` | 主人/管理员/公开文件 Agent 能力策略 | 文件任务根目录、沙箱、管理员破坏性操作拒绝策略或文件任务指令 |
+| `src/channels/http/hub-http-server.js` | HTTP 请求分发与安全错误边界 | API/资源路由或 OneBot webhook 限流 |
 | `src/channels/qq/` | 唯一的 QQ / OneBot 消息传输边界 | 解析、校验和归一化 QQ 事件 |
 | `src/config/` | 环境变量与运行默认值 | 新环境变量、默认值、范围约束 |
 | `src/qq-enhancer/` | 可选 QQ 回复增强 | 图片、主动兴趣、回复风格 |
 | `src/qq-main-prompt.js` | 主模型提示词边界 | 角色、执行顺序、主动任务和按需工具目录 |
-| `src/qq-task-control.js` | QQ 多步任务控制 | 进度/续轮/预算 marker 解析，分钟、轮数、申请次数和进度条数上限 |
 | `src/qq-proactive-pipeline.js` | 主动聊天双模型契约 | 普通接话、冷群话题/水群和主动私聊的兴趣批准凭据与主模型必经校验 |
 | `src/qq-proactive-cycle-state.js` | 普通兴趣内存周期状态 | pending 消息计数、Bot 确认送达后的重置，以及作废送达前执行中 judge 且保留后续消息 |
 | `src/qq-message-run-compaction.js` | 模型上下文连续复读压缩 | 相邻同文消息的语义签名、计数合并和中文条数标注 |
 | `src/codex-app-server-turn.js` | Codex app-server 单轮客户端 | `thread/start`/`thread/resume`、`turn/start`、运行中控制、直接截断续开、inactive turn 竞态恢复、超时和中断 |
+| `src/infrastructure/codex/qq-turn-runner.js` | QQ App Server 生命周期适配器 | 限流、隔离子进程环境、原生轮次参数、诊断、融合恢复、取消和配额刷新 |
+| `src/infrastructure/codex/qq-native-tools.js` | QQ 动态工具表面 | 把结构化 App Server 调用映射到已有鉴权 Hub 操作 |
+| `src/qq-cross-session.js` | 跨会话目录与事件重绑定 | 列出/解析群聊私聊 selector，或把已验证角色安全绑定到目标会话 |
+| `src/qq-operation-log.js` | QQ 操作日志统一字段 | 统一 Agent、管理员、社交和跨会话的操作者及来源/目标范围 |
+| `src/infrastructure/codex/qq-agent-output.js` | QQ 结构化最终输出边界 | 回复/静默/寻址/附件 Schema 与投递兼容转换 |
+| `src/infrastructure/storage/settings-repository.js` | 原子设置 I/O | 加载或持久化 `data/settings.json`，不把文件系统逻辑塞回组合根 |
 | `src/qq-codex-turn-recovery.js` | 融合 turn 故障隔离 | 识别无进展的替代 turn，并用原始 prompt 与已接收融合输入重建一次全新线程尝试 |
 | `src/qq-reply-steering.js` | QQ 追问融合调度 | 每条新追问重置的 5 秒静默窗口、单批快照消费、优先 steer 活跃 turn、拒绝时替代、已完成草稿替换、失败保留和活动轮次校验 |
 | `src/qq-context-relevance.js` | 远聊天语义评分 | 缓存本地语义画像并为较早的人类/Bot 聊天片段计算相关性 |
@@ -90,11 +98,11 @@
 
 - **HTTP：**仪表盘和管理 API 提供公开状态、维护信息和日志；没有显式开启远程绑定与认证时拒绝非回环访问。
 - **OneBot：**Webhook 先经过认证或回环限制、大小限制、归一化和去重，再进入 QQ 策略。
-- **Codex：**普通 QQ 回复通过 app-server 的可控 turn 运行；每条新消息先经过正常记忆和路由，真正触发 Bot 的追问进入融合缓冲。一批追问静默满 5 秒后，Hub 优先调用 `turn/steer` 引导当前活跃任务；只有 steer 被拒绝或 turn 已不活跃时，才 `turn/interrupt` 并在同一 thread 中 `turn/start` 替代输入。任务基础时限先按任务类型选择，再按当前思考强度以 `low/medium/high/xhigh/max/ultra = ×1/×1.5/×2/×3/×4/×5` 放大；普通文字回复的 `low` 基础时限为 2 分钟。每次追问引导被接受或替代 turn 开始时，任务截止时间都会按当前任务类型与思考强度续成完整窗口。主模型还可通过任务控制 marker 自选任意阶段进度、申请受限的后续单轮时长/工具轮数，或无工具继续一轮；纯模块负责 24 总轮、2 次申请、单次 15 分钟/8 轮和 4 条进度等硬上限，`server.js` 只负责投递和接线。替代 turn 连续 60 秒没有协议活动时会被隔离，并在全新 app-server 线程中用原始完整 prompt 与已接收融合输入重试一次；普通非融合超时不会重试。如果 turn 完成时仍有一批追问等待处理，未发送草稿会被丢弃，这批追问立即开启替代轮次，不继续等待也不投递过时文本。长期 scope 通过独立 app-server 进程 `thread/resume` 同一本地线程；每个子进程仍使用受控环境、并发限制和当前 QQ 模型配置。
+- **Codex：**主回复、主人/公开文件任务、聊天总结、人设/风格总结和复杂知识终审全部走 App Server，旧的 `codex exec` 回复控制层已删除。多轮工具、计划、上下文压缩、Web Search、文件操作和 Shell 由 Codex 原生能力负责；Hub 通过 `item/tool/call` 暴露 QQ 动态工具，并按原始发送者权限执行，最终输出必须符合严格 Schema。融合追问的替代、完整时限续期和新线程单次恢复保持原语义。长期 scope 续用同一 thread 时会刷新当前动态工具定义。每个子进程使用隔离白名单环境，并接收当前模型、强度、摘要、人格和服务档位。
 - **QQ 上下文：**连续复读压缩后，总会完整发送一段连续的近期窗口（群普通 20 条、群明确触发 30 条、群扩展 48 条；私聊 30 条、扩展 60 条）。语义筛选只处理保留记录中更早的部分，并同时覆盖人类与 Bot 消息。当前正文、引用和融合追问组成同一查询，也供短期记忆、知识、印象和统一记忆召回复用。
 - **QQ 投递：**主模型从完整上下文自行判断闲聊或实质任务；解题、代码、写作、总结及其短续答以完成任务为长度依据，不受闲聊字数建议限制。投递前，`src/qq-reply-chunks.js` 把超过单条安全字符上限的正文优先按段落/句子边界拆成多条有序气泡，避免把完整答案硬裁到 900 字或用一条超限消息发送。多人融合轮把有界参与者交给主模型，每位候选人都能被选择引用或艾特；缺少或无效标记时安全回退为普通回复。单人轮仍沿用基于关系距离的引用/艾特/普通回复策略。OneBot 每个气泡结果都会形成投递回执，只有成功文本进入“已发送”记忆，失败项单独保留给下一轮主模型。
 - **模型职责：**已配置的 OpenRouter、DeepSeek 或自定义 OpenAI 兼容兴趣模型是后台轻量判定与杂项初筛面，厂商适配集中在 `src/interest-model-provider.js`；密钥只在环境配置中，厂商/模型选择可持久化。兴趣模型只处理有界触发、分类、风险标注和简单审核；Codex 主模型负责聊天、总结、工具检索、选题、知识提取、复杂推理和最终回复。
-- **存储：**设置、记忆和社交状态保存在本地文件；QQ scope 到 Codex thread 的映射单独原子写入 `data/qq-codex-sessions.json`，不复制 Codex 线程正文。`qq-knowledge-base` 已通过 repository 进行安全加载与原子写入；格式错误会保留原文件并切换只读保护，其他存储后续按小步继续抽取。
+- **存储：**设置、记忆和社交状态保存在本地文件。`data/settings.json` 通过 `src/infrastructure/storage/settings-repository.js` 加载和原子替换，纯快照包含全部 Codex 原生运行参数。QQ scope 到 Codex thread 的映射单独原子写入 `data/qq-codex-sessions.json`，不复制 Codex 线程正文。`qq-knowledge-base` 在格式错误时保留原文件并切换只读保护；其他记忆存储继续按小步抽取。
 - **周期与手动任务：**`src/wall-clock-scheduler.js` 只负责唤醒领域检查；到期时间仍保存在对应领域数据中。普通兴趣周期与短期记忆写入 `data/qq-memory.json`，知识频率复核时钟写入 `data/qq-knowledge-base.json`，自适应/人格时钟继续留在 persona 文件。启动和 QQ 通道恢复时只立即补做一轮，完成时刻成为下一周期的新起点。`/api/qq/ai-tasks`、QQ `/AI任务` 与 NCC 复用同一套总结/复盘函数、范围校验和并发锁；强制模式只跳过调度与常规样本条件。知识低频复核无论自动还是手动都先通过 `qq-enhancer` 的兴趣模型结构化通道做有界初筛，再启动 Codex 主模型读取完整证据终审。
 
 ## 新增功能的步骤
@@ -109,10 +117,10 @@
 
 后续按行为不变的小切片继续缩小 `src/server.js`：
 
-1. 仪表盘/API 路由移到 `src/channels/http/`。
+1. 继续把单个仪表盘/API 路由放到新的 `src/channels/http/hub-http-server.js` 边界之后。
 2. OneBot API 调用和 QQ 回复发送移到 `src/channels/qq/`。
-3. Codex CLI 执行和额度发现移到 `src/infrastructure/codex/`。
-4. 设置与记忆持久化移到 `src/infrastructure/storage/`。
+3. 把剩余 Codex 额度发现移到 `src/infrastructure/codex/`；Agent turn 执行已完成拆分。
+4. 把剩余记忆持久化移到 `src/infrastructure/storage/`；settings 已完成拆分。
 
 每个切片都应保持公共接口兼容并带回归测试。避免一次性大规模移动文件，否则难以审查行为变化和回滚。
 

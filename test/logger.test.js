@@ -127,7 +127,7 @@ test("logger correlates child entries and supports diagnostic filters and summar
 
   const tracedEntries = await readLogEntries(filePath, { traceId: "trace-qq", groupId: "10001" });
   assert.equal(tracedEntries.length, 2);
-  assert.ok(tracedEntries.every((entry) => entry.schemaVersion === 2 && entry.id));
+  assert.ok(tracedEntries.every((entry) => entry.schemaVersion === 3 && entry.id));
   assert.ok(tracedEntries.every((entry) => entry.spanId === "reply-span"));
 
   const slow = await readLogEntries(filePath, {
@@ -140,6 +140,8 @@ test("logger correlates child entries and supports diagnostic filters and summar
     total: 2,
     byLevel: { debug: 1, success: 1 },
     byCategory: { lifecycle: 2 },
+    byOperation: {},
+    byOutcome: { sent: 1 },
     traceCount: 1,
     firstAt: tracedEntries[0].ts,
     lastAt: tracedEntries[1].ts,

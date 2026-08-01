@@ -9,6 +9,8 @@ export async function buildLogsResponse(logFilePath, searchParams) {
   const query = searchParams.get("q") || searchParams.get("query") || "";
   const groupId = searchParams.get("groupId") || searchParams.get("group") || "";
   const senderId = searchParams.get("senderId") || searchParams.get("sender") || "";
+  const scopeId = searchParams.get("scopeId") || searchParams.get("scope") || "";
+  const operation = searchParams.get("operation") || searchParams.get("op") || "";
   const since = searchParams.get("since") || "";
   const until = searchParams.get("until") || "";
   const minDurationMs = Math.max(0, Number(searchParams.get("minDurationMs") || searchParams.get("slow") || 0) || 0);
@@ -23,11 +25,13 @@ export async function buildLogsResponse(logFilePath, searchParams) {
     query,
     groupId,
     senderId,
+    scopeId,
+    operation,
     since,
     until,
     minDurationMs
   });
-  const hasAdvancedFilter = Boolean(traceId || query || groupId || senderId || since || until || minDurationMs);
+  const hasAdvancedFilter = Boolean(traceId || query || groupId || senderId || scopeId || operation || since || until || minDurationMs);
   const visibleEntries = entries
     .filter((entry) => isVisibleByDefault(entry, { verbose, level, category, hasAdvancedFilter }))
     .slice(-normalizedLimit)
@@ -41,6 +45,8 @@ export async function buildLogsResponse(logFilePath, searchParams) {
       query: query || null,
       groupId: groupId || null,
       senderId: senderId || null,
+      scopeId: scopeId || null,
+      operation: operation || null,
       since: since || null,
       until: until || null,
       minDurationMs: minDurationMs || null
@@ -70,7 +76,9 @@ function compactEntry(entry) {
     "deadlineRenewalCount",
     "resultCount", "status", "outcome", "code", "error", "reason", "decisionReason", "url", "diagnostic", "diagnosticOmittedLines",
     "groupId", "senderId", "messageId", "messageType", "proactive", "triggerMode", "taskType", "queuedCount", "bubbleCount", "replyChars", "sendStatus",
-    "source", "action", "operation", "scopeType", "scopeId", "entryId", "variantId", "title", "titles", "matchedTerms",
+    "source", "action", "operation", "scopeType", "scopeId", "sourceScopeId", "targetScopeId", "targetType",
+    "actorRole", "actorUserId", "toolNamespace", "toolName", "toolAction", "toolCallId", "toolRound", "errorCode",
+    "entryId", "variantId", "title", "titles", "matchedTerms",
     "appliedCount", "rejectedCount", "removedCount", "entryCount", "scopeCount", "titleCount", "slangCount", "variantCount",
     "matchedTitleCount", "recordedHitCount", "contextExtendedCount", "hitCount", "totalHits", "recentHits", "retainedOccurrenceCount",
     "deleted", "modelDecision", "modelDurationMs", "modelTemperature", "modelOutput", "outputChars", "outputTruncated",

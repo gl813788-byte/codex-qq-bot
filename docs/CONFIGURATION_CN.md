@@ -45,10 +45,11 @@ npm run ncc -- setup
 
 ```json
 {
-  "version": 1,
+  "version": 3,
   "qq": {
     "allowedGroups": ["QQ群号"],
     "ownerUserIds": ["主人QQ号"],
+    "adminUserIds": ["Bot管理员QQ号"],
     "bannedUserIds": [],
     "bannedUntilByUserId": {},
     "enhancer": { "enabled": true },
@@ -78,7 +79,10 @@ npm run ncc -- setup
   },
   "ai": {
     "model": "gpt-5.4-mini",
-    "reasoningEffort": "low"
+    "reasoningEffort": "low",
+    "reasoningSummary": "auto",
+    "personality": "none",
+    "serviceTier": ""
   },
   "branding": {
     "assistantName": "assistant",
@@ -94,6 +98,7 @@ npm run ncc -- setup
 | --- | --- |
 | `qq.allowedGroups` | 允许处理的 QQ 群号；群号按字符串保存 |
 | `qq.ownerUserIds` | 拥有绝对管理权限的 QQ 号 |
+| `qq.adminUserIds` | 由主人授予的 Bot 管理员；可用完整菜单、Agent 与跨会话，但不能授予/撤销管理员或冒充主人 |
 | `qq.bannedUserIds` / `bannedUntilByUserId` | 永久与临时 ban |
 | `qq.enhancer.enabled` | 图片、风格、兴趣等 QQ 增强总开关 |
 | `qq.webLookup.enabled` | QQ 联网查询运行时开关；可由网页端持久化修改 |
@@ -101,14 +106,14 @@ npm run ncc -- setup
 | `qq.commandPermissions` | 非主人可见且可执行的公共/用户级指令 |
 | `qq.codexSession.defaultMode` | 未单独覆盖 scope 的 `auto` / `persistent` / `temporary` 默认模式 |
 | `qq.codexSession.scopes` | 按群号或 `private:QQ号` 覆盖会话模式；线程 ID 不写入设置文件 |
-| `ai.*` | QQ 使用的模型和思考强度 |
+| `ai.*` | QQ 使用的模型、思考强度、推理摘要、Codex 人格与模型公布的服务档位 |
 | `unifiedMemory.*` | 自动写入与手动交接策略 |
 | `branding.*` | 助手名称、主人称呼和 @ 别名 |
 | `network.allowLanAccess` | 仪表盘持久化的局域网开关 |
 | `network.publicTunnelEnabled` | Cloudflare 临时 Quick Tunnel 的持久期望状态；默认 `false` |
 | `network.apiToken` | 自动生成的远程管理 token；真实值只能保留在未跟踪本机设置或环境中 |
 
-网页端“智能行为”页可持久化修改 `qq.enhancer.enabled`、`qq.webLookup.enabled`、主动兴趣开关、判定开关、消息/分钟间隔、判定模型、静默超时和最近上下文数量。显式 @ Bot 的正常回复不依赖主动兴趣开关。模型切换应使用当前 Codex 登录实际提供的模型列表；不要把历史模型名当成永久可用值。
+网页端“智能行为”页可持久化修改 `qq.enhancer.enabled`、`qq.webLookup.enabled`、主动兴趣开关、判定开关、消息/分钟间隔、判定模型、静默超时和最近上下文数量。显式 @ Bot 的正常回复不依赖主动兴趣开关。主人可用 `/思考强度`、`/推理摘要`、`/人格` 和 `/服务档位` 查看或修改原生轮次参数；服务档位从当前模型目录动态读取（例如 `fast`），不再硬编码。Hub 会在确认成功前原子落盘，并从下一轮 App Server turn 起应用。模型切换应使用当前 Codex 登录实际提供的模型列表。
 
 主人可在 QQ 使用 `/会话模式` 和 `/会话模式 自动|长期|临时` 修改当前群/私聊。管理 API 为 `POST /api/qq/session-mode`，请求体为 `{"mode":"auto|persistent|temporary","scopeId":"可选群号或 private:QQ号"}`；scope 使用 `inherit` 可删除覆盖。仓库控制器使用 `npm run ncc -- session` 与 `npm run ncc -- session-mode MODE [SCOPE]`，支持该能力的全局控制器使用相同命令名。实际线程映射单独保存在 `data/qq-codex-sessions.json`，`/新对话` 只停止复用当前映射，不删除 Codex CLI 自身的历史文件。
 
@@ -156,6 +161,9 @@ npm run ncc -- setup
 | `CODEX_CLI_PATH` | macOS App 内置路径 | Codex 可执行文件；Linux/Windows 部署应设置或保证 `codex` 可发现 |
 | `CODEX_REMOTE_CONTACT_CODEX_MODEL` | `gpt-5.4-mini` | QQ 默认模型 |
 | `CODEX_REMOTE_CONTACT_REASONING_EFFORT` | `low` | QQ 默认思考强度 |
+| `CODEX_REMOTE_CONTACT_REASONING_SUMMARY` | `auto` | App Server 可展示推理摘要的详细度：`auto`、`concise`、`detailed` 或 `none`；它不是完整内部思维，也不改变思考强度 |
+| `CODEX_REMOTE_CONTACT_CODEX_PERSONALITY` | `none` | App Server 人格：`none`、`friendly` 或 `pragmatic` |
+| `CODEX_REMOTE_CONTACT_CODEX_SERVICE_TIER` | 空 | 模型公布的服务档位 ID，例如 `fast`；无效值会按实时模型目录清除 |
 | `CODEX_REMOTE_CONTACT_CODEX_MAX_CONCURRENCY` | `2` | Codex 同时运行数，范围 1–8 |
 | `CODEX_REMOTE_CONTACT_CODEX_MAX_PENDING` | `32` | 等待队列，范围 0–256 |
 | `CODEX_REMOTE_CONTACT_QUOTA_CACHE_TTL_MS` | `30000` | 额度信息缓存时间 |
@@ -166,7 +174,7 @@ npm run ncc -- setup
 | `CODEX_REMOTE_CONTACT_CODEX_FILE_TASK_TIMEOUT_MS` | `300000` | 主人本机文件任务时限 |
 | `CODEX_REMOTE_CONTACT_CODEX_IMAGE_GENERATION_TIMEOUT_MS` | `600000` | 图片生成时限；允许配置到 60 分钟 |
 
-Hub 会先识别 Codex 任务类型，再把上表的任务基础时限按当前思考强度放大：`low ×1`、`medium ×1.5`、`high ×2`、`xhigh ×3`、`max ×4`、`ultra ×5`。因此普通文字回复默认从 `low` 的 2 分钟逐档增加；看图、总结、文件与画图任务保留各自的基础时限。以上值的单位都是毫秒，普通任务最终不超过 30 分钟，图片生成不超过 60 分钟。运行中的 QQ turn 接受追问引导或融合追问启动替代 turn 后，会重新获得一整段对应任务时限，因此包含多轮追问替换的完整回复生命周期可以长于表中的单轮时限。复杂 QQ 工具任务可在模型判断现有预算确实不足时申请增加后续单轮时限和循环轮数；每次最多增加 15 分钟/8 轮，一次任务最多申请 2 次，总工具轮数最多 24，且仍受上述任务硬时限约束。`/详细配置`、`/api/maintenance` 和 Codex 结构化日志会显示当前思考强度、倍率、基础时限、实际时限、本次任务类型、任务申请或续期次数。
+Hub 会先识别 Codex 任务类型，再把上表的任务基础时限按当前思考强度放大：`low ×1`、`medium ×1.5`、`high ×2`、`xhigh ×3`、`max ×4`、`ultra ×5`。因此普通文字回复默认从 `low` 的 2 分钟逐档增加；看图、总结、文件与画图任务保留各自的基础时限。以上值单位为毫秒，普通任务最终不超过 30 分钟，图片生成不超过 60 分钟。多轮工具与上下文压缩由 App Server 原生负责；已删除的文字预算/续轮协议不再改变时限。运行中的 QQ turn 接受追问引导或融合追问启动替代 turn 后，会重新获得一整段对应任务时限。`/详细配置`、`/api/state`、`/api/maintenance` 和 Codex 结构化日志会显示当前原生参数与任务时限。
 
 ### OneBot
 

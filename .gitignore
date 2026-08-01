@@ -13,6 +13,9 @@ downloads/
 backups/
 apps/
 vendor/
+output/
+.playwright-cli/
+workspaces/codex-cli/
 
 # Runtime output
 runtime/
@@ -42,7 +45,11 @@ data/qq-requests.json
 data/qq-sticker-inventory.json
 data/qq-sticker-labels.json
 data/qq-stickers/
+data/qq-codex-sessions.json
+data/semantic-memory.sqlite*
 data/keep-awake.pid
 data/previous-brightness.txt
 modules/system-control/bin/
 config/local.codexremotecontact.chat-hub.plist
+config/local.gpt-qq-bot.chat-hub.plist
+/guild*.db*

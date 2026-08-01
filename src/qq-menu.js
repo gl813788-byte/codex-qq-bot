@@ -9,12 +9,14 @@ const categoryMeta = {
 
 export function formatQqVisualMenu({
   owner = false,
+  administrator = false,
   assistantName = "Bot",
   model = "",
   reasoningEffort = "",
   allowedGroups = [],
   commands = []
 } = {}) {
+  const privileged = owner || administrator;
   const visible = (Array.isArray(commands) ? commands : []).filter((command) => command?.menuLine);
   const sections = categoryOrder
     .map((category) => ({
@@ -23,9 +25,10 @@ export function formatQqVisualMenu({
     }))
     .filter((section) => section.commands.length > 0);
   const lines = [
-    `╭─ ${owner ? "👑" : "✨"} ${compact(assistantName, 24)} · QQ 控制台`,
-    owner && model ? `│ 🤖 ${compact(model, 40)} · ${compact(reasoningEffort || "default", 12)}` : null,
-    owner ? `│ 👥 白名单 ${allowedGroups.length} 个${allowedGroups.length ? ` · ${allowedGroups.join("、")}` : ""}` : null,
+    `╭─ ${owner ? "👑" : administrator ? "🛡️" : "✨"} ${compact(assistantName, 24)} · QQ 控制台`,
+    administrator ? "│ 身份：Bot 管理员" : null,
+    privileged && model ? `│ 🤖 ${compact(model, 40)} · ${compact(reasoningEffort || "default", 12)}` : null,
+    privileged ? `│ 👥 白名单 ${allowedGroups.length} 个${allowedGroups.length ? ` · ${allowedGroups.join("、")}` : ""}` : null,
     "╰────────────────",
     ""
   ].filter((line) => line != null);
@@ -34,7 +37,7 @@ export function formatQqVisualMenu({
     const meta = categoryMeta[section.category];
     lines.push(`${meta.icon} ${meta.label}`);
     for (const command of section.commands) {
-      const publicTag = owner && command.public ? "  ◦ 公开" : "";
+      const publicTag = privileged && command.public ? "  ◦ 公开" : "";
       lines.push(`  ${command.menuLine}${publicTag}`);
       if (command.description) lines.push(`    ${command.description}`);
     }
@@ -42,7 +45,7 @@ export function formatQqVisualMenu({
   }
   lines.push(
     "",
-    owner
+    privileged
       ? "💡 发送 /菜单权限 调整“公开”项目；发送 /AI任务 查看全部模型任务。"
       : "💡 直接发送上面的命令即可使用。"
   );

@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildCodexChildEnv, parseEnvFile } from "../src/codex-child-env.js";
+import {
+  buildCodexChildEnv,
+  buildIsolatedCodexChildEnv,
+  parseEnvFile
+} from "../src/codex-child-env.js";
 
 test("parses the supported active profile env syntax without executing shell code", () => {
   assert.deepEqual(parseEnvFile(`
@@ -16,6 +20,31 @@ test("parses the supported active profile env syntax without executing shell cod
     OPENAI_BASE_URL: "https://example.test/v1",
     PLAIN: "value"
   });
+});
+
+test("isolated app-server env keeps Codex runtime/auth and drops unrelated Hub secrets", () => {
+  const env = buildIsolatedCodexChildEnv({
+    baseEnv: {
+      HOME: "/root",
+      PATH: "/usr/bin",
+      LANG: "zh_CN.UTF-8",
+      ONEBOT_ACCESS_TOKEN: "do-not-forward",
+      TAVILY_API_KEY: "do-not-forward",
+      OPENAI_API_KEY: "stale"
+    },
+    profileEnvPath: "/missing/active.env",
+    configPath: "/missing/config.toml",
+    overrides: {
+      CODEX_REMOTE_CONTACT_QQ_MODE: "1",
+      CODEX_REMOTE_CONTACT_QQ_TASK_WORKSPACE_DIR: "/tmp/task"
+    }
+  });
+  assert.equal(env.HOME, "/root");
+  assert.equal(env.PATH, "/usr/bin");
+  assert.equal(env.CODEX_REMOTE_CONTACT_QQ_MODE, "1");
+  assert.equal(env.CODEX_REMOTE_CONTACT_QQ_TASK_WORKSPACE_DIR, "/tmp/task");
+  assert.equal(env.ONEBOT_ACCESS_TOKEN, undefined);
+  assert.equal(env.TAVILY_API_KEY, undefined);
 });
 
 test("follows the main Codex login config for every child without retaining stale auth", async () => {
