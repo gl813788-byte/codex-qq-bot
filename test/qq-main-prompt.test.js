@@ -17,6 +17,8 @@ test("main prompt delegates agent control to Codex native capabilities", () => {
   });
   assert.match(prompt, /Codex 原生 Agent 负责推理、工具循环、文件操作、联网搜索、计划、上下文压缩/);
   assert.match(prompt, /连续调用多个原生工具/);
+  assert.match(prompt, /原生 commentary 写少量可直接发给 QQ 用户的自然中文进度/);
+  assert.match(prompt, /不要在 commentary 里放最终 Schema JSON/);
   assert.match(prompt, /不需要向 Hub 申请额外轮数/);
   assert.match(prompt, /结构化输出的 status 设为 silent/);
   assert.match(prompt, /reply\.mode.*automatic、plain、quote 或 mention/);

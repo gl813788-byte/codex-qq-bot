@@ -15,6 +15,7 @@ const source = {
   exchanges: {},
   shortTermNotes: {},
   privateChats: { "30003": { aliases: ["小王"] } },
+  people: { "40004": { aliases: ["群友小李"], updatedAt: "2026-08-01T10:00:00.000Z" } },
   threads: { "20002": { threadId: "thread-2" } },
   getGroupName: (groupId) => ({ "10001": "当前群", "20002": "项目群" })[groupId] || ""
 };
@@ -24,6 +25,8 @@ test("cross-session catalog lists groups and private chats with stable selectors
   assert.equal(scopes[0].scopeId, "10001");
   assert.equal(scopes.find((scope) => scope.scopeId === "20002").selector, "group:20002");
   assert.equal(scopes.find((scope) => scope.scopeId === "private:30003").label, "私聊 小王");
+  assert.equal(scopes.find((scope) => scope.scopeId === "private:40004").label, "私聊 群友小李");
+  assert.equal(scopes.find((scope) => scope.scopeId === "private:40004").contactOnly, true);
 });
 
 test("cross-session scope resolution rejects ambiguous bare QQ ids", () => {
@@ -34,6 +37,10 @@ test("cross-session scope resolution rejects ambiguous bare QQ ids", () => {
   assert.equal(resolveQqCrossSessionScope(ambiguous, "30003", { currentScopeId: "10001" }), "");
   assert.equal(resolveQqCrossSessionScope(ambiguous, "private:30003"), "private:30003");
   assert.equal(resolveQqCrossSessionScope(ambiguous, "group:30003"), "30003");
+});
+
+test("cross-session scope resolution accepts a known group participant before private chat exists", () => {
+  assert.equal(resolveQqCrossSessionScope(source, "private:40004"), "private:40004");
 });
 
 test("cross-session events preserve the verified role without copying message context", () => {

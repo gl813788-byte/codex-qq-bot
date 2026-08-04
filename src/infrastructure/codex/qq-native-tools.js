@@ -39,7 +39,7 @@ export function buildQqNativeToolSpecs({
             action: { type: "string", enum: ["list", "search", "detail", "add", "force_add", "overwrite", "stale", "delete"] },
             value: string("Search text, entry id, or content required by the selected action."),
             extra: string("Replacement content or stale reason when needed.")
-          })
+          }, ["action"])
         },
         {
           type: "function",
@@ -55,7 +55,7 @@ export function buildQqNativeToolSpecs({
             personImpressionPromotionReason: string("Why a stable non-sensitive profile merits unified-person promotion, or empty."),
             botThoughtSummary: string("Short Bot-side relationship thought, or empty."),
             botThoughtDetail: string("Substantive Bot-side thought, or empty.")
-          })
+          }, [])
         },
         ...(hasMemoryPeople ? [{
           type: "function",
@@ -71,7 +71,7 @@ export function buildQqNativeToolSpecs({
             userId: string("Recognized person's QQ number."),
             alias: string("Alias to add/remove, or old alias for rename."),
             replacement: string("New alias for rename; otherwise empty.")
-          })
+          }, ["action", "userId"])
         }] : [])
       ]
     },
@@ -88,7 +88,7 @@ export function buildQqNativeToolSpecs({
           title: string("Stable title, slang phrase, or search query."),
           content: string("Knowledge body/explanation for write/slang; otherwise empty."),
           scope: string("Allowed current scope such as group, group-member, member, or empty for inferred current scope.")
-        })
+        }, ["action"])
       }]
     },
     {
@@ -114,7 +114,7 @@ export function buildQqNativeToolSpecs({
           action: { type: "string", enum: ["poke", "like", "requests", "add_friend", "join_group", "qzone_recent", "qzone_publish", "qzone_comment", "ban", "unban", "group_admin"] },
           target: string("QQ id, group id, sender, request id, or empty when the action does not need one."),
           value: string("Count, duration, verification answer, post text, comment, or subcommand details.")
-        })
+        }, ["action"])
       }]
     },
     ...(hasStickerCandidates ? [{
@@ -130,13 +130,13 @@ export function buildQqNativeToolSpecs({
           selector: string("Sticker name or current candidate number."),
           tags: string("Comma-separated tags for label; otherwise empty."),
           description: string("Visual description/context for label, or frame selection for inspect.")
-        })
+        }, ["action", "selector"])
       }]
     }] : []),
     ...(isOwner ? [{
       type: "namespace",
       name: "qq_session",
-      description: "Privileged cross-session routing for the verified owner or a Bot administrator. List saved QQ sessions, switch the active target for subsequent QQ tools, read another session, or send a real message there.",
+      description: "Privileged cross-session routing for the verified owner or a Bot administrator. List known QQ groups/private contacts, switch the active target for subsequent QQ tools, read another session, or send a real message there.",
       tools: [{
         type: "function",
         name: "manage",
@@ -145,7 +145,7 @@ export function buildQqNativeToolSpecs({
           action: { type: "string", enum: ["list", "current", "select", "clear", "read", "send"] },
           scopeId: string("Use group:GROUP_ID or private:QQ_ID; empty uses the active focus where supported."),
           value: string("List filter, history query, or message text; empty when not needed.")
-        })
+        }, ["action"])
       }]
     }, {
       type: "namespace",

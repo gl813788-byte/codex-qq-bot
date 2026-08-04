@@ -9,6 +9,7 @@ export function listQqCrossSessionScopes(source = {}, {
     ...Object.keys(source.shortTermNotes || {}),
     ...(source.allowedGroups || []).map(String),
     ...Object.keys(source.privateChats || {}).map((userId) => `private:${userId}`),
+    ...Object.keys(source.people || {}).map((userId) => `private:${userId}`),
     ...Object.keys(source.threads || {})
   ]);
   if (currentScopeId) scopeIds.add(currentScopeId);
@@ -37,14 +38,16 @@ export function describeQqCrossSessionScope(source = {}, scopeId, { currentScope
   if (privateMatch) {
     const userId = privateMatch[1];
     const chat = source.privateChats?.[userId];
-    const label = chat?.aliases?.at(-1) || `QQ ${userId}`;
+    const person = source.people?.[userId];
+    const label = chat?.aliases?.at(-1) || person?.aliases?.at(-1) || person?.displayName || `QQ ${userId}`;
     return {
       scopeId: normalizedScopeId,
       selector: normalizedScopeId,
       kind: "private",
       label: `私聊 ${label}`,
       messageCount: entries.length,
-      lastActivityAt,
+      lastActivityAt: lastActivityAt || chat?.updatedAt || person?.updatedAt || null,
+      contactOnly: !chat && entries.length === 0 && exchanges.length === 0,
       current: normalizedScopeId === currentScopeId
     };
   }
