@@ -256,6 +256,7 @@ import {
   buildQqNativeToolSpecs,
   createQqNativeToolDispatcher
 } from "./infrastructure/codex/qq-native-tools.js";
+import { createQqNativeProgressReporter } from "./infrastructure/codex/qq-native-progress.js";
 import { createQqCodexTurnRunner } from "./infrastructure/codex/qq-turn-runner.js";
 import {
   parseQqContextSummaryOutput,
@@ -1372,6 +1373,7 @@ function getQqCrossSessionSource(rootEvent = null) {
     shortTermNotes: state.qq.memory.shortTermNotes,
     allowedGroups: state.qq.allowedGroups,
     privateChats: state.qq.conversationMemory?.privateChats,
+    people: state.qq.conversationMemory?.people,
     threads: state.qq.codexSession?.store?.threads,
     currentScopeId: getQqMemoryScopeId(rootEvent),
     getGroupName: (groupId) => getQqKnowledgeGroupName(state.qq.knowledgeBase, groupId)
@@ -6389,7 +6391,7 @@ async function executeQqCrossSessionNativeTool(call, event, { rootEvent = event,
       reply: scopes.length
         ? [
           `可用 QQ 会话 ${scopes.length} 个${value ? `（筛选：${value}）` : ""}：`,
-          ...scopes.map((scope) => `${scope.current ? "*" : "-"} ${scope.selector} · ${scope.label} · ${scope.messageCount} 条${scope.lastActivityAt ? ` · ${formatMemoryTime(scope.lastActivityAt)}` : ""}`),
+          ...scopes.map((scope) => `${scope.current ? "*" : "-"} ${scope.selector} · ${scope.label} · ${scope.messageCount} 条${scope.contactOnly ? " · 已知联系人，暂无私聊记录" : ""}${scope.lastActivityAt ? ` · ${formatMemoryTime(scope.lastActivityAt)}` : ""}`),
           `当前工具焦点：${currentScopeId || "无"}`
         ].join("\n")
         : `没有找到匹配的 QQ 会话${value ? `：${value}` : ""}。`
@@ -8471,6 +8473,8 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     return buildQqOwnerFileImageReply(event, { replyScope });
   }
 
+  const nativeProgress = createQqNativeAgentProgressObserver(event, { replyScope });
+
   const text = stripMentionText(event.text);
   const scopeId = getQqMemoryScopeId(event);
   const qqCodexSessionPlan = resolveQqCodexSessionPlan({
@@ -8660,7 +8664,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       },
       runtimeWorkspaceRoots: [taskWorkspace.root],
       onDynamicToolCall: dispatchNativeTool,
-      onProgress: (progress) => logQqNativeAgentProgress(event, progress)
+      onProgress: nativeProgress.observe
     });
     assertQqReplyScopeActive(replyScope);
     if (qqCodexSessionPlan.persistent) {
@@ -8979,6 +8983,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     if (!parsedMemory.visibleText) return event.qqColdProactive || event.qqPrivateProactive ? "" : buildAssistantReply(event);
     return parsedMemory.visibleText;
   } finally {
+    await nativeProgress.finish();
     event.imagePaths = imagePaths;
   }
 }
@@ -9240,6 +9245,7 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
     requestText: text,
     isImageGeneration
   });
+  const nativeProgress = createQqNativeAgentProgressObserver(event, { replyScope });
 
   try {
     const result = await runSteerableQqCodexTurn(turn.prompt, {
@@ -9266,7 +9272,7 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
       sandboxPolicy: turn.sandboxPolicy,
       runtimeWorkspaceRoots: turn.runtimeWorkspaceRoots,
       onDynamicToolCall: dispatchNativeTool,
-      onProgress: (progress) => logQqNativeAgentProgress(event, progress)
+      onProgress: nativeProgress.observe
     });
     assertQqReplyScopeActive(replyScope);
     const parsed = parseQqAgentOutput(result.finalResponse, { bubbleSeparator: qqBubbleSeparator });
@@ -9279,6 +9285,7 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
     });
     return normalized || "执行完了，但没有生成可读回复。";
   } finally {
+    await nativeProgress.finish();
     event.imagePaths = imagePaths;
   }
 }
@@ -11224,6 +11231,98 @@ function logQqNativeAgentProgress(event, progress) {
     groupId: event?.groupId || null,
     senderId: event?.senderId || null
   }, "codex", event ? qqLogContext(event) : {});
+}
+
+function createQqNativeAgentProgressObserver(event, { replyScope = null } = {}) {
+  const reporter = createQqNativeProgressReporter({
+    send: (text) => sendQqTaskProgressMessage(event, text, { replyScope }),
+    onError: (error) => {
+      logger.debug("QQ native Agent progress observer failed", {
+        outcome: "ignored",
+        groupId: event?.groupId || null,
+        senderId: event?.senderId || null,
+        error
+      }, "codex", event ? qqLogContext(event) : {});
+    }
+  });
+  return {
+    observe(progress) {
+      logQqNativeAgentProgress(event, progress);
+      return reporter.observe(progress);
+    },
+    finish: () => reporter.finish(),
+    snapshot: () => reporter.snapshot()
+  };
+}
+
+async function rememberQqTaskProgress(event, progress) {
+  const scopeId = getQqMemoryScopeId(event);
+  if (!state.qq.memory.enabled || !scopeId || !progress) return false;
+  const knowledgeContextChanged = rememberQqConversationAssistantMessage(scopeId, progress, {
+    bubbleCount: 1,
+    replyTargetId: event.senderId,
+    event
+  });
+  const group = getQqPersonaGroup(scopeId);
+  const member = getQqPersonaMember(scopeId, event.senderId, event.senderName);
+  const adaptiveChanged = recordQqAdaptiveBotReply(group, member, event, progress, { bubbleCount: 1 });
+  await Promise.all([
+    saveQqMemory(),
+    knowledgeContextChanged ? saveQqKnowledgeBase() : Promise.resolve(),
+    adaptiveChanged ? saveQqPersonas() : Promise.resolve()
+  ]);
+  return true;
+}
+
+async function sendQqTaskProgressMessage(event, progress, { replyScope = null } = {}) {
+  const text = String(progress || "").trim();
+  if (!text) return { ok: false, reason: "进度内容为空。" };
+  if (event.qqTransportSource !== "onebot") {
+    return { ok: false, reason: "当前消息通道不支持任务中途进度。" };
+  }
+  assertHubAcceptingOutbound();
+  assertQqReplyScopeActive(replyScope);
+  const result = isQqPrivateEvent(event)
+    ? await sendOneBotPrivateMessage(event, text, { replyScope })
+    : await sendOneBotGroupMessage(event, text, {
+      quoteSource: false,
+      replyScope
+    });
+  const send = {
+    ok: result?.ok !== false,
+    bubbles: [text],
+    flattened: text,
+    results: [result]
+  };
+  const receipt = buildQqDeliveryReceipt(text, send);
+  if (receipt.deliveredBubbleCount > 0) {
+    event.qqTaskProgressMessages = [
+      ...(event.qqTaskProgressMessages || []),
+      text
+    ].slice(-4);
+    await rememberQqTaskProgress(event, text);
+    await resetQqOrdinaryInterestAfterDeliveredBotReply(event, receipt);
+    logger.info("QQ task progress delivered", {
+      outcome: "delivered",
+      groupId: event.groupId || null,
+      senderId: event.senderId || null,
+      progressCount: event.qqTaskProgressMessages.length,
+      preview: text.slice(0, 160)
+    }, "qq", qqLogContext(event));
+    return { ok: true, receipt };
+  }
+  await rememberQqDeliveryFailure(event, receipt);
+  logger.warn("QQ task progress delivery failed", {
+    outcome: "failed",
+    groupId: event.groupId || null,
+    senderId: event.senderId || null,
+    error: receipt.error || null
+  }, "qq", qqLogContext(event));
+  return {
+    ok: false,
+    reason: receipt.error || "QQ 没有确认进度消息送达。",
+    receipt
+  };
 }
 
 function logQqNativeToolEvent(toolEvent = {}) {

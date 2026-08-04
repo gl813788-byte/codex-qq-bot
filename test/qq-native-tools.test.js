@@ -18,6 +18,10 @@ test("native QQ tools expose owner runtime controls only to verified owners", ()
   assert.ok(owner.some((entry) => entry.name === "qq_session"));
   assert.ok(owner.find((entry) => entry.name === "qq_memory").tools.some((tool) => tool.name === "person_detail"));
   assert.ok(owner.some((entry) => entry.name === "qq_sticker"));
+  const sessionSchema = owner.find((entry) => entry.name === "qq_session").tools[0].inputSchema;
+  assert.deepEqual(sessionSchema.required, ["action"]);
+  const socialSchema = owner.find((entry) => entry.name === "qq_social").tools[0].inputSchema;
+  assert.deepEqual(socialSchema.required, ["action"]);
 });
 
 test("owner session selection routes subsequent QQ tools to the selected event", async () => {

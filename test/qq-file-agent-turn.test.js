@@ -20,6 +20,7 @@ test("owner file Agent receives project capability with bounded writes", () => {
   assert.deepEqual(turn.writableRoots, [taskWorkspace.root, "/project"]);
   assert.deepEqual(turn.runtimeWorkspaceRoots, ["/project", taskWorkspace.root]);
   assert.match(turn.developerInstructions, /原生文件 Agent/);
+  assert.match(turn.developerInstructions, /原生 commentary 写少量可直接发给 QQ 用户的自然中文进度/);
   assert.match(turn.prompt, /修改 src\/app\.js/);
 });
 
