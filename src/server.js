@@ -8641,6 +8641,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       cwd: taskWorkspace.root,
       taskType,
       timeout: currentTaskPolicy.maximumMs,
+      replacementIdleTimeoutMs: currentTaskPolicy.timeoutMs,
       imagePaths: currentImagePaths,
       env: {
         ...process.env,
@@ -9201,6 +9202,11 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
   const taskType = isImageGeneration
     ? CODEX_TASK_TYPES.QQ_IMAGE_GENERATION
     : CODEX_TASK_TYPES.QQ_FILE_TASK;
+  const taskPolicy = getCodexTaskTimeoutPolicy(
+    codexTaskTimeouts,
+    taskType,
+    state.ai.reasoningEffort
+  );
   const id = crypto.randomUUID();
   const taskStartedAt = Date.now();
   const taskWorkspace = await createQqTaskWorkspace(
@@ -9251,11 +9257,8 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
     const result = await runSteerableQqCodexTurn(turn.prompt, {
       cwd: turn.cwd,
       taskType,
-      timeout: getCodexTaskTimeoutPolicy(
-        codexTaskTimeouts,
-        taskType,
-        state.ai.reasoningEffort
-      ).maximumMs,
+      timeout: taskPolicy.maximumMs,
+      replacementIdleTimeoutMs: taskPolicy.timeoutMs,
       imagePaths,
       env: {
         CODEX_REMOTE_CONTACT_QQ_OWNER_FILE_IMAGE_MODE: isPrivilegedTask ? "1" : "0",

@@ -201,6 +201,28 @@ test("fails a silent replacement early and exposes its accepted input for fresh-
   ]);
 });
 
+test("allows a replacement to stay quiet through its configured task-specific idle window", async () => {
+  const server = createFakeAppServer();
+  let ready;
+  const readyPromise = new Promise((resolve) => { ready = resolve; });
+  const resultPromise = runCodexAppServerTurn({
+    prompt: "first",
+    timeoutMs: 500,
+    replacementIdleTimeoutMs: 120,
+    spawnProcess: server.spawn,
+    onReady: ready
+  });
+  const controls = await readyPromise;
+  await controls.restart("long-running replacement tool");
+
+  await delay(70);
+  server.complete("completed after the former fixed idle window");
+
+  const result = await resultPromise;
+  assert.equal(result.finalResponse, "completed after the former fixed idle window");
+  assert.equal(result.deadlineRenewalCount, 1);
+});
+
 test("resumes a persistent thread and falls back to a new one when it is stale", async () => {
   const resumedServer = createFakeAppServer({ resume: "ok" });
   const resumedTools = [{

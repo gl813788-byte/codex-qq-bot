@@ -1,4 +1,5 @@
 const obsoleteControlPattern = /\[\[(?:qq_command|qq_menu|qq_done|qq_progress|qq_task_budget|qq_task_continue)(?::[^\]\n]*)?\]\]/gi;
+const legacyReplyTargetPattern = /\[\[qq_reply:[^\]\n]+\]\]/gi;
 
 export const qqAgentOutputSchema = Object.freeze({
   type: "object",
@@ -119,7 +120,10 @@ function parseJsonObject(value) {
 }
 
 function cleanVisibleText(value) {
-  return stripObsoleteQqControlMarkers(String(value || "").trim());
+  return stripObsoleteQqControlMarkers(String(value || "").trim())
+    .replace(legacyReplyTargetPattern, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function normalizeQqId(value) {
