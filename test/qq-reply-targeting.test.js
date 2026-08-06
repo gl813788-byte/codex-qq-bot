@@ -28,9 +28,9 @@ test("lets a fused multi-sender reply quote a model-selected participant", () =>
 
   const instruction = formatQqReplyTargetInstruction(candidates);
   assert.match(instruction, /QQ 10001/);
-  assert.match(instruction, /\[\[qq_reply:quote:QQ号\]\]/);
-  assert.match(instruction, /\[\[qq_reply:mention:QQ号\]\]/);
-  assert.match(instruction, /省略标记.*普通回复/);
+  assert.match(instruction, /reply\.mode.*quote/);
+  assert.match(instruction, /使用 mention/);
+  assert.match(instruction, /不要在 text 或 bubbles 中写.*兼容标记/);
 
   const parsed = extractQqReplyTargetDirective("回答乙\n[[qq_reply:quote:10002]]");
   assert.equal(parsed.visibleText, "回答乙");

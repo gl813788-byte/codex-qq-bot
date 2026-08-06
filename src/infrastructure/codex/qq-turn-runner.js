@@ -62,6 +62,7 @@ export function createQqCodexTurnRunner({
           permissions: options.permissions || null,
           runtimeWorkspaceRoots: options.runtimeWorkspaceRoots || [],
           timeoutMs: options.timeout,
+          replacementIdleTimeoutMs: options.replacementIdleTimeoutMs,
           signal: replyScope?.signal,
           onDynamicToolCall: options.onDynamicToolCall,
           onServerRequest: options.onServerRequest,
@@ -91,6 +92,7 @@ export function createQqCodexTurnRunner({
               ...buildQqTurnOperationLogDetails(options, "restarted"),
               cwd: options.cwd,
               timeoutMs: options.timeout,
+              replacementIdleTimeoutMs: normalizedReplacementIdleTimeout(options),
               qqGenerationId: generationId,
               recoveryAttempt: 1,
               recoveryReason: error?.code || "CODEX_FUSION_TIMEOUT",
@@ -138,6 +140,7 @@ function recordSuccess({ state, result, options, startedAt, generationId, logger
     cwd: options.cwd,
     durationMs: state.maintenance.codex.lastDurationMs,
     timeoutMs: options.timeout,
+    replacementIdleTimeoutMs: normalizedReplacementIdleTimeout(options),
     qqGenerationId: generationId,
     threadId: result.threadId,
     turnId: result.turnId,
@@ -160,6 +163,7 @@ function recordFailure({ state, error, options, startedAt, generationId, stopped
     cwd: options.cwd,
     durationMs: state.maintenance.codex.lastDurationMs,
     timeoutMs: options.timeout,
+    replacementIdleTimeoutMs: normalizedReplacementIdleTimeout(options),
     qqGenerationId: generationId
   };
   if (stopped) {
@@ -194,6 +198,11 @@ function diagnosticFields(diagnostics) {
     diagnosticLines: diagnostics.lines,
     diagnosticOmittedLines: diagnostics.omittedLineCount
   } : {};
+}
+
+function normalizedReplacementIdleTimeout(options) {
+  const value = Number(options?.replacementIdleTimeoutMs);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : null;
 }
 
 function assertFunction(value, name) {

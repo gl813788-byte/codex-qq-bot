@@ -171,6 +171,18 @@ test("compacts casual replies and preserves invisible memory markers", () => {
   assert.match(guarded, /\[\[qq_memory:/);
 });
 
+test("compacts only visible text while preserving a structured reply target", () => {
+  const guarded = applyQqHumanReplyGuard("正文还在。后面的解释可以裁掉。\n[[qq_reply:quote:2134857442]]", {
+    mode: "casual",
+    compact: true,
+    maxChars: 8,
+    preferMultiBubble: false
+  });
+  assert.match(guarded, /^正文还在/);
+  assert.doesNotMatch(guarded, /后面的解释/);
+  assert.match(guarded, /\[\[qq_reply:quote:2134857442\]\]/);
+});
+
 test("turns two natural beats into two bubbles when the round prefers it", () => {
   const guarded = applyQqHumanReplyGuard("这个确实挺好笑，后劲还挺大。", {
     mode: "casual",

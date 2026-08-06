@@ -33,8 +33,8 @@ export function formatQqReplyTargetInstruction(candidates = []) {
   return [
     "这批消息来自多位群友，最终答案的内容对象和 QQ 寻址对象必须由你自己匹配，不能沿用最早触发者。",
     `以下每位候选人都可以由你选择引用或艾特：${formatTargets(options)}。`,
-    "引用某人时，在最终正文中独占一行写 [[qq_reply:quote:QQ号]]；艾特某人时写 [[qq_reply:mention:QQ号]]；不需要引用或艾特任何人时写 [[qq_reply:plain]]。标记不会显示给群友。",
-    "省略标记时 Hub 默认使用普通回复，不会引用或艾特最早触发者。只能选择上面列出的 QQ 号；需要同时艾特多人时，仍在可见正文中使用 @昵称 或 @QQ号。"
+    "需要引用时，把最终 JSON 的 reply.mode 设为 quote、targetUserId 设为候选 QQ 号；需要艾特时使用 mention；不需要寻址时使用 plain 并留空 targetUserId。",
+    "不要在 text 或 bubbles 中写 [[qq_reply:...]] 兼容标记；结构化 reply 对象是唯一寻址来源。省略或填写非法目标时 Hub 默认普通回复，不会引用或艾特最早触发者。需要同时艾特多人时，仍在可见正文中使用 @昵称 或 @QQ号。"
   ].filter(Boolean).join("\n");
 }
 

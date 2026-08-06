@@ -30,6 +30,17 @@ test("structured QQ output is translated at the delivery compatibility boundary"
   assert.match(parsed.output, /\[\[qq_file:\/tmp\/task\/output\/a\.txt\|结果\.txt\]\]/);
 });
 
+test("structured QQ output removes legacy reply markers from visible text", () => {
+  const parsed = parseQqAgentOutput(JSON.stringify({
+    status: "reply",
+    text: "[[qq_reply:quote:123456]]\n正文还在",
+    bubbles: [],
+    reply: { mode: "mention", targetUserId: "654321" },
+    attachments: []
+  }));
+  assert.equal(parsed.output, "正文还在\n[[qq_reply:mention:654321]]");
+});
+
 test("structured silence and legacy-control stripping fail closed", () => {
   const silent = parseQqAgentOutput(JSON.stringify({
     status: "silent",
