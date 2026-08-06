@@ -123,6 +123,7 @@ export function formatQqMainToolGuide({
   messageText = "",
   pokeEvent = false,
   replyStickerCandidates = [],
+  inboundFileSummary = "",
   memoryPeople = []
 } = {}) {
   const actionRelevant = /(?:拍一拍|点赞|好友|加群|入群|群邀请|申请|QQ\s*空间|空间|动态|评论|ban|封禁|拉黑|禁言|踢人)/i.test(String(messageText || "")) || pokeEvent;
@@ -162,6 +163,7 @@ export function formatQqMainToolGuide({
     candidates.length
       ? "查看未标注表情后，先用 qq_sticker.manage 的 label 动作保存真实标签，再完成回复。"
       : null,
+    inboundFileSummary || null,
     "边界：工具沿用当前发送者、群、线程和原始 callId 的服务端绑定上下文，绝不能提升权限或假装动作成功。",
     `当前发送者：${currentSender || "未知"}${isOwner ? `（${ownerLabel}）` : isBotAdmin ? "（Bot 管理员）" : ""}。可查的${scopeLabel}聊天记录 ${Math.max(0, Number(recentCount) || 0)} 行；长期知识 ${Math.max(0, Number(knowledgeTitleCount) || 0)} 个标题。`,
     mentionedTargets ? `本条消息 @ 的其他目标：${mentionedTargets}。` : null,

@@ -57,6 +57,11 @@ export function createEnvironmentConfig(env = process.env) {
     min: 256 * 1024,
     max: 100 * 1024 * 1024
   });
+  const qqFileMaxBytes = boundedInteger(env.CODEX_REMOTE_CONTACT_QQ_FILE_MAX_BYTES, {
+    defaultValue: 50 * 1024 * 1024,
+    min: 1024 * 1024,
+    max: 1024 * 1024 * 1024
+  });
   const hubPort = parsePort(env.CODEX_REMOTE_CONTACT_PORT, 3789);
   const qqWebLookupTimeoutMs = numberOrDefault(
     env.CODEX_REMOTE_CONTACT_QQ_WEB_TIMEOUT_MS
@@ -203,6 +208,7 @@ export function createEnvironmentConfig(env = process.env) {
     qqSocialExtensionBase: String(env.CODEX_REMOTE_CONTACT_QQ_SOCIAL_API_BASE || "").trim().replace(/\/$/, ""),
     qqOwnerFileImageTasksEnabled: env.CODEX_REMOTE_CONTACT_QQ_OWNER_FILE_IMAGE_TASKS !== "0",
     qqImageMaxBytes,
+    qqFileMaxBytes,
     qqBubbleSeparator: normalizeBubbleSeparator(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR),
     qqBubbleSendDelayMs: Math.max(0, numberOrDefault(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEND_DELAY_MS, 650)),
     qqBubbleMaxChars: boundedInteger(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_MAX_CHARS, {

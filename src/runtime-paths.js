@@ -12,6 +12,7 @@ export function createRuntimePaths({
     projectDir,
     dataDir,
     codexHomeDir,
+    codexGeneratedImagesDir: join(codexHomeDir, "generated_images"),
     codexWorkspaceDir: join(projectDir, "workspaces", "codex-cli"),
     codexTmpDir,
     logFilePath: env.CODEX_REMOTE_CONTACT_LOG_FILE || join(projectDir, "runtime", "logs", "hub.jsonl"),

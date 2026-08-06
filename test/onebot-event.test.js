@@ -26,6 +26,7 @@ test("normalizes OneBot message structure at the QQ channel boundary", () => {
       { type: "at", data: { qq: "456789", name: "被艾特群友" } },
       { type: "text", data: { text: "hello" } },
       { type: "reply", data: { id: 42 } },
+      { type: "file", data: { file: "report.pdf", file_id: "/file-id", file_size: 2048, url: "https://files.example/private-token" } },
       { type: "forward", data: { id: "forward-1" } }
     ]
   };
@@ -47,6 +48,24 @@ test("normalizes OneBot message structure at the QQ channel boundary", () => {
   ]);
   assert.deepEqual(event.contentContext.forwardIds, ["forward-1"]);
   assert.equal(event.images.length, 1);
+  assert.equal(event.files.length, 1);
+  assert.equal(event.files[0].name, "report.pdf");
+  assert.doesNotMatch(event.text, /private-token|file-id/);
+});
+
+test("redacts file CQ download details from the normalized model-facing text", () => {
+  const event = normalizeOneBotEvent({
+    post_type: "message",
+    message_type: "private",
+    self_id: 123456,
+    user_id: 234567,
+    raw_message: "[CQ:file,file=report.pdf,file_id=/secret-id,file_size=12,url=https://files.example/secret-url]",
+    message: [{ type: "file", data: { file: "report.pdf", file_id: "/secret-id", file_size: 12, url: "https://files.example/secret-url" } }]
+  });
+
+  assert.equal(event.text, "[文件]");
+  assert.deepEqual(event.contentContext.links, []);
+  assert.equal(event.files[0].messageType, "private");
 });
 
 test("normalizes poke notices and validates QQ identifiers", () => {

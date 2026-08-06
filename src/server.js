@@ -55,6 +55,7 @@ import {
   shouldUseQqFileImageTask
 } from "./qq-file-image-task-intent.js";
 import { resolveAllowedQqMarkerPath, resolveQqMarkerPath } from "./qq-output-policy.js";
+import { parseQqAgentOutputWithAttachmentImport } from "./infrastructure/codex/qq-agent-attachments.js";
 import { createQqZoneClient } from "./qq-qzone.js";
 import {
   getDefaultInterestModel,
@@ -148,6 +149,14 @@ import {
   formatQqMainToolGuide,
   formatQqPromptDate
 } from "./qq-main-prompt.js";
+import {
+  buildOneBotInboundFileUrlRequest,
+  collectQqInboundFileCandidates,
+  downloadQqInboundFile,
+  extractOneBotFileInputs,
+  formatQqInboundFileCandidates,
+  redactQqFileCqCodes
+} from "./qq-inbound-files.js";
 import {
   analyzeQqConversationIntent,
   extractQqUrls,
@@ -248,7 +257,6 @@ import {
   getQqLogScopeType
 } from "./qq-operation-log.js";
 import {
-  parseQqAgentOutput,
   qqAgentOutputSchema,
   stripObsoleteQqControlMarkers
 } from "./infrastructure/codex/qq-agent-output.js";
@@ -351,6 +359,7 @@ const environmentConfig = createEnvironmentConfig();
 const {
   codexWorkspaceDir,
   codexTmpDir,
+  codexGeneratedImagesDir,
   logFilePath,
   qqStickerDir,
   qqOutputImagesDir,
@@ -435,6 +444,7 @@ const {
   qqSocialExtensionBase,
   qqOwnerFileImageTasksEnabled,
   qqImageMaxBytes,
+  qqFileMaxBytes,
   qqBubbleSeparator,
   qqBubbleSendDelayMs,
   qqBubbleMaxChars,
@@ -1706,6 +1716,10 @@ async function buildQqPendingSteeringInput(entries, generation) {
   const aggregate = buildAggregatedQqEvent(entries);
   if (!aggregate) return [];
   const parentEvent = generation?.qqEvent;
+  if (parentEvent) {
+    const appendedFiles = collectQqInboundFileCandidates(aggregate).map(({ selector: _selector, ...file }) => file);
+    parentEvent.files = [...(parentEvent.files || []), ...appendedFiles].slice(0, 16);
+  }
   aggregate.qqMemoryPeople = resolveQqMemoryPeople(state.qq.conversationMemory, aggregate);
   aggregate.qqSemanticPersonIds = aggregate.qqMemoryPeople.map((person) => person.userId);
   if (parentEvent) {
@@ -1774,6 +1788,9 @@ async function buildQqPendingSteeringInput(entries, generation) {
       semanticRecall.context ? "" : null,
       "",
       aggregate.text,
+      parentEvent
+        ? formatQqInboundFileCandidates(collectQqInboundFileCandidates(parentEvent), { maxBytes: qqFileMaxBytes })
+        : formatQqInboundFileCandidates(collectQqInboundFileCandidates(aggregate), { maxBytes: qqFileMaxBytes }),
       interleavedContext.text ? "" : null,
       interleavedContext.text || null,
       distantSemanticContext.text ? "" : null,
@@ -1882,10 +1899,12 @@ function buildAggregatedQqEvent(items) {
     return `${label}（${time}，${sender}）：${appendQqConsecutiveRepeatSuffix(body, entry)}${formatQqMentionSuffix(entry)}${quoted}${imageNote}`;
   }).join("\n\n");
   const allImages = compactedEntries.flatMap((entry) => Array.isArray(entry.images) ? entry.images : []);
+  const allFiles = compactedEntries.flatMap((entry) => Array.isArray(entry.files) ? entry.files : []);
   return enrichQqEvent({
     ...base,
     text,
     images: allImages.slice(0, 6),
+    files: allFiles.slice(0, 16),
     atTargets: atMentions.map((mention) => mention.userId),
     atMentions,
     replyContext: base.replyContext,
@@ -3534,6 +3553,33 @@ async function fetchOneBotImage(file) {
   return body.data || body;
 }
 
+async function resolveOneBotInboundFileUrl(candidate) {
+  const attempts = [];
+  const request = buildOneBotInboundFileUrlRequest(candidate);
+  if (request) {
+    const result = await callOneBotAction(request.endpoint, request.payload).catch((error) => ({
+      ok: false,
+      error: error.message,
+      endpoint: request.endpoint
+    }));
+    attempts.push(result);
+    const resolved = String(result?.body?.data?.url || result?.body?.url || "").trim();
+    if (result.ok && /^https?:\/\//i.test(resolved)) return resolved;
+  }
+  if (/^https?:\/\//i.test(String(candidate?.url || ""))) return candidate.url;
+  const failure = attempts.at(-1);
+  throw new Error(failure?.error || failure?.body?.message || failure?.body?.wording || "QQ 没有返回文件下载地址。");
+}
+
+function fetchQqInboundFileUrl(url) {
+  return fetchWithUrlPolicy(url, {
+    headers: { "user-agent": userAgentName },
+    signal: AbortSignal.timeout(120_000)
+  }, {
+    mode: safeFetchMode
+  });
+}
+
 function oneBotFetch(endpoint, options = {}) {
   const { signal, ...requestOptions } = options;
   const timeoutSignal = AbortSignal.timeout(oneBotRequestTimeoutMs);
@@ -3643,6 +3689,8 @@ async function cleanupQqEventTaskWorkspaceByBot(event, reason = "QQ send finishe
   event.qqTaskWorkspace = null;
   event.imagePaths = [];
   event.qqToolImagePaths = [];
+  event.qqToolFilePaths = [];
+  event.qqDownloadedInboundFiles = {};
   event.qqPendingStickerLabels = [];
   event.qqStickerViewRounds = {};
   event.qqReplyStickerCandidates = [];
@@ -3787,6 +3835,7 @@ function isQqPrivateEvent(event) {
 
 function stripMentionText(text) {
   let value = String(text || "")
+    .replace(/\[CQ:file,[^\]]+\]/gi, "")
     .replace(/\[CQ:image,[^\]]+\]/g, "")
     .replace(/\[CQ:(?:record|voice|audio),[^\]]+\]/g, "")
     .replace(/\[CQ:face,[^\]]+\]/g, "")
@@ -3809,6 +3858,7 @@ function escapeRegExp(value) {
 
 function normalizeQqDisplayText(text) {
   return String(text || "")
+    .replace(/\[CQ:file,[^\]]+\]/gi, "[文件]")
     .replace(/\[CQ:image,[^\]]+\]/g, "[图片]")
     .replace(/\[CQ:(?:record|voice|audio),[^\]]+\]/g, "[语音]")
     .replace(/\[CQ:face,[^\]]+\]/g, "[表情]")
@@ -6250,6 +6300,7 @@ function buildQqOwnerConfigDetail() {
     `主动判定模型：${state.qq.proactive.judge.provider}/${state.qq.proactive.judge.model}，Key：${state.qq.proactive.judge.apiKeyConfigured ? "已配置" : "未配置"}，Token 静默超时 ${state.qq.proactive.judge.timeoutMs}ms`,
     `联网查询：${state.qq.webLookup.enabled ? "开启" : "关闭"}`,
     `主人文件/图片任务：${qqOwnerFileImageTasksEnabled ? "开启" : "关闭"}`,
+    `附件大小：图片 ${qqImageMaxBytes} 字节；Bot 按需下载入站文件 ${qqFileMaxBytes} 字节`,
     `任务时限（当前 ${state.ai.reasoningEffort}，基础时限 ×${timeoutMultiplier}）：普通回复 ${timeoutFor(CODEX_TASK_TYPES.QQ_REPLY)}，看图回复 ${timeoutFor(CODEX_TASK_TYPES.QQ_VISION_REPLY)}，总结 ${timeoutFor(CODEX_TASK_TYPES.QQ_CONTEXT_SUMMARY)}，人格刷新 ${timeoutFor(CODEX_TASK_TYPES.QQ_SELF_PERSONA)}，文件任务 ${timeoutFor(CODEX_TASK_TYPES.QQ_FILE_TASK)}，画图 ${timeoutFor(CODEX_TASK_TYPES.QQ_IMAGE_GENERATION)}`,
     `长回复投递：每条最多 ${qqBubbleMaxChars} 字，单次回复最多 ${qqBubbleMaxCount} 条，超长正文自动按自然边界拆分`,
     `短期记忆范围：${Object.keys(state.qq.memory.shortTermNotes).length}`,
@@ -6316,6 +6367,7 @@ function formatQqBotInternalToolContext(event) {
   const replyStickerCandidates = Array.isArray(event.qqReplyStickerCandidates) && event.qqReplyStickerCandidates.length
     ? event.qqReplyStickerCandidates
     : extractQqReplyStickerCandidates(event);
+  const inboundFiles = collectQqInboundFileCandidates(event);
   return formatQqMainToolGuide({
     scopeLabel,
     recentCount,
@@ -6329,11 +6381,15 @@ function formatQqBotInternalToolContext(event) {
     messageText: event.text,
     pokeEvent: isQqPokeEvent(event),
     replyStickerCandidates,
+    inboundFileSummary: formatQqInboundFileCandidates(inboundFiles, { maxBytes: qqFileMaxBytes }),
     memoryPeople: event.qqMemoryPeople || []
   });
 }
 
 async function executeQqStructuredNativeTool(call, event, context = {}) {
+  if (call?.namespace === "qq_context" && call?.tool === "download_file") {
+    return executeQqInboundFileNativeTool(call, context.rootEvent || event);
+  }
   if (call?.namespace === "qq_session" && call?.tool === "manage") {
     return executeQqCrossSessionNativeTool(call, event, context);
   }
@@ -6372,6 +6428,59 @@ async function executeQqStructuredNativeTool(call, event, context = {}) {
     ok: true,
     reply: `${event.qqCrossSessionScopeId ? `会话 ${event.qqCrossSessionScopeId} 的` : ""}社会印象更新已暂存；只有本轮最终 QQ 回复成功投递后才会持久化。`
   };
+}
+
+async function executeQqInboundFileNativeTool(call, event) {
+  const selector = String(call?.arguments?.selector || "").trim();
+  const candidates = collectQqInboundFileCandidates(event);
+  const candidate = candidates.find((file) => file.selector === selector);
+  if (!candidate) {
+    return {
+      ok: false,
+      error: "文件编号不属于本轮触发消息；只能使用提示中列出的 file-N 编号。"
+    };
+  }
+  if (!event?.qqTaskWorkspace?.inputDir) {
+    return { ok: false, error: "本轮 QQ 任务工作区不可用，无法安全下载文件。" };
+  }
+  const cache = event.qqDownloadedInboundFiles && typeof event.qqDownloadedInboundFiles === "object"
+    ? event.qqDownloadedInboundFiles
+    : {};
+  event.qqDownloadedInboundFiles = cache;
+  const cached = cache[selector];
+  if (cached?.path && await fileExists(cached.path)) {
+    return {
+      ok: true,
+      reply: `文件 ${selector} 已下载到本轮输入目录：${cached.path}（${cached.bytes} 字节）。`
+    };
+  }
+  try {
+    const saved = await downloadQqInboundFile(candidate, {
+      inputDir: event.qqTaskWorkspace.inputDir,
+      maxBytes: qqFileMaxBytes,
+      resolveDownloadUrl: resolveOneBotInboundFileUrl,
+      fetchDownload: fetchQqInboundFileUrl
+    });
+    cache[selector] = saved;
+    event.qqToolFilePaths = [...new Set([...(event.qqToolFilePaths || []), saved.path])];
+    return {
+      ok: true,
+      reply: `文件 ${selector}（${saved.name}）已下载到本轮输入目录：${saved.path}（${saved.bytes} 字节）。现在可以用原生文件或 Shell 能力读取；需要回传时把成品写入本轮 output 目录。`
+    };
+  } catch (error) {
+    logger.warn("QQ inbound file download failed", {
+      selector,
+      fileName: candidate.name || null,
+      declaredBytes: candidate.fileSize || null,
+      maxBytes: qqFileMaxBytes,
+      errorCode: String(error?.code || "QQ_FILE_DOWNLOAD_FAILED"),
+      error
+    }, "qq", qqLogContext(event));
+    return {
+      ok: false,
+      error: String(error?.message || "QQ 文件下载失败。")
+    };
+  }
 }
 
 async function executeQqCrossSessionNativeTool(call, event, { rootEvent = event, focusedEvent = null } = {}) {
@@ -8624,6 +8733,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
         : "";
   const runReplyPrompt = async (prompt, resumePrompt = prompt) => {
     assertQqReplyScopeActive(replyScope);
+    const turnStartedAt = Date.now();
     const currentImagePaths = [...new Set([
       ...imagePaths,
       ...(event.imagePaths || []),
@@ -8673,7 +8783,15 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       event.qqCodexSessionThreadId = qqCodexThreadId;
       event.qqCodexSession.resumed = Boolean(event.qqCodexSession.resumed || result.resumed);
     }
-    const parsed = parseQqAgentOutput(result.finalResponse, { bubbleSeparator: qqBubbleSeparator });
+    const parsed = await parseQqAgentOutputWithAttachmentImport(result.finalResponse, {
+      bubbleSeparator: qqBubbleSeparator,
+      threadId: result.threadId,
+      generatedImagesDir: codexGeneratedImagesDir,
+      outputDir: taskWorkspace.outputDir,
+      generatedAfterMs: turnStartedAt,
+      maxImageBytes: qqImageMaxBytes
+    });
+    logQqGeneratedAttachmentImport(parsed, event, result);
     event.qqAgentStructuredOutput = parsed.structured;
     return parsed.output;
   };
@@ -9248,6 +9366,10 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
     taskWorkspace,
     quotedContext,
     imagePaths,
+    inboundFileSummary: formatQqInboundFileCandidates(
+      collectQqInboundFileCandidates(event),
+      { maxBytes: qqFileMaxBytes }
+    ),
     requestText: text,
     isImageGeneration
   });
@@ -9278,7 +9400,15 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
       onProgress: nativeProgress.observe
     });
     assertQqReplyScopeActive(replyScope);
-    const parsed = parseQqAgentOutput(result.finalResponse, { bubbleSeparator: qqBubbleSeparator });
+    const parsed = await parseQqAgentOutputWithAttachmentImport(result.finalResponse, {
+      bubbleSeparator: qqBubbleSeparator,
+      threadId: result.threadId,
+      generatedImagesDir: codexGeneratedImagesDir,
+      outputDir: taskWorkspace.outputDir,
+      generatedAfterMs: taskStartedAt,
+      maxImageBytes: qqImageMaxBytes
+    });
+    logQqGeneratedAttachmentImport(parsed, event, result);
     event.qqAgentStructuredOutput = parsed.structured;
     const normalized = await normalizeQqImageGenerationReply(parsed.output, {
       event,
@@ -11392,6 +11522,24 @@ function logCodexModelOutput(output, { event = null, taskType = "", label = "" }
   }, "codex", event ? qqLogContext(event) : {});
 }
 
+function logQqGeneratedAttachmentImport(parsed, event, result) {
+  const importedImageCount = Number(parsed?.importedImageCount || 0);
+  const rejectedGeneratedImageCount = Number(parsed?.rejectedGeneratedImageCount || 0);
+  if (importedImageCount <= 0 && rejectedGeneratedImageCount <= 0) return;
+  const details = {
+    groupId: event?.groupId || null,
+    senderId: event?.senderId || null,
+    threadId: result?.threadId || null,
+    importedImageCount,
+    rejectedGeneratedImageCount
+  };
+  if (importedImageCount > 0) {
+    logger.info("Codex generated image imported into QQ task output", details, "qq", qqLogContext(event));
+    return;
+  }
+  logger.warn("Codex generated image attachment was rejected", details, "qq", qqLogContext(event));
+}
+
 async function sendOneBotGroupReply(event, reply, options = {}) {
   if (!event.groupId) return { ok: false, reason: "Missing group id" };
   try {
@@ -11729,7 +11877,7 @@ async function fetchOneBotMessage(messageId, selfId) {
   const senderId = data.user_id == null ? undefined : String(data.user_id);
   const segments = Array.isArray(data.message) ? data.message : [];
   const forwardSegment = segments.find((segment) => segment?.type === "forward");
-  const richContent = extractQqRichMessageContent(segments, data.raw_message || "");
+  const richContent = extractQqRichMessageContent(segments, redactQqFileCqCodes(data.raw_message || ""));
   const forwardContext = forwardSegment?.data?.id
     ? await fetchOneBotForwardContent(forwardSegment.data.id).catch(() => null)
     : null;
@@ -11737,6 +11885,7 @@ async function fetchOneBotMessage(messageId, selfId) {
     ...extractOneBotImageInputs(data),
     ...((forwardContext?.images) || [])
   ]);
+  const files = extractOneBotFileInputs(data);
   return {
     messageId: String(data.message_id ?? messageId),
     senderId,
@@ -11745,6 +11894,7 @@ async function fetchOneBotMessage(messageId, selfId) {
       ? `[合并转发]\n${forwardContext.text}`
       : (richContent.displayText || data.raw_message || ""),
     images,
+    files,
     contentContext: {
       ...richContent,
       links: [...new Set([...(richContent.links || []), ...extractQqUrls(forwardContext?.text || "")])],
@@ -13056,6 +13206,7 @@ async function handleApi(req, res) {
       senderName: event.senderName || null,
       text: String(event.text || "").slice(0, 800),
       imageCount: Array.isArray(event.images) ? event.images.length : 0,
+      fileCount: Array.isArray(event.files) ? event.files.length : 0,
       hasReply: Boolean(event.replyContext || event.replyMessageId),
       isAt: Boolean(event.hasSelfAtSegment || event.type === "group_at"),
       atTargets: Array.isArray(event.atTargets) ? event.atTargets : [],

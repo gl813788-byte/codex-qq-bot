@@ -204,6 +204,7 @@ Use the same token on both sides. Without one, the webhook trusts only requests 
 | `..._JUDGE_BASE_URL` | empty | OpenAI-compatible API root for the `custom` provider |
 | `..._JUDGE_TIMEOUT_MS` | `6500` | Streaming idle timeout |
 | `CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES` | `20971520` | QQ image limit, 20 MiB by default |
+| `CODEX_REMOTE_CONTACT_QQ_FILE_MAX_BYTES` | `52428800` | Per-file limit for model-selected inbound QQ downloads; bounded to 1 MiB–1 GiB |
 | `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | Safe-download mode; `proxy-compatible` additionally permits DNS names mapped into proxy Fake-IP range `198.18.0.0/15`, while literal private IPs and other reserved ranges stay blocked |
 | `CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR` | `|||` | Multi-bubble separator |
 | `..._BUBBLE_SEND_DELAY_MS` | `650` | Base inter-bubble delay |

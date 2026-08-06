@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { extractQqRichMessageContent } from "../../qq-message-content.js";
+import { extractOneBotFileInputs, redactQqFileCqCodes } from "../../qq-inbound-files.js";
 import { normalizeMentionIdentity } from "./mention-identities.js";
 
 export function normalizeOneBotEvent(payload, { extractImageInputs = () => [] } = {}) {
@@ -27,7 +28,9 @@ export function normalizeOneBotEvent(payload, { extractImageInputs = () => [] } 
   const replyMessageId = replySegment?.data?.id || replySegment?.data?.message_id;
   const messageType = payload.message_type === "private" ? "private_message" : "group_message";
   const images = extractImageInputs(payload);
-  const contentContext = extractQqRichMessageContent(segments, payload.raw_message || textFromSegments);
+  const files = extractOneBotFileInputs(payload);
+  const safeFallbackText = redactQqFileCqCodes(payload.raw_message || textFromSegments);
+  const contentContext = extractQqRichMessageContent(segments, safeFallbackText);
   const forwardIds = segments
     .filter((segment) => String(segment?.type || "").toLowerCase() === "forward")
     .map((segment) => String(segment?.data?.id || segment?.data?.res_id || "").trim())
@@ -43,12 +46,13 @@ export function normalizeOneBotEvent(payload, { extractImageInputs = () => [] } 
     groupName: compactGroupName(payload.group_name || payload.group?.name),
     senderId: normalizeQqIdentifier(payload.user_id),
     senderName: payload.sender?.card || payload.sender?.nickname || String(payload.user_id || "群友"),
-    text: contentContext.displayText || payload.raw_message || textFromSegments,
+    text: contentContext.displayText || safeFallbackText || textFromSegments,
     contentContext: {
       ...contentContext,
       forwardIds: [...new Set(forwardIds)]
     },
     images,
+    files,
     hasAudioSegment,
     hasAtSegment,
     hasSelfAtSegment,
@@ -94,6 +98,7 @@ export function normalizeOneBotPokeEvent(payload) {
     senderName,
     text: `${senderName} 拍了拍${targetLabel}。`,
     images: [],
+    files: [],
     hasAudioSegment: false,
     hasAtSegment: false,
     hasSelfAtSegment: false,

@@ -6,6 +6,7 @@ export function buildQqFileAgentTurn({
   taskWorkspace,
   quotedContext = "",
   imagePaths = [],
+  inboundFileSummary = "",
   requestText = "",
   isImageGeneration = false
 } = {}) {
@@ -45,6 +46,7 @@ export function buildQqFileAgentTurn({
     privileged ? `当前项目：${projectDir}` : null,
     quotedContext || null,
     imagePaths.length ? `收到的 QQ 图片：\n${imagePaths.join("\n")}` : null,
+    inboundFileSummary || null,
     owner ? `${ownerLabel}的请求：` : administrator ? "Bot 管理员的请求：" : "群友的公开图片请求：",
     requestText || (isImageGeneration ? "根据收到的图片完成这次图片任务。" : "处理收到的文件或图片。")
   ].filter(Boolean).join("\n\n");

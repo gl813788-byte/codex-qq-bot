@@ -66,6 +66,7 @@ export function analyzeQqConversationIntent(event = {}) {
   const hasForward = Boolean(content.forward?.text || /\[合并转发|聊天记录/.test(text));
   const hasReply = Boolean(event.replyContext || event.replyMessageId);
   const hasImages = (event.images || []).length > 0 || (event.replyContext?.images || []).length > 0;
+  const hasFiles = (event.files || []).length > 0 || (event.replyContext?.files || []).length > 0;
   const asksRecent = /(刚刚|刚才|前面|上面|之前|前文|上文|聊天记录|什么情况|咋回事|聊什么|说什么|总结|概括|复盘)/.test(text);
   const asksOpinion = /(怎么看|评价|锐评|点评|分析|说说|讲讲|啥意思|什么意思|什么梗)/.test(text);
   const asksAction = /(帮我|给我|请|查一下|搜一下|看一下|看看|写|做|生成|修改|设置|禁言|踢|点赞)/.test(text);
@@ -73,6 +74,7 @@ export function analyzeQqConversationIntent(event = {}) {
   let primary = "延续当前聊天";
   if (hasForward) primary = "理解并回应分享的聊天记录";
   else if (links.length > 0) primary = "理解并回应分享的链接或网页卡片";
+  else if (hasFiles) primary = "判断是否需要读取并处理收到的文件";
   else if (hasImages) primary = "结合图片理解消息";
   else if (asksRecent) primary = "结合群聊上下文回答前文问题";
   else if (asksAction) primary = "完成对方提出的任务";
@@ -83,6 +85,7 @@ export function analyzeQqConversationIntent(event = {}) {
     hasForward,
     hasReply,
     hasImages,
+    hasFiles,
     links,
     asksRecent,
     asksOpinion,
@@ -97,6 +100,7 @@ export function formatQqConversationIntent(intent = {}) {
     intent.hasForward ? "包含合并或嵌套聊天记录" : null,
     intent.links?.length ? `包含 ${intent.links.length} 个链接/网页卡片` : null,
     intent.hasImages ? "包含图片内容" : null,
+    intent.hasFiles ? "包含尚未自动下载的文件" : null,
     intent.asksRecent ? "明显依赖前文" : null,
     intent.asksOpinion ? "希望得到理解或看法" : null,
     intent.asksAction ? "包含办事意图" : null

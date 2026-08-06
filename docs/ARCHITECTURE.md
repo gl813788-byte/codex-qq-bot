@@ -44,6 +44,8 @@ environment + runtime paths
 | `src/qq-cross-session.js` | Cross-session catalog and event rebinding | listing/resolving group/private selectors or safely rebinding a verified role to a target session |
 | `src/qq-operation-log.js` | Unified QQ operation-log fields | aligning actor and source/target scope fields across Agent, administrator, social and cross-session work |
 | `src/infrastructure/codex/qq-agent-output.js` | Structured QQ final-output boundary | reply/silence/addressing/attachment schema and delivery compatibility translation |
+| `src/infrastructure/codex/qq-agent-attachments.js` | Codex generated-image import boundary | copying only current-turn, current-thread, signature-checked generated images into the active QQ task output while leaving file policy unchanged |
+| `src/qq-inbound-files.js` | QQ inbound-file trust and transfer boundary | extracting redacted current/quoted file metadata, assigning turn-local selectors, building group/private URL lookups, and enforcing bounded downloads into the active task input |
 | `src/infrastructure/storage/settings-repository.js` | Atomic settings I/O | loading or persisting `data/settings.json` without embedding filesystem code in the composition root |
 | `src/qq-codex-turn-recovery.js` | Fused-turn failure isolation | detecting a replacement that exceeds its task-and-effort-specific protocol-idle window and rebuilding one fresh-thread attempt from the original prompt plus accepted fused input |
 | `src/qq-reply-steering.js` | QQ follow-up fusion scheduler | a five-second quiet window reset by every new follow-up, snapshot consumption, active-turn steering with interrupt/replacement fallback, completed-draft replacement, failure retention, and active-turn identity checks |

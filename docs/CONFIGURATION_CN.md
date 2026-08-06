@@ -206,6 +206,7 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 | `..._JUDGE_BASE_URL` | 空 | `custom` 厂商的 OpenAI 兼容 API 根地址 |
 | `..._JUDGE_TIMEOUT_MS` | `6500` | judge 流式空闲超时 |
 | `CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES` | `20971520` | QQ 图片上限，默认 20 MiB |
+| `CODEX_REMOTE_CONTACT_QQ_FILE_MAX_BYTES` | `52428800` | 模型按需下载入站 QQ 文件的单文件上限，范围 1 MiB–1 GiB |
 | `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | 安全下载模式；`proxy-compatible` 仅额外允许域名解析到 `198.18.0.0/15` 代理 Fake-IP，仍拦截字面私网 IP 和其他保留地址 |
 | `CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR` | `|||` | 多气泡分隔符 |
 | `..._BUBBLE_SEND_DELAY_MS` | `650` | 气泡间基础延迟 |
