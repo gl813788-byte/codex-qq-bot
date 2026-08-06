@@ -88,4 +88,9 @@ test("tool guide describes native tools and server-bound permissions", () => {
   assert.match(withPerson, /小林\(20002\)【统一人物】/);
   assert.match(withPerson, /qq_memory\.person_detail/);
   assert.match(withPerson, /qq_memory\.person_alias/);
+
+  const withFile = formatQqMainToolGuide({
+    inboundFileSummary: "触发消息中检测到 1 个文件：file-1 · report.pdf"
+  });
+  assert.match(withFile, /file-1 · report\.pdf/);
 });

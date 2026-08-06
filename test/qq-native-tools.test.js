@@ -9,6 +9,7 @@ import {
 test("native QQ tools expose owner runtime controls only to verified owners", () => {
   const ordinary = buildQqNativeToolSpecs({ toolsEnabled: true });
   assert.ok(ordinary.some((entry) => entry.name === "qq_context"));
+  assert.ok(ordinary.find((entry) => entry.name === "qq_context").tools.some((tool) => tool.name === "download_file"));
   assert.ok(ordinary.some((entry) => entry.name === "qq_search"));
   assert.ok(ordinary.find((entry) => entry.name === "qq_memory").tools.some((tool) => tool.name === "impression"));
   assert.equal(ordinary.some((entry) => entry.name === "qq_runtime"), false);
@@ -22,6 +23,31 @@ test("native QQ tools expose owner runtime controls only to verified owners", ()
   assert.deepEqual(sessionSchema.required, ["action"]);
   const socialSchema = owner.find((entry) => entry.name === "qq_social").tools[0].inputSchema;
   assert.deepEqual(socialSchema.required, ["action"]);
+});
+
+test("native file download remains structured and bound to the original trigger event", async () => {
+  const event = { senderId: "10001", files: [{ name: "input.txt" }] };
+  const calls = [];
+  const dispatch = createQqNativeToolDispatcher({
+    event,
+    executeCommand: async () => ({ ok: false }),
+    executeStructured: async (call, boundEvent, context) => {
+      calls.push({ call, boundEvent, context });
+      return { ok: true, reply: "/task/input/input.txt" };
+    }
+  });
+  const result = await dispatch({
+    callId: "file-1",
+    namespace: "qq_context",
+    tool: "download_file",
+    arguments: { selector: "file-1" }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.result, "/task/input/input.txt");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].boundEvent, event);
+  assert.equal(calls[0].context.rootEvent, event);
 });
 
 test("owner session selection routes subsequent QQ tools to the selected event", async () => {

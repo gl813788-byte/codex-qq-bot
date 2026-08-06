@@ -14,6 +14,7 @@ test("owner file Agent receives project capability with bounded writes", () => {
     ownerLabel: "主人",
     projectDir: "/project",
     taskWorkspace,
+    inboundFileSummary: "触发消息中检测到 1 个文件：file-1 · input.csv；文件尚未下载。",
     requestText: "修改 src/app.js"
   });
   assert.equal(turn.cwd, "/project");
@@ -22,6 +23,7 @@ test("owner file Agent receives project capability with bounded writes", () => {
   assert.match(turn.developerInstructions, /原生文件 Agent/);
   assert.match(turn.developerInstructions, /原生 commentary 写少量可直接发给 QQ 用户的自然中文进度/);
   assert.match(turn.prompt, /修改 src\/app\.js/);
+  assert.match(turn.prompt, /file-1 · input\.csv/);
 });
 
 test("public image Agent is isolated to its task workspace", () => {

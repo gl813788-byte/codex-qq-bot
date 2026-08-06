@@ -24,6 +24,11 @@ export function buildQqNativeToolSpecs({
         name: "history",
         description: "Read recent messages, a numeric range such as 20-40, or search by keyword.",
         inputSchema: objectSchema({ query: string("Examples: 最近 50, 20-40, or a keyword.") })
+      }, {
+        type: "function",
+        name: "download_file",
+        description: "Download one file explicitly detected in the current triggering QQ message or its quoted message into this turn's task input directory. Use only selectors listed in the turn context.",
+        inputSchema: objectSchema({ selector: string("An exact current-turn selector such as file-1.") })
       }]
     },
     {
@@ -204,7 +209,10 @@ export function createQqNativeToolDispatcher({
     if (event && typeof event === "object") event.qqCurrentToolRound = toolRound;
     const boundEvent = focusedEvent || event;
     const sessionTool = call.namespace === "qq_session" && call.tool === "manage";
-    const structured = sessionTool || (call.namespace === "qq_memory" && call.tool === "impression");
+    const inboundFileTool = call.namespace === "qq_context" && call.tool === "download_file";
+    const structured = sessionTool
+      || inboundFileTool
+      || (call.namespace === "qq_memory" && call.tool === "impression");
     const command = structured ? "" : mapQqNativeToolToCommand(call.namespace, call.tool, call.arguments, { event: boundEvent });
     const startedAt = Date.now();
     const promise = (async () => {
