@@ -184,7 +184,7 @@ curl -fsS 'http://127.0.0.1:3789/api/logs?category=interest&group=群号' | jq .
 curl -fsS 'http://127.0.0.1:3789/api/logs?scope=private:QQ号&operation=session' | jq .
 ```
 
-常用分类：`system`、`web`、`onebot`、`qq`、`codex`、`search`、`interest`、`learning`、`memory` 和 `lifecycle`。新日志使用兼容旧条目的 schema v3；Agent 轮次/工具、跨会话发送、好友/加群、管理员变更和设置落盘统一带 `operation`、`outcome`、操作者角色/QQ、来源/目标会话、工具名、耗时和错误代码。动态工具参数及跨会话消息正文不会写日志。优先按 trace 追踪一条完整回复，再用 `--scope` 或 `--operation` 缩小跨会话与工具范围；摘要会额外统计操作和结果。融合追问使用 `qq` 分类，中文彩色标题依次显示进入可重置的 5 秒缓冲、引导进活跃 turn、引导失败后截断并开始替代回答，以及旧草稿完成后在发送前直接开启替代轮次。原生 Agent commentary 与 plan 更新仍会以有界 `codex` debug 诊断记录；安全 commentary 还会在 `qq` 分类产生 `QQ task progress delivered` 或失败记录，已删除的文字进度/预算协议不会制造控制轮。生命周期还会显示成功/失败气泡数；失败回执为下一轮主模型保留时会另记一条 QQ 警告。
+常用分类：`system`、`web`、`onebot`、`qq`、`codex`、`search`、`interest`、`learning`、`memory` 和 `lifecycle`。新日志使用兼容旧条目的 schema v3；Agent 轮次/工具、跨会话发送、好友/加群、管理员变更和设置落盘统一带 `operation`、`outcome`、操作者角色/QQ、来源/目标会话、工具名、耗时和错误代码。动态工具参数及跨会话消息正文不会写日志。优先按 trace 追踪一条完整回复，再用 `--scope` 或 `--operation` 缩小跨会话与工具范围；摘要会额外统计操作和结果。融合追问使用 `qq` 分类，中文彩色标题依次显示进入可重置的 5 秒缓冲、引导进活跃 turn、引导失败后截断并开始替代回答，以及旧草稿完成后在发送前直接开启替代轮次。原生 Agent commentary 与 plan 更新仍会以有界 `codex` debug 诊断记录；安全 commentary 还会在 `qq` 分类产生 `QQ task progress delivered` 或失败记录。若 `codex` 诊断里的 commentary 是完整 QQ Schema JSON，Hub 会先精确校验并只提取无附件回复的可见 `text`/`bubbles`，原始 JSON 本身不会进入 QQ；已删除的文字进度/预算协议也不会制造控制轮。生命周期还会显示成功/失败气泡数；失败回执为下一轮主模型保留时会另记一条 QQ 警告。
 
 仪表盘不再把所有功能堆在同一页，而是分成总览、通道、智能行为、记忆、实时日志和设置六个视图。通道页只处理连接、白名单和联系人；智能行为页显示并持久化 Bot 增强、联网、主动兴趣、模型厂商与判定参数，同时提供当前厂商 key、搜索 provider、安全下载模式、活动生成和待回复数量等安全诊断信息。行为状态采用独立双列流，较长的人设卡不会在另一列制造大片空白；窄屏恢复为自然单列顺序。
 
