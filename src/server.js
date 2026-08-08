@@ -141,6 +141,7 @@ import { formatQqColdProactivePrompt } from "./qq-cold-proactive-prompt.js";
 import {
   createQqTwoModelProactiveApproval,
   QQ_AUTONOMOUS_PROACTIVE_KINDS,
+  reconcileQqOrdinaryProactiveDecisionActivity,
   validateQqTwoModelProactiveDecision
 } from "./qq-proactive-pipeline.js";
 import {
@@ -3970,19 +3971,12 @@ async function judgeQqProactiveEvent(event, { triggerMode = "message", countMess
   if (proactiveDecision.cycleCompletedAt && Number(proactiveDecision.messageCountRemaining || 0) === 0) {
     qqProactiveLatestEventByGroupId.delete(String(event.groupId));
   }
-  if (proactiveDecision.ok && activityVersion > 0
-    && qqGroupActivityVersionByGroupId.get(String(event.groupId)) !== activityVersion) {
-    const superseded = {
-      ...proactiveDecision,
-      ok: false,
-      reason: "conversation advanced during proactive judge",
-      superseded: true
-    };
-    logQqProactiveInterestDecision(event, superseded);
-    return superseded;
-  }
-  logQqProactiveInterestDecision(event, proactiveDecision);
-  return proactiveDecision;
+  const reconciledDecision = reconcileQqOrdinaryProactiveDecisionActivity(proactiveDecision, {
+    judgedActivityVersion: activityVersion,
+    currentActivityVersion: qqGroupActivityVersionByGroupId.get(String(event.groupId))
+  });
+  logQqProactiveInterestDecision(event, reconciledDecision);
+  return reconciledDecision;
 }
 
 function rememberLatestQqProactiveEvent(event) {
@@ -4993,6 +4987,10 @@ function logQqProactiveInterestDecision(event, decision = {}) {
     triggerMode: decision.triggerMode,
     triggerReason: decision.triggerReason,
     messageCountRemaining: decision.messageCountRemaining,
+    activityAdvancedDuringJudge: Boolean(decision.activityAdvancedDuringJudge),
+    judgedActivityVersion: decision.judgedActivityVersion,
+    currentActivityVersion: decision.currentActivityVersion,
+    additionalActivityCount: decision.additionalActivityCount,
     ruleScore: decision.interestScore ?? interest.score,
     directness: interest.directness,
     likedTopicScore: interest.likedTopicScore,
@@ -8726,10 +8724,14 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     ? (event.proactiveDecision?.promptHint || formatQqColdProactivePrompt({
       mode: event.proactiveDecision?.coldTopicStart?.mode
     }))
-    : event.qqPrivateProactive
+      : event.qqPrivateProactive
       ? formatQqApprovedProactivePrompt({ kind: "private" })
       : event.proactiveDecision?.proactive
-        ? formatQqApprovedProactivePrompt({ kind: "ordinary" })
+        ? formatQqApprovedProactivePrompt({
+          kind: "ordinary",
+          activityAdvancedDuringJudge: Boolean(event.proactiveDecision.activityAdvancedDuringJudge),
+          additionalActivityCount: event.proactiveDecision.additionalActivityCount
+        })
         : "";
   const runReplyPrompt = async (prompt, resumePrompt = prompt) => {
     assertQqReplyScopeActive(replyScope);

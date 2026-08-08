@@ -124,6 +124,20 @@ test("two-model proactive and complex review details are fully localized", () =>
   });
 });
 
+test("ordinary interest activity handoff details are fully localized", () => {
+  assert.deepEqual(localizeLogDetails({
+    activityAdvancedDuringJudge: true,
+    judgedActivityVersion: 10,
+    currentActivityVersion: 12,
+    additionalActivityCount: 2
+  }), {
+    判定期间是否有后续活动: true,
+    判定起始活动版本: 10,
+    当前活动版本: 12,
+    判定期间新增活动数: 2
+  });
+});
+
 test("startup learning snapshots and knowledge details share recursive Chinese labels", () => {
   assert.equal(getLogDetailLabel("averageTextChars"), "平均文字长度");
   assert.equal(getLogDetailLabel("modelTemperature"), "模型温度");
