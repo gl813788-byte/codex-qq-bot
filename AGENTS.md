@@ -10,7 +10,7 @@ This repository runs a local Hub between QQ/OneBot and Codex CLI. Treat it as a 
 - Use `docs/ARCHITECTURE_CN.md` or `docs/ARCHITECTURE.md` for source boundaries.
 - Use `docs/CONFIGURATION_CN.md` or `docs/CONFIGURATION.md` before changing settings or environment variables.
 - Use `docs/OPERATIONS_CN.md` or `docs/OPERATIONS.md` for deployment and process behavior.
-- For local NapCat/QQ bridge operations, also read `skills/claude-to-im/SKILL.md` when that skill applies.
+- For local NapCat/QQ bridge operations, also read `skills/codex-qq-bot/SKILL.md` when that skill applies.
 
 ## Structural boundaries
 
@@ -40,5 +40,5 @@ This repository runs a local Hub between QQ/OneBot and Codex CLI. Treat it as a 
 ## Documentation and skill sync
 
 - Keep Chinese and English documentation structurally equivalent when behavior changes.
-- When deployment, QQ bridge or operator behavior changes, update both `skills/claude-to-im/SKILL.md` and the installed operational copy when it exists and is in scope.
+- When deployment, QQ bridge or operator behavior changes, update both `skills/codex-qq-bot/SKILL.md` and the installed operational copy when it exists and is in scope.
 - Commands in public documentation must work from the repository. Prefer `npm run ncc -- <command>` over assuming a global `ncc`, because a machine may already have a different NapCat controller with the same name.

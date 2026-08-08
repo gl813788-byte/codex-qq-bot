@@ -74,3 +74,27 @@ export function validateQqTwoModelProactiveDecision(decision = {}, { forceRequir
       reason: "autonomous QQ chat requires an approved interest gate before main-model generation"
     };
 }
+
+export function reconcileQqOrdinaryProactiveDecisionActivity(decision = {}, {
+  judgedActivityVersion = 0,
+  currentActivityVersion = 0
+} = {}) {
+  const judgedVersion = Number(judgedActivityVersion);
+  const currentVersion = Number(currentActivityVersion);
+  const activityAdvanced = Number.isSafeInteger(judgedVersion)
+    && Number.isSafeInteger(currentVersion)
+    && judgedVersion > 0
+    && currentVersion > judgedVersion;
+  if (!activityAdvanced
+    || decision?.ok !== true
+    || decision?.proactiveKind !== QQ_AUTONOMOUS_PROACTIVE_KINDS.ORDINARY_GROUP_REPLY) {
+    return decision;
+  }
+  return {
+    ...decision,
+    activityAdvancedDuringJudge: true,
+    judgedActivityVersion: judgedVersion,
+    currentActivityVersion: currentVersion,
+    additionalActivityCount: currentVersion - judgedVersion
+  };
+}

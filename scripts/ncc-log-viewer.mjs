@@ -471,6 +471,9 @@ function formatInterestDetails(details, options) {
   }
   if (options.verbose && details.judgeEveryMinutes != null) pushPart(parts, "分钟间隔", `${details.judgeEveryMinutes} 分钟`);
   if (options.verbose && details.messageCountRemaining != null) pushPart(parts, "下轮剩余", details.messageCountRemaining);
+  if (details.activityAdvancedDuringJudge) {
+    pushPart(parts, "判定期新增活动", `${details.additionalActivityCount || 0} 条（已纳入上下文）`);
+  }
   pushPart(parts, "规则分", details.ruleScore);
   if (options.verbose) {
     pushPart(parts, "直呼", details.directness);

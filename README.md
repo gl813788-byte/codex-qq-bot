@@ -55,7 +55,7 @@ Goal: connect QQ / OneBot to the current Codex CLI login and start a locally acc
 Execute the deployment instead of only giving me a command list. Continue until the result is verifiable:
 1. Inspect the OS, CPU architecture, Git, Node.js, npm, zsh, curl, Codex CLI, any existing OneBot/NapCat installation, and any existing ncc command. Require Node.js 20 or newer.
 2. Clone into a stable directory when the project is absent. Use /root/Codex-QQ-Bot for a Linux root environment; otherwise choose an appropriate user directory. Reuse an existing legacy /root/Codex-Remote-Contact installation instead of forcing a migration. Inspect the remote, branch, and worktree first. Never overwrite local changes, configuration, data, or runtime state.
-3. Read README.md, docs/INSTALLATION.md, docs/DEPLOY_WITH_CODEX.md, docs/ARCHITECTURE.md, and skills/claude-to-im/SKILL.md when that skill matches the environment.
+3. Read README.md, docs/INSTALLATION.md, docs/DEPLOY_WITH_CODEX.md, docs/ARCHITECTURE.md, and skills/codex-qq-bot/SKILL.md when that skill matches the environment.
 4. Install dependencies and run npm run verify. Diagnose and fix failures instead of skipping verification.
 5. Create data/settings.json from config/settings.example.json only when it is missing. Merge only necessary fields into an existing file. Ask me for owner QQ ids, allowed group ids, OneBot address, or secrets only when needed, and never print secrets back in full.
 6. Determine whether ncc is the repository's setup helper or a separate NapCat controller by running its help first. Do not replace a working command with another command of the same name. The repository helper is always available as npm run ncc -- <command>.

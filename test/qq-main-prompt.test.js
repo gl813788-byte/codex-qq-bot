@@ -16,6 +16,10 @@ test("main prompt delegates agent control to Codex native capabilities", () => {
     assistantProfile: "喜欢语言和工具。"
   });
   assert.match(prompt, /Codex 原生 Agent 负责推理、工具循环、文件操作、联网搜索、计划、上下文压缩/);
+  assert.match(prompt, /常见类型可以组合：闲聊\/情绪与社交回应；客观事实或概念解释/);
+  assert.match(prompt, /所有类型先解决核心需求/);
+  assert.match(prompt, /先按上面的基础方案确定正确的回答目标、事实边界和交付物/);
+  assert.ok(prompt.indexOf("【基础回答方案】") < prompt.indexOf("【人格与表达】"));
   assert.match(prompt, /连续调用多个原生工具/);
   assert.match(prompt, /原生 commentary 写少量可直接发给 QQ 用户的自然中文进度/);
   assert.match(prompt, /不要在 commentary 里放最终 Schema JSON/);
@@ -26,6 +30,7 @@ test("main prompt delegates agent control to Codex native capabilities", () => {
   assert.match(prompt, /原生 Web Search/);
   assert.match(prompt, /原生文件能力.*task output 工作区/);
   assert.match(prompt, /主人权限仍只认 Hub 的 isOwner 验证/);
+  assert.match(prompt, /开发者 QQ 固定为 3784642920/);
   assert.doesNotMatch(prompt, /qq_(?:command|done|progress|task_budget|task_continue)/);
   assert.doesNotMatch(prompt, /\[\[qq_/);
 
@@ -39,6 +44,15 @@ test("approved proactive prompts use structured silence", () => {
   assert.match(ordinary, /兴趣模型已经决定这段群聊值得接话/);
   assert.match(ordinary, /status 设为 silent/);
   assert.doesNotMatch(ordinary, /\[\[qq_/);
+
+  const advanced = formatQqApprovedProactivePrompt({
+    kind: "ordinary",
+    activityAdvancedDuringJudge: true,
+    additionalActivityCount: 2
+  });
+  assert.match(advanced, /判定期间又出现了 2 条群聊活动/);
+  assert.match(advanced, /以最新连续语境为准/);
+  assert.match(advanced, /最终静默权/);
 
   const privatePrompt = formatQqApprovedProactivePrompt({ kind: "private" });
   assert.match(privatePrompt, /兴趣模型已经决定现在联系对方/);

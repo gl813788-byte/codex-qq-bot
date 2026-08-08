@@ -61,7 +61,7 @@ Execution requirements:
 1. Inspect the OS/architecture, free disk and memory, git, node, npm, zsh, curl, codex, jq, screen/launchctl when applicable, OneBot/NapCat, and ncc. Require Node.js 20+.
 2. Make a short plan and execute it. Ask me only for a QR scan, secret values, elevated/system changes, external-download approval, or a choice that changes the existing deployment strategy.
 3. Clone into a stable path when absent. Use /root/Codex-QQ-Bot for a Linux root environment; otherwise choose a stable path under HOME; reuse an existing legacy /root/Codex-Remote-Contact installation. For an existing repository, inspect git status --short --branch, remotes, and the current branch first. Never use reset --hard, clean, forced checkout, or overwrite local files.
-4. Read the README, docs/INSTALLATION*, docs/DEPLOY_WITH_CODEX*, docs/ARCHITECTURE*, root AGENTS.md, and skills/claude-to-im/SKILL.md when applicable.
+4. Read the README, docs/INSTALLATION*, docs/DEPLOY_WITH_CODEX*, docs/ARCHITECTURE*, root AGENTS.md, and skills/codex-qq-bot/SKILL.md when applicable.
 5. Install dependencies and run npm run verify. Explain and fix syntax or test failures; do not skip verification.
 6. Create data/settings.json from config/settings.example.json only when missing. Merge an existing file at field level. Never commit data, runtime, config/local.env, or tokens.
 7. Ask for owner QQ ids, allowed groups, OneBot address, and optional search keys only when needed. Mask secrets in output.

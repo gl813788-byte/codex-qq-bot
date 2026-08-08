@@ -55,7 +55,7 @@ https://github.com/gl813788-byte/codex-qq-bot.git
 请直接执行部署，不要只给我命令清单。按以下要求持续推进到可验证的最终状态：
 1. 先检查操作系统、CPU 架构、Git、Node.js、npm、zsh、curl、Codex CLI、现有 OneBot/NapCat 和现有 ncc；Node.js 必须为 20 或更高。
 2. 如果项目不存在，克隆到稳定目录；Linux root 环境默认用 /root/Codex-QQ-Bot，其他环境选合适的用户目录。如果已存在旧版 /root/Codex-Remote-Contact，继续复用而不要强制迁移。先检查 Git remote、分支和工作区，绝不覆盖本地改动、配置、data 或 runtime。
-3. 阅读仓库 README_CN.md、docs/INSTALLATION_CN.md、docs/DEPLOY_WITH_CODEX_CN.md、docs/ARCHITECTURE_CN.md，以及 skills/claude-to-im/SKILL.md（如果适用于当前环境）。
+3. 阅读仓库 README_CN.md、docs/INSTALLATION_CN.md、docs/DEPLOY_WITH_CODEX_CN.md、docs/ARCHITECTURE_CN.md，以及 skills/codex-qq-bot/SKILL.md（如果适用于当前环境）。
 4. 安装依赖并运行 npm run verify；任何失败都要定位并修复，不能跳过验证。
 5. 如果 data/settings.json 不存在，从 config/settings.example.json 创建；已有文件只做必要的合并，不重置。需要主人 QQ 号、群白名单、OneBot 地址或密钥时再向我询问，并避免在输出中泄露密钥。
 6. 检查当前 ncc 到底是仓库自带快捷配置器还是独立 NapCat 控制器，先运行帮助再使用，不能覆盖一个正在使用的同名控制脚本。仓库自带入口始终可用 npm run ncc -- <command> 调用。

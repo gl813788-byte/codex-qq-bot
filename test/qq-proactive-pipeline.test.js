@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   createQqTwoModelProactiveApproval,
   QQ_AUTONOMOUS_PROACTIVE_KINDS,
+  reconcileQqOrdinaryProactiveDecisionActivity,
   validateQqTwoModelProactiveDecision
 } from "../src/qq-proactive-pipeline.js";
 
@@ -76,4 +77,51 @@ test("unsupported proactive kinds cannot create an approval envelope", () => {
     () => createQqTwoModelProactiveApproval({ kind: "fixed_text_bypass" }),
     /Unsupported QQ autonomous proactive kind/
   );
+});
+
+test("ordinary interest approval survives human activity that arrives while its judge is running", () => {
+  const decision = {
+    ok: true,
+    proactive: true,
+    reason: "model final decision",
+    ...createQqTwoModelProactiveApproval({
+      kind: QQ_AUTONOMOUS_PROACTIVE_KINDS.ORDINARY_GROUP_REPLY,
+      provider: "deepseek",
+      model: "interest/test",
+      task: "qq_ordinary_group_reply",
+      interest: 45,
+      reason: "the current exchange merits a reply"
+    })
+  };
+
+  const reconciled = reconcileQqOrdinaryProactiveDecisionActivity(decision, {
+    judgedActivityVersion: 10,
+    currentActivityVersion: 12
+  });
+
+  assert.equal(reconciled.ok, true);
+  assert.equal(reconciled.reason, "model final decision");
+  assert.equal(reconciled.activityAdvancedDuringJudge, true);
+  assert.equal(reconciled.additionalActivityCount, 2);
+  assert.equal(validateQqTwoModelProactiveDecision(reconciled).ok, true);
+});
+
+test("activity reconciliation does not revive declined or non-ordinary proactive decisions", () => {
+  const declined = { ok: false, proactive: false, reason: "declined" };
+  assert.equal(reconcileQqOrdinaryProactiveDecisionActivity(declined, {
+    judgedActivityVersion: 2,
+    currentActivityVersion: 3
+  }), declined);
+
+  const coldDecision = {
+    ok: true,
+    proactive: true,
+    ...createQqTwoModelProactiveApproval({
+      kind: QQ_AUTONOMOUS_PROACTIVE_KINDS.COLD_GROUP_TOPIC
+    })
+  };
+  assert.equal(reconcileQqOrdinaryProactiveDecisionActivity(coldDecision, {
+    judgedActivityVersion: 2,
+    currentActivityVersion: 3
+  }), coldDecision);
 });
