@@ -11,6 +11,8 @@ test("QQ menu excludes channel shutdown", () => {
 test("Bot administrators are persisted as a distinct role with full menu routing", async () => {
   assert.ok(qqCommandCatalog.some((command) => command.key === "botAdmins"));
   assert.ok(qqCommandCatalog.some((command) => command.key === "crossSession"));
+  assert.ok(qqCommandCatalog.some((command) => command.key === "requests" && command.menuLine === "/申请"));
+  assert.ok(qqCommandCatalog.some((command) => command.key === "activeGroupJoin" && command.menuLine === "/主动加群"));
   const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
   assert.match(source, /function hasQqPrivilegedAccess\(event\)/);
   assert.match(source, /event\?\.isOwner \|\| event\?\.isBotAdmin/);

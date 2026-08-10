@@ -93,6 +93,24 @@ export const qqCommandCatalog = [
     description: "禁言、踢人、全员禁言与禁言列表",
     aliases: ["群管理", "禁言", "解禁言", "解除禁言", "踢人", "全员禁言", "群禁言列表"]
   },
+  {
+    key: "requests",
+    defaultPublic: false,
+    configurable: false,
+    menuLine: "/申请",
+    category: "operations",
+    description: "列出、同步并真实处理好友申请、群邀请和入群申请",
+    aliases: ["申请", "好友申请", "群申请"]
+  },
+  {
+    key: "activeGroupJoin",
+    defaultPublic: false,
+    configurable: false,
+    menuLine: "/主动加群",
+    category: "operations",
+    description: "让 Bot 申请加入指定 QQ 群；需要时附验证答案",
+    aliases: ["主动加群"]
+  },
   { key: "ban", defaultPublic: false, configurable: true, menuLine: "/ban @用户", category: "operations", description: "管理 Bot 侧用户封禁名单", aliases: ["ban", "封禁", "拉黑", "unban", "解禁", "banlist"] },
   { key: "permissions", defaultPublic: false, configurable: false, menuLine: "/菜单权限", category: "authority", description: "设置非主人可见且可执行的命令", aliases: ["菜单权限", "权限菜单", "公开指令", "允许指令", "禁用指令"] },
   {

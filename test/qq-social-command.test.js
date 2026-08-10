@@ -1,52 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  buildQqActiveAddPayload,
-  formatQqActiveAddFailure,
-  parseQqActiveAddCommand,
+  buildQqActiveJoinGroupPayload,
+  formatQqActiveJoinGroupFailure,
+  parseQqActiveJoinGroupCommand,
   parseQqZonePublishCommand
 } from "../src/qq-social-command.js";
 
-test("parses legacy and structured friend add commands", () => {
-  assert.deepEqual(parseQqActiveAddCommand("主动加好友 123456 群里认识的"), {
-    kind: "friend",
-    targetId: "123456",
-    message: "群里认识的",
-    answer: "",
-    remark: "",
-    categoryId: undefined,
-    setting: undefined
-  });
-
-  const parsed = parseQqActiveAddCommand("主动加好友 123456 验证=群里认识的 | 答案=42 | 备注=小王 | 分组=3 | 方式=2");
-  assert.deepEqual(buildQqActiveAddPayload(parsed), {
-    target_id: "123456",
-    message: "群里认识的",
-    answer: "42",
-    remark: "小王",
-    category_id: 3,
-    add_friend_setting: 2
-  });
-
-  assert.deepEqual(parseQqActiveAddCommand("/加好友 123456"), {
-    kind: "friend",
-    targetId: "123456",
-    message: "",
-    answer: "",
-    remark: "",
-    categoryId: undefined,
-    setting: undefined
-  });
-  assert.equal(parseQqActiveAddCommand("添加好友 123456")?.kind, "friend");
+test("does not parse proactive friend-add commands", () => {
+  assert.equal(parseQqActiveJoinGroupCommand("主动加好友 123456 群里认识的"), null);
+  assert.equal(parseQqActiveJoinGroupCommand("加好友 123456"), null);
+  assert.equal(parseQqActiveJoinGroupCommand("添加好友 123456"), null);
+  assert.equal(parseQqActiveJoinGroupCommand("加群 987654"), null);
+  assert.equal(parseQqActiveJoinGroupCommand("加入群 987654"), null);
 });
 
 test("parses group answers with spaces and keeps legacy syntax", () => {
-  assert.deepEqual(buildQqActiveAddPayload(parseQqActiveAddCommand("主动加群 987654 正确 答案 2026")), {
+  assert.deepEqual(buildQqActiveJoinGroupPayload(parseQqActiveJoinGroupCommand("主动加群 987654 正确 答案 2026")), {
     target_id: "987654",
     message: "正确 答案 2026",
     answer: "正确 答案 2026"
   });
-  assert.deepEqual(buildQqActiveAddPayload(parseQqActiveAddCommand("主动加群 987654 答案=Open AI 2026")), {
+  assert.deepEqual(buildQqActiveJoinGroupPayload(parseQqActiveJoinGroupCommand("主动加群 987654 答案=Open AI 2026")), {
     target_id: "987654",
     message: "Open AI 2026",
     answer: "Open AI 2026"
@@ -54,18 +29,17 @@ test("parses group answers with spaces and keeps legacy syntax", () => {
 });
 
 test("formats actionable verification failures", () => {
-  assert.match(formatQqActiveAddFailure("friend", "123456", {
-    error: "verification_required",
-    questions: ["2+2 等于几？"]
-  }, 409), /2\+2 等于几/);
-  assert.match(formatQqActiveAddFailure("group", "987654", {
+  assert.match(formatQqActiveJoinGroupFailure("987654", {
     error: "answer_required",
     question: "项目口令"
   }, 409), /主动加群 987654 答案=正确答案/);
-  assert.match(formatQqActiveAddFailure("friend", "123456", {
+  assert.match(formatQqActiveJoinGroupFailure("987654", {
     error: "native_timeout",
-    native_api: "BuddyService.reqToAddFriends\(uin,message\)"
+    native_api: "GroupService.reqToJoinGroup"
   }, 504), /没有在限定时间内返回/);
+  assert.match(formatQqActiveJoinGroupFailure("987654", {
+    error: "group_join_unconfirmed"
+  }, 502), /群列表没有确认/);
 });
 
 test("parses text, image-only and mixed QQ Zone publish commands", () => {

@@ -237,7 +237,9 @@ Common machine-controller intent:
 | Start stack | `ncc all` |
 | Reconnect after login | `ncc connect` |
 | Start NapCat only | `ncc napcat` |
+| Stop NapCat and its Xvfb session | `ncc stop-napcat` |
 | Start Hub only | `ncc hub` |
+| Show one-shot startup resource profile | `ncc resources` |
 | Logs | `ncc logs` or `ncc logs --compact` |
 | Stop Hub | `ncc stop-hub` |
 
@@ -253,6 +255,30 @@ Start/recovery sequence:
 Do not kill QQ, NapCat, Node, or screen sessions merely to inspect status. After
 dashboard or Hub code changes, first confirm no active QQ generation, then stop
 and start only the Hub; leave NapCat running.
+
+On this memory-constrained Termux/PRoot host, use `ncc napcat` only for short
+bridge diagnostics and stop it with `ncc stop-napcat` when finished. The global
+controller reads `MemAvailable` once before startup and selects the standard,
+balanced, or low-memory profile. The profile constrains both sides of the stack:
+QQ renderer/V8 limits and Hub heap/Codex concurrency/queues. `ncc all` must start
+both Hub and QQ; it brings the Hub up first so active QQ events do not spin on a
+missing loopback receiver, and cleans a newly started Hub if QQ startup fails.
+There is no resident memory monitor or shell `wait` supervisor. QQ and Xvfb run
+directly in separate screen sessions, while exact PID/PGID state supports bounded
+cleanup. Verify that QQ, Xvfb, and any turn-scoped Codex children are gone after
+a diagnostic stop.
+
+Proactive friend-add is intentionally unavailable: the Bot tool schema and the
+NapCat plugin must not expose `add_friend`, `/add-friend`, or `/inspect-friend`.
+Incoming friend requests, group invitations, and group membership requests use
+social bridge v19 or newer. `/health` must report the four
+`incoming-*-request-*` capabilities. `/申请 同步` reads the bridge's pending
+request list because NapCat has no public ordinary-friend-request list action.
+For a decision, call the matching native operation exactly once and wait for it;
+an ambiguous transport result must never fall back to a second OneBot write.
+Report success only after the friend list, group list, or pending-request state
+confirms the change. Suspicious friend requests may be accepted but cannot be
+reliably rejected.
 
 For the NapCat WebUI login token only, read `.token` from
 `/root/Napcat/opt/QQ/resources/app/app_launcher/napcat/config/webui.json`. Do not

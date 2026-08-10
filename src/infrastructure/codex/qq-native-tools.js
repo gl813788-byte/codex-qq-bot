@@ -114,9 +114,9 @@ export function buildQqNativeToolSpecs({
       tools: [{
         type: "function",
         name: "act",
-        description: "Perform a bounded QQ action such as poke, like, requests, friend/group add, Qzone, moderation, or ban. Hub permissions remain authoritative.",
+        description: "Perform a bounded QQ action such as poke, like, incoming-request handling, group join, Qzone, moderation, or ban. Hub permissions remain authoritative.",
         inputSchema: objectSchema({
-          action: { type: "string", enum: ["poke", "like", "requests", "add_friend", "join_group", "qzone_recent", "qzone_publish", "qzone_comment", "ban", "unban", "group_admin"] },
+          action: { type: "string", enum: ["poke", "like", "requests", "join_group", "qzone_recent", "qzone_publish", "qzone_comment", "ban", "unban", "group_admin"] },
           target: string("QQ id, group id, sender, request id, or empty when the action does not need one."),
           value: string("Count, duration, verification answer, post text, comment, or subcommand details.")
         }, ["action"])
@@ -323,8 +323,7 @@ function mapSocialCommand(args) {
   switch (args.action) {
     case "poke": return joinCommand("/拍一拍", target || "发送者");
     case "like": return joinCommand("/点赞", target || "发送者", value || "1");
-    case "requests": return joinCommand("/申请", value || target || "列表");
-    case "add_friend": return joinCommand("/主动加好友", target, value);
+    case "requests": return mapRequestCommand(target, value);
     case "join_group": return joinCommand("/主动加群", target, value);
     case "qzone_recent": return joinCommand("/动态 最近", target, value || "10");
     case "qzone_publish": return `/发动态 ${value}`.trim();
@@ -334,6 +333,12 @@ function mapSocialCommand(args) {
     case "group_admin": return `/${value}`.trim();
     default: return "";
   }
+}
+
+function mapRequestCommand(target, value) {
+  const action = value.match(/^(同意|通过|接受|拒绝|驳回)(?:\s+([\s\S]+))?$/i);
+  if (action && target) return joinCommand("/申请", action[1], target, action[2]);
+  return joinCommand("/申请", value || target || "列表");
 }
 
 function joinCommand(...parts) {

@@ -5,6 +5,7 @@ const profileAuthKeys = ["OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL"];
 const codexRuntimeEnvKeys = new Set([
   "HOME", "USER", "LOGNAME", "PATH", "SHELL", "TMPDIR", "TMP", "TEMP", "TZ", "TERM",
   "LANG", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+  "NODE_OPTIONS", "UV_THREADPOOL_SIZE", "MALLOC_ARENA_MAX",
   "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
   "http_proxy", "https_proxy", "all_proxy", "no_proxy",
   "CODEX_HOME", "CODEX_CONFIG_PATH", "CODEX_ENV_FILE",
