@@ -1,7 +1,7 @@
 {
   "name": "napcat-plugin-builtin",
-  "version": "1.1.4",
+  "version": "2.0.0",
   "type": "module",
   "main": "index.mjs",
-  "description": "Loopback-only QQ friend and group verification bridge for Codex QQ Bot"
+  "description": "Loopback-only incoming-request and group-join bridge for Codex QQ Bot"
 }

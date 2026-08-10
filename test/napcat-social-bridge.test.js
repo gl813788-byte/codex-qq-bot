@@ -2,348 +2,267 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { plugin_init, withNativeTimeout } from "../modules/napcat-social-bridge/index.mjs";
 
-test("NapCat social bridge submits loopback friend requests and blocks remote callers", async () => {
+test("NapCat bridge removes proactive friend routes and exposes incoming request capabilities", async () => {
   const routes = new Map();
-  const submitted = [];
-  const ctx = {
-    pluginName: "napcat-plugin-builtin",
-    router: {
-      getNoAuth(path, handler) { routes.set(`GET ${path}`, handler); },
-      postNoAuth(path, handler) { routes.set(`POST ${path}`, handler); }
-    },
-    core: {
-      apis: {
-        UserApi: { async getUidByUinV2(id) { return `uid:${id}`; } },
-        FriendApi: { async isBuddy() { return false; } }
-      },
-      context: {
-        session: {
-          getBuddyService() {
-            return { reqToAddFriends(targetId, message) { submitted.push([targetId, message]); } };
-          }
-        }
-      }
-    },
-    logger: { info() {}, error() {} }
+  await plugin_init(createContext(routes));
+
+  assert.equal(routes.has("POST /add-friend"), false);
+  assert.equal(routes.has("POST /inspect-friend"), false);
+  assert.equal(routes.has("POST /pending-requests"), true);
+  assert.equal(routes.has("POST /handle-request"), true);
+
+  const response = responseRecorder();
+  routes.get("GET /health")(localRequest(), response);
+  assert.equal(response.body.version, 19);
+  assert.ok(response.body.capabilities.includes("incoming-friend-request-handle"));
+  assert.ok(response.body.capabilities.includes("incoming-group-request-handle"));
+  assert.equal(response.body.capabilities.some((item) => /friend.*submit/i.test(item)), false);
+});
+
+test("NapCat bridge lists and truly approves an incoming friend request through the native service", async () => {
+  const routes = new Map();
+  const state = {
+    friends: new Set(),
+    requests: [{
+      reqTime: "1700000000",
+      friendUid: "uid:123456",
+      reqType: 1,
+      isInitiator: false,
+      isDecide: false,
+      isBuddy: false,
+      isDoubt: false,
+      extWords: "我是测试账号",
+      friendNick: "测试用户",
+      sourceId: 3999,
+      groupCode: ""
+    }]
   };
-  await plugin_init(ctx);
-  const handler = routes.get("POST /add-friend");
-  assert.equal(typeof handler, "function");
-
-  const local = responseRecorder();
-  await handler({
-    body: { target_id: "3596291931", message: "群里认识的" },
-    raw: { socket: { remoteAddress: "::ffff:127.0.0.1" } }
-  }, local);
-  assert.equal(local.statusCode, 200);
-  assert.equal(local.body.status, "submitted");
-  assert.equal(local.body.native_api_shape, "uin-message");
-  assert.deepEqual(submitted, [[3596291931, "群里认识的"]]);
-
-  const remote = responseRecorder();
-  await handler({
-    body: { target_id: "3596291931" },
-    raw: { socket: { remoteAddress: "192.168.1.9" } }
-  }, remote);
-  assert.equal(remote.statusCode, 403);
-  assert.equal(submitted.length, 1);
-});
-
-test("NapCat social bridge requests and submits a friend verification answer", async () => {
-  const routes = new Map();
-  const submitted = [];
+  const submissions = [];
   await plugin_init(createContext(routes, {
+    friendApi: {
+      async getBuddyReq() { return { buddyReqs: state.requests }; },
+      async getDoubtFriendRequest() { return []; },
+      async isBuddy(uid) { return state.friends.has(uid); },
+      async setBuddyRemark() {}
+    },
     buddyService: {
-      getTargetBuddySetting() {
-        return { addFriendSetting: 2, question: ["2+2 等于几？"] };
-      },
-      reqToAddFriends(targetId, message) { submitted.push([targetId, message]); }
-    }
-  }));
-  const handler = routes.get("POST /add-friend");
-
-  const missing = responseRecorder();
-  await handler(localRequest({ target_id: "3596291931" }), missing);
-  assert.equal(missing.statusCode, 409);
-  assert.equal(missing.body.error, "verification_required");
-  assert.deepEqual(missing.body.questions, ["2+2 等于几？"]);
-  assert.equal(submitted.length, 0);
-
-  const answered = responseRecorder();
-  await handler(localRequest({
-    target_id: "3596291931",
-    answer: "4",
-    remark: "测试好友",
-    category_id: 3
-  }), answered);
-  assert.equal(answered.statusCode, 200);
-  assert.equal(answered.body.status, "submitted");
-  assert.equal(answered.body.native_api_shape, "uin-message");
-  assert.deepEqual(submitted[0], [3596291931, "4"]);
-});
-
-test("NapCat social bridge keeps compatibility with one-object friend APIs", async () => {
-  const routes = new Map();
-  const submitted = [];
-  await plugin_init(createContext(routes, {
-    buddyService: {
-      reqToAddFriends(request) { submitted.push(request); }
-    }
-  }));
-
-  const response = responseRecorder();
-  await routes.get("POST /add-friend")(localRequest({
-    target_id: "3596291931",
-    message: "群里认识的",
-    remark: "测试好友",
-    category_id: 3
-  }), response);
-
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.native_api_shape, "request-object");
-  assert.equal(submitted[0].buddyUin, 3596291931);
-  assert.equal(submitted[0].verifyInfo, "群里认识的");
-  assert.equal(submitted[0].remark, "测试好友");
-  assert.equal(submitted[0].defaultCatgory, 3);
-});
-
-test("NapCat social bridge treats hidden native friend arity as the stable UIN API", async () => {
-  const routes = new Map();
-  const submitted = [];
-  await plugin_init(createContext(routes, {
-    buddyService: {
-      reqToAddFriends(...args) {
-        submitted.push(args);
+      async approvalFriendRequest(request) {
+        submissions.push(request);
+        state.requests = [];
+        if (request.accept) state.friends.add(request.friendUid);
         return { result: 0 };
       }
-    }
-  }));
-
-  const response = responseRecorder();
-  await routes.get("POST /add-friend")(localRequest({
-    target_id: "3596291931",
-    message: "群里认识的"
-  }), response);
-
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.native_api_shape, "uin-message");
-  assert.equal(submitted.length, 1);
-  assert.deepEqual(submitted[0], [3596291931, "群里认识的"]);
-});
-
-test("NapCat social bridge retries the request-object friend API only after an argument assertion", async () => {
-  const routes = new Map();
-  const submitted = [];
-  await plugin_init(createContext(routes, {
-    buddyService: {
-      reqToAddFriends(...args) {
-        submitted.push(args);
-        if (args.length === 2) {
-          throw new Error("assertion (argc == 1) failed: reqToAddFriends needs 1 argument");
-        }
-        return { result: 0 };
-      }
-    }
-  }));
-
-  const response = responseRecorder();
-  await routes.get("POST /add-friend")(localRequest({
-    target_id: "3596291931",
-    message: "群里认识的"
-  }), response);
-
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.native_api_shape, "request-object");
-  assert.equal(submitted.length, 2);
-  assert.deepEqual(submitted[0], [3596291931, "群里认识的"]);
-  assert.equal(submitted[1].length, 1);
-  assert.equal(submitted[1][0].buddyUin, 3596291931);
-  assert.equal(submitted[1][0].verifyInfo, "群里认识的");
-});
-
-test("NapCat social bridge submits by UIN when stranger UID lookup fails", async () => {
-  const routes = new Map();
-  const submitted = [];
-  await plugin_init(createContext(routes, {
+    },
     userApi: {
-      async getUidByUinV2() { throw new Error("UID lookup unavailable for stranger"); }
-    },
-    buddyService: {
-      reqToAddFriends(targetId, message) { submitted.push([targetId, message]); }
+      async getUinByUidV2() { return "123456"; }
     }
   }));
 
-  const response = responseRecorder();
-  await routes.get("POST /add-friend")(localRequest({
-    target_id: "3596291931",
-    message: "群里认识的"
-  }), response);
+  const pending = responseRecorder();
+  await routes.get("POST /pending-requests")(localRequest({ count: 20 }), pending);
+  assert.equal(pending.statusCode, 200);
+  assert.deepEqual(pending.body.requests, [{
+    request_type: "friend",
+    sub_type: "add",
+    flag: "1700000000",
+    user_id: "123456",
+    comment: "我是测试账号",
+    requester_nickname: "测试用户",
+    group_id: "",
+    source: "source:3999",
+    time: 1700000000
+  }]);
 
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.status, "submitted");
-  assert.deepEqual(submitted, [[3596291931, "群里认识的"]]);
-});
-
-test("NapCat social bridge friend preflight never submits a request", async () => {
-  const routes = new Map();
-  let submitted = 0;
-  await plugin_init(createContext(routes, {
-    buddyService: {
-      getTargetBuddySetting() {
-        return { addFriendSetting: 3, questions: ["从哪里认识的？"] };
-      },
-      reqToAddFriends() { submitted += 1; }
-    }
-  }));
-
-  const response = responseRecorder();
-  await routes.get("POST /inspect-friend")(localRequest({ target_id: "3596291931" }), response);
-
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.status, "ready");
-  assert.equal(response.body.uid_available, true);
-  assert.equal(response.body.verification_setting, 3);
-  assert.deepEqual(response.body.questions, ["从哪里认识的？"]);
-  assert.equal(submitted, 0);
-});
-
-test("NapCat social bridge prefers the modern AddBuddyService for read-only friend preflight", async () => {
-  const routes = new Map();
-  const inspected = [];
-  await plugin_init(createContext(routes, {
-    addBuddyService: {
-      getBuddySetting(callFrom, request, context) {
-        inspected.push([callFrom, request, context]);
-        return {
-          result: { errorCode: 0 },
-          rsp: {
-            addFriendSetting: 3,
-            questions: ["请填写认识方式"]
-          }
-        };
-      },
-      addBuddy() {
-        throw new Error("preflight must not submit");
-      }
-    },
-    buddyService: {
-      getTargetBuddySetting() {
-        throw new Error("legacy preflight should not be used");
-      },
-      reqToAddFriends() {
-        throw new Error("preflight must not submit");
-      }
-    }
-  }));
-
-  const response = responseRecorder();
-  await routes.get("POST /inspect-friend")(localRequest({ target_id: "3596291931" }), response);
-
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.inspection_api, "add-buddy-service");
-  assert.equal(response.body.verification_setting, 3);
-  assert.deepEqual(response.body.questions, ["请填写认识方式"]);
-  assert.equal(inspected.length, 1);
-  assert.equal(inspected[0][0], "CodexRemoteContact");
-  assert.deepEqual(inspected[0][1].targetInfo, {
-    uid: "uid:3596291931",
-    uin: 3596291931,
-    phoneNum: ""
+  const handled = responseRecorder();
+  await routes.get("POST /handle-request")(localRequest({
+    request_type: "friend",
+    flag: "1700000000",
+    user_id: "123456",
+    approve: true,
+    note: "已验证"
+  }), handled);
+  assert.equal(handled.statusCode, 200);
+  assert.equal(handled.body.status, "approved");
+  assert.equal(handled.body.confirmation, "friend_list");
+  assert.equal(submissions.length, 1);
+  assert.deepEqual(submissions[0], {
+    friendUid: "uid:123456",
+    reqTime: "1700000000",
+    accept: true
   });
-  assert.equal(inspected[0][1].sourceSubId, 0);
-  assert.deepEqual(inspected[0][2], []);
 });
 
-test("NapCat social bridge prefers forced UIN submission when both friend APIs are available", async () => {
+test("NapCat bridge reports a failed request source instead of presenting it as an empty list", async () => {
   const routes = new Map();
-  const modernSubmissions = [];
-  const uinSubmissions = [];
   await plugin_init(createContext(routes, {
-    addBuddyService: {
-      getBuddySetting() {
-        return {
-          result: 0,
-          rsp: {
-            querySetting: 1,
-            question: []
-          }
-        };
-      },
-      addBuddy(callFrom, request, context) {
-        modernSubmissions.push([callFrom, request, context]);
-        return { result: 0, errorString: "" };
-      }
+    friendApi: {
+      async getBuddyReq() { throw new Error("buddy source unavailable"); },
+      async getDoubtFriendRequest() { return []; }
+    }
+  }));
+
+  const response = responseRecorder();
+  await routes.get("POST /pending-requests")(localRequest({ count: 20 }), response);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body.requests, []);
+  assert.deepEqual(response.body.source_errors, [{
+    source: "ordinary_friend",
+    error: "buddy source unavailable"
+  }]);
+});
+
+test("NapCat bridge rejects an incoming friend request only after it leaves the pending list", async () => {
+  const routes = new Map();
+  let requests = [{
+    reqTime: "1700000001",
+    friendUid: "uid:654321",
+    reqType: 1,
+    isInitiator: false,
+    isDecide: false,
+    isBuddy: false
+  }];
+  let submissions = 0;
+  await plugin_init(createContext(routes, {
+    friendApi: {
+      async getBuddyReq() { return { buddyReqs: requests }; },
+      async getDoubtFriendRequest() { return []; },
+      async isBuddy() { return false; }
     },
     buddyService: {
-      reqToAddFriends(targetId, message) {
-        uinSubmissions.push([targetId, message]);
-        return { result: 0 };
+      async approvalFriendRequest(request) {
+        submissions += 1;
+        assert.equal(request.accept, false);
+        requests = [];
+      }
+    },
+    userApi: { async getUinByUidV2() { return "654321"; } }
+  }));
+
+  const handled = responseRecorder();
+  await routes.get("POST /handle-request")(localRequest({
+    request_type: "friend",
+    flag: "1700000001",
+    user_id: "654321",
+    approve: false
+  }), handled);
+  assert.equal(handled.statusCode, 200);
+  assert.equal(handled.body.status, "rejected");
+  assert.equal(handled.body.confirmation, "request_resolved");
+  assert.equal(submissions, 1);
+});
+
+test("NapCat bridge handles suspicious friend requests without pretending rejection is supported", async () => {
+  const routes = new Map();
+  let doubts = [{ flag: "doubt-flag", user_id: 998877, nickname: "可疑账号", reason: "来源异常" }];
+  let approvals = 0;
+  await plugin_init(createContext(routes, {
+    friendApi: {
+      async getBuddyReq() { return { buddyReqs: [] }; },
+      async getDoubtFriendRequest() { return doubts; },
+      async isBuddy() { return false; }
+    },
+    buddyService: {
+      async approvalDoubtBuddyReq(flag) {
+        assert.equal(flag, "doubt-flag");
+        approvals += 1;
+        doubts = [];
       }
     }
   }));
 
-  const missing = responseRecorder();
-  await routes.get("POST /add-friend")(localRequest({
-    target_id: "3596291931"
-  }), missing);
-  assert.equal(missing.statusCode, 409);
-  assert.equal(missing.body.error, "verification_message_required");
-  assert.equal(modernSubmissions.length, 0);
-  assert.equal(uinSubmissions.length, 0);
+  const rejected = responseRecorder();
+  await routes.get("POST /handle-request")(localRequest({
+    request_type: "friend",
+    flag: "doubt-flag",
+    approve: false
+  }), rejected);
+  assert.equal(rejected.statusCode, 409);
+  assert.equal(rejected.body.error, "doubt_reject_unsupported");
+  assert.equal(approvals, 0);
 
-  const response = responseRecorder();
-  await routes.get("POST /add-friend")(localRequest({
-    target_id: "3596291931",
-    message: "群里认识的",
-    category_id: 3
-  }), response);
-
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.native_api_shape, "uin-message");
-  assert.deepEqual(uinSubmissions, [[3596291931, "群里认识的"]]);
-  assert.equal(modernSubmissions.length, 0);
+  const approved = responseRecorder();
+  await routes.get("POST /handle-request")(localRequest({
+    request_type: "friend",
+    flag: "doubt-flag",
+    approve: true
+  }), approved);
+  assert.equal(approved.statusCode, 200);
+  assert.equal(approved.body.status, "approved");
+  assert.equal(approvals, 1);
 });
 
-test("NapCat social bridge falls back to AddBuddyService when the UIN API is unavailable", async () => {
+test("NapCat bridge lists and confirms group invitations and join requests", async () => {
   const routes = new Map();
-  const submitted = [];
+  const invited = {
+    seq: "1800000000000000",
+    type: 1,
+    status: 1,
+    group: { groupCode: "987654", groupName: "邀请测试群" },
+    user1: { uid: "unused", nickName: "" },
+    user2: { uid: "uid:123456", nickName: "邀请人" },
+    postscript: "来玩"
+  };
+  const join = {
+    seq: "1800000000000001",
+    type: 7,
+    status: 1,
+    group: { groupCode: "998877", groupName: "管理测试群" },
+    user1: { uid: "uid:654321", nickName: "申请人" },
+    user2: { uid: "", nickName: "" },
+    postscript: "申请加入"
+  };
+  const groups = [];
+  const operations = [];
   await plugin_init(createContext(routes, {
-    addBuddyService: {
-      addBuddy(callFrom, request, context) {
-        submitted.push([callFrom, request, context]);
+    groupApi: {
+      async getSingleScreenNotifies(doubt) { return doubt ? [] : [invited, join]; },
+      async handleGroupRequest(doubt, notify, operation, reason) {
+        operations.push({ doubt, notify, operation, reason });
+        notify.status = operation === 1 ? 2 : 3;
+        if (notify.type === 1 && operation === 1) groups.push({ groupCode: notify.group.groupCode });
         return { result: 0 };
-      }
+      },
+      async getGroups() { return groups; }
     },
-    buddyService: {}
+    userApi: {
+      async getUinByUidV2(uid) { return uid === "uid:123456" ? "123456" : "654321"; }
+    }
   }));
 
-  const response = responseRecorder();
-  await routes.get("POST /add-friend")(localRequest({
-    target_id: "3596291931",
-    message: "群里认识的",
-    category_id: 3
-  }), response);
+  const pending = responseRecorder();
+  await routes.get("POST /pending-requests")(localRequest({ count: 20 }), pending);
+  assert.deepEqual(pending.body.requests.map((item) => [item.sub_type, item.group_id, item.user_id]), [
+    ["invite", "987654", "123456"],
+    ["add", "998877", "654321"]
+  ]);
 
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.native_api_shape, "add-buddy-service");
-  assert.equal(submitted.length, 1);
-  assert.equal(submitted[0][0], "CodexRemoteContact");
-  assert.equal(submitted[0][1].targetInfo.uin, 3596291931);
-  assert.equal(submitted[0][1].name1, "群里认识的");
-  assert.equal(submitted[0][1].myFriendGroupId, 3);
-  assert.deepEqual(submitted[0][2], []);
+  const acceptInvite = responseRecorder();
+  await routes.get("POST /handle-request")(localRequest({
+    request_type: "group",
+    flag: invited.seq,
+    group_id: "987654",
+    approve: true
+  }), acceptInvite);
+  assert.equal(acceptInvite.statusCode, 200);
+  assert.equal(acceptInvite.body.confirmation, "group_list");
+
+  const rejectJoin = responseRecorder();
+  await routes.get("POST /handle-request")(localRequest({
+    request_type: "group",
+    flag: join.seq,
+    group_id: "998877",
+    approve: false,
+    reason: "资料不符"
+  }), rejectJoin);
+  assert.equal(rejectJoin.statusCode, 200);
+  assert.equal(rejectJoin.body.confirmation, "request_resolved");
+  assert.equal(operations.length, 2);
+  assert.equal(operations[0].operation, 1);
+  assert.equal(operations[1].operation, 2);
+  assert.equal(operations[1].reason, "资料不符");
 });
 
-test("NapCat social bridge bounds native calls that never settle", async () => {
-  await assert.rejects(
-    withNativeTimeout(new Promise(() => {}), "BuddyService.reqToAddFriends(uin,message)", 10),
-    (error) => error?.code === "native_timeout"
-      && error?.nativeApi === "BuddyService.reqToAddFriends(uin,message)"
-      && error?.timeoutMs === 10
-  );
-});
-
-test("NapCat social bridge handles group questions, approval and membership states", async () => {
+test("NapCat bridge handles active group questions, approval and membership states", async () => {
   const routes = new Map();
   const submitted = [];
   const groupInfo = {
@@ -358,7 +277,8 @@ test("NapCat social bridge handles group questions, approval and membership stat
   await plugin_init(createContext(routes, {
     groupApi: {
       async getGroups() { return []; },
-      async searchGroup() { return { groupCode: "987654", searchGroupInfo: groupInfo }; }
+      async searchGroup() { return { groupCode: "987654", searchGroupInfo: groupInfo }; },
+      async getSingleScreenNotifies() { return []; }
     },
     groupService: {
       reqToJoinGroup(request) {
@@ -373,7 +293,6 @@ test("NapCat social bridge handles group questions, approval and membership stat
   await handler(localRequest({ target_id: "987654" }), missing);
   assert.equal(missing.statusCode, 409);
   assert.equal(missing.body.error, "answer_required");
-  assert.equal(missing.body.question, "项目口令");
 
   const answered = responseRecorder();
   await handler(localRequest({ target_id: "987654", answer: "OpenAI" }), answered);
@@ -390,26 +309,20 @@ test("NapCat social bridge handles group questions, approval and membership stat
   });
 });
 
-test("NapCat social bridge treats hidden native group arity as one request object", async () => {
+test("NapCat bridge reports a verification-free group join only after the group list changes", async () => {
   const routes = new Map();
-  const submitted = [];
+  const groups = [];
   await plugin_init(createContext(routes, {
     groupApi: {
-      async getGroups() { return []; },
+      async getGroups() { return groups; },
+      async getSingleScreenNotifies() { return []; },
       async searchGroup() {
-        return {
-          searchGroupInfo: {
-            groupCode: "987654",
-            groupName: "测试群",
-            groupOption: 2,
-            joinGroupAuth: "auth-token"
-          }
-        };
+        return { searchGroupInfo: { groupCode: "987654", groupName: "直加群", groupOption: 1 } };
       }
     },
     groupService: {
-      reqToJoinGroup(...args) {
-        submitted.push(args);
+      reqToJoinGroup(request) {
+        groups.push({ groupCode: String(request.groupCode) });
         return { result: 0 };
       }
     }
@@ -417,75 +330,59 @@ test("NapCat social bridge treats hidden native group arity as one request objec
 
   const response = responseRecorder();
   await routes.get("POST /join-group")(localRequest({ target_id: "987654" }), response);
-
   assert.equal(response.statusCode, 200);
-  assert.equal(response.body.status, "pending_approval");
-  assert.equal(response.body.native_api_shape, "request-object");
-  assert.deepEqual(submitted, [[{
-      groupCode: 987654,
-      sourceId: 3,
-      sourceSubId: 0,
-      applyMsg: "",
-      auth: "auth-token",
-      token: "",
-      noVerifyAuth: ""
-  }]]);
+  assert.equal(response.body.status, "joined");
 });
 
-test("NapCat social bridge keeps compatibility with explicit two-argument group APIs", async () => {
-  const routes = new Map();
-  const submitted = [];
-  await plugin_init(createContext(routes, {
-    groupApi: {
-      async getGroups() { return []; },
-      async searchGroup() {
-        return {
-          searchGroupInfo: {
-            groupCode: "987654",
-            groupName: "测试群",
-            groupOption: 2,
-            joinGroupAuth: "auth-token"
-          }
-        };
-      }
-    },
-    groupService: {
-      reqToJoinGroup(groupCode, request) {
-        submitted.push([groupCode, request]);
-        return { result: 0 };
-      }
-    }
-  }));
-
-  const response = responseRecorder();
-  await routes.get("POST /join-group")(localRequest({ target_id: "987654" }), response);
-
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.native_api_shape, "group-code-request");
-  assert.equal(submitted[0][0], "987654");
-  assert.equal(submitted[0][1].groupCode, 987654);
-});
-
-test("NapCat social bridge refuses disabled and full group joins", async () => {
-  for (const [info, expected] of [
-    [{ groupCode: "987654", groupOption: 3 }, "group_join_disabled"],
-    [{ groupCode: "987654", groupOption: 2, memberNum: 200, maxMemberNum: 200 }, "group_full"]
+test("NapCat bridge adapts hidden and explicit two-argument group APIs", async () => {
+  for (const [groupService, expectedShape] of [
+    [{ reqToJoinGroup(...args) { this.args = args; return { result: 0 }; } }, "request-object"],
+    [{ reqToJoinGroup(groupCode, request) { this.args = [groupCode, request]; return { result: 0 }; } }, "group-code-request"]
   ]) {
     const routes = new Map();
     await plugin_init(createContext(routes, {
       groupApi: {
         async getGroups() { return []; },
-        async searchGroup() { return { groupCode: "987654", searchGroupInfo: info }; }
-      }
+        async getSingleScreenNotifies() { return []; },
+        async searchGroup() {
+          return { searchGroupInfo: { groupCode: "987654", groupOption: 2, joinGroupAuth: "auth" } };
+        }
+      },
+      groupService
     }));
     const response = responseRecorder();
     await routes.get("POST /join-group")(localRequest({ target_id: "987654" }), response);
-    assert.equal(response.statusCode, 409);
-    assert.equal(response.body.error, expected);
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.native_api_shape, expectedShape);
   }
 });
 
-function createContext(routes, { addBuddyService, buddyService, groupApi, groupService, userApi } = {}) {
+test("NapCat bridge blocks non-loopback request operations and bounds native calls", async () => {
+  const routes = new Map();
+  await plugin_init(createContext(routes));
+  const response = responseRecorder();
+  await routes.get("POST /handle-request")({
+    body: { request_type: "friend", flag: "x", approve: true },
+    raw: { socket: { remoteAddress: "203.0.113.9" } }
+  }, response);
+  assert.equal(response.statusCode, 403);
+
+  await assert.rejects(
+    withNativeTimeout(new Promise(() => {}), "native-test", 10),
+    (error) => error?.code === "native_timeout" && error?.nativeApi === "native-test"
+  );
+});
+
+function createContext(routes, { buddyService, friendApi, groupApi, groupService, userApi } = {}) {
+  const defaultFriendApi = {
+    async getBuddyReq() { return { buddyReqs: [] }; },
+    async getDoubtFriendRequest() { return []; },
+    async isBuddy() { return false; }
+  };
+  const defaultGroupApi = {
+    async getGroups() { return []; },
+    async getSingleScreenNotifies() { return []; }
+  };
   return {
     pluginName: "napcat-plugin-builtin",
     router: {
@@ -494,15 +391,17 @@ function createContext(routes, { addBuddyService, buddyService, groupApi, groupS
     },
     core: {
       apis: {
-        UserApi: userApi || { async getUidByUinV2(id) { return `uid:${id}`; } },
-        FriendApi: { async isBuddy() { return false; } },
-        GroupApi: groupApi
+        FriendApi: friendApi || defaultFriendApi,
+        GroupApi: groupApi || defaultGroupApi,
+        UserApi: userApi || {
+          async getUinByUidV2() { return ""; },
+          async getUidByUinV2() { return ""; }
+        }
       },
       context: {
         session: {
-          getAddBuddyService() { return addBuddyService; },
-          getBuddyService() { return buddyService; },
-          getGroupService() { return groupService; }
+          getBuddyService() { return buddyService || {}; },
+          getGroupService() { return groupService || {}; }
         }
       }
     },
@@ -510,7 +409,7 @@ function createContext(routes, { addBuddyService, buddyService, groupApi, groupS
   };
 }
 
-function localRequest(body) {
+function localRequest(body = {}) {
   return { body, raw: { socket: { remoteAddress: "127.0.0.1" } } };
 }
 

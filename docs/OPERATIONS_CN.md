@@ -69,6 +69,8 @@ ncc connect
 
 本机全局控制器会从固定的 `NAPCAT_WORK_DIR`（默认 `/root/.local/share/napcat`）启动 QQ。这样 QQ 的相对路径缓存数据库不会再落进调用 `ncc` 时所在的仓库或 shell 目录；需要时可用环境变量改成其他持久目录。
 
+本机控制器在启动前只读取一次 `/proc/meminfo` 的 `MemAvailable`，自动选择标准、均衡或低内存档；不会启动常驻内存检测。档位会同时限制 QQ 的 V8 堆/渲染进程和 Hub 的 Node 堆/Codex 并发与队列。`ncc resources` 可预览选择结果。`ncc all` 始终以“Hub 就绪后启动 QQ”的顺序启动两项；若 QQ 启动失败，会清理本次新启动的 Hub，避免只留下半套服务。QQ 和 Xvfb 由两个独立 `screen` 会话直接托管，不再使用会在 Termux/PRoot 中空转的后台 `wait` supervisor。
+
 会话模式可从 QQ 菜单或 `ncc` 调整：
 
 ```bash
@@ -245,7 +247,7 @@ npm run verify
 | 主动兴趣不回复 | 周期为空、judge 关闭/失败、兴趣不足、结果过时 | `interest` 日志、当前厂商对应 key、模型参数和群活跃状态 |
 | QQ 图片提示 `URL_PRIVATE_ADDRESS` 且解析到 `198.18/15` | 代理软件使用 Fake-IP DNS，严格下载模式按保留地址拦截 | 保持私网保护，设置 `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE=proxy-compatible` 后只重启 Hub；字面私网 IP 和其他保留地址仍会拒绝 |
 | 无关文字回复出现 `image download returned HTTP 400` | 持久化的附带上下文图片保留了已过期的腾讯下载地址 | 当前/明确引用图片仍可用；附带上下文图片会排除超过两小时或无时间戳的引用，确认运行中的 Hub 已加载当前源码 |
-| 主动加好友无回复、出现参数断言或返回 `native_timeout` | 旧桥可能无限等待 QQ 原生调用，或当前 QQ 暴露了不同的原生参数签名 | 部署好友桥 v8，并确认 `/health` 返回 `preferredFriendSubmitApi: buddy-service-uin`。UID/预检失败不会阻止提交；提交卡住会返回 HTTP 504 并指出原生接口。若预检返回 `verification_message_required`，请带 `验证=...` 重试 |
+| `/申请` 显示成功但 QQ 没变化，或 Hub 重启后普通好友申请消失 | NapCat 标准好友审批动作会在原生审批 Promise 完成前返回，而公开 API 又不能列出普通好友申请 | 部署收到申请桥 v19，并确认 `/health` 包含四项 `incoming-*-request-*` 能力。之后 `/申请 同步` 会经回环桥恢复普通/可疑好友申请及群申请。好友审批只调用一次并等待原生结果，且必须由好友列表、群列表或待处理状态确认变化后才报成功；传输结果不明时不会再经 OneBot 重复写入。可疑好友申请不能可靠拒绝。 |
 | 联网失败 | key、provider、网络或超时 | `/api/maintenance` 的 provider attempts，`search` 日志 |
 | `ncc` 命令不认识参数 | 调用了另一套同名控制器 | `command -v ncc`、`readlink -f`、`ncc help`；仓库命令改用 `npm run ncc --` |
 | dead screen session | 异常退出留下 socket | 确认没有活进程后 `screen -wipe`，再启动 |

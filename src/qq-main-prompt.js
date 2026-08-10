@@ -140,7 +140,7 @@ export function formatQqMainToolGuide({
   inboundFileSummary = "",
   memoryPeople = []
 } = {}) {
-  const actionRelevant = /(?:拍一拍|点赞|好友|加群|入群|群邀请|申请|QQ\s*空间|空间|动态|评论|ban|封禁|拉黑|禁言|踢人)/i.test(String(messageText || "")) || pokeEvent;
+  const actionRelevant = /(?:拍一拍|点赞|好友申请|加群|入群|群邀请|申请|QQ\s*空间|空间|动态|评论|ban|封禁|拉黑|禁言|踢人)/i.test(String(messageText || "")) || pokeEvent;
   const candidates = Array.isArray(replyStickerCandidates) ? replyStickerCandidates : [];
   const detectedPeople = (Array.isArray(memoryPeople) ? memoryPeople : [])
     .filter((person) => person?.userId && (person.summary || person.hasDetail || person.promoted))
@@ -148,7 +148,7 @@ export function formatQqMainToolGuide({
   return [
     "【本轮原生能力】",
     "直接调用 Codex 提供的原生 Web Search、文件、Shell、计划与动态 QQ 工具。工具调用与结果属于协议事件，不要把调用伪装成文本或发明文字控制协议。Codex 自己决定需要多少次工具调用和推理步骤，Hub 只保留总超时与安全边界。",
-    "真实动作硬约束：凡是可见回复声称已经拍一拍、点赞、加好友、加群、处理申请、管理群或发布/评论动态，都必须先调用对应工具，并且只在工具结果明确成功后才能说已经完成。你可以在调用前拒绝执行或设置 status=silent；一旦写操作已经成功，最终回复必须如实反馈结果，不能静默吞掉，也不能在失败时假装成功。",
+    "真实动作硬约束：凡是可见回复声称已经拍一拍、点赞、加群、处理好友/群申请、管理群或发布/评论动态，都必须先调用对应工具，并且只在工具结果明确成功后才能说已经完成。你可以在调用前拒绝执行或设置 status=silent；一旦写操作已经成功，最终回复必须如实反馈结果，不能静默吞掉，也不能在失败时假装成功。",
     "- qq_context.history：读最近消息、数值范围或关键词记录。",
     "- qq_memory：检索、覆盖或标记短期记忆，按候选 QQ 号读取人物详情，并在确有新证据时用 impression 暂存当前范围/人物印象。",
     "- qq_knowledge.manage：按稳定标题搜索、查看和覆盖长期知识。",

@@ -28,6 +28,9 @@ test("isolated app-server env keeps Codex runtime/auth and drops unrelated Hub s
       HOME: "/root",
       PATH: "/usr/bin",
       LANG: "zh_CN.UTF-8",
+      NODE_OPTIONS: "--max-old-space-size=256",
+      UV_THREADPOOL_SIZE: "2",
+      MALLOC_ARENA_MAX: "2",
       ONEBOT_ACCESS_TOKEN: "do-not-forward",
       TAVILY_API_KEY: "do-not-forward",
       OPENAI_API_KEY: "stale"
@@ -41,6 +44,9 @@ test("isolated app-server env keeps Codex runtime/auth and drops unrelated Hub s
   });
   assert.equal(env.HOME, "/root");
   assert.equal(env.PATH, "/usr/bin");
+  assert.equal(env.NODE_OPTIONS, "--max-old-space-size=256");
+  assert.equal(env.UV_THREADPOOL_SIZE, "2");
+  assert.equal(env.MALLOC_ARENA_MAX, "2");
   assert.equal(env.CODEX_REMOTE_CONTACT_QQ_MODE, "1");
   assert.equal(env.CODEX_REMOTE_CONTACT_QQ_TASK_WORKSPACE_DIR, "/tmp/task");
   assert.equal(env.ONEBOT_ACCESS_TOKEN, undefined);

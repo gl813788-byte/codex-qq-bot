@@ -64,11 +64,12 @@ import {
 } from "./interest-model-provider.js";
 import { createQqRequestStore, formatQqRequestEntry } from "./qq-request-store.js";
 import {
-  buildQqActiveAddPayload,
-  formatQqActiveAddFailure,
-  parseQqActiveAddCommand,
+  buildQqActiveJoinGroupPayload,
+  formatQqActiveJoinGroupFailure,
+  parseQqActiveJoinGroupCommand,
   parseQqZonePublishCommand
 } from "./qq-social-command.js";
+import { createQqSocialBridgeClient } from "./qq-social-bridge-client.js";
 import { createQqStickerLabelStore, normalizeQqStickerTags } from "./qq-sticker-label-store.js";
 import { createQqStickerInventory } from "./qq-sticker-inventory.js";
 import { buildQqStickerReply, formatQqStickerSendModeInstruction } from "./qq-sticker-delivery.js";
@@ -702,6 +703,10 @@ const qqStickerInventory = createQqStickerInventory({ filePath: qqStickerInvento
 const qqRequestStore = createQqRequestStore({ filePath: qqRequestsPath });
 const qqKnowledgeBaseRepository = createQqKnowledgeBaseRepository({ filePath: qqKnowledgeBasePath });
 const qqZone = createQqZoneClient({ callOneBotAction });
+const qqSocialBridge = createQqSocialBridgeClient({
+  baseUrl: qqSocialExtensionBase,
+  timeoutMs: oneBotRequestTimeoutMs
+});
 
 function defaultQqProactiveInterestPreset() {
   return {
@@ -6053,7 +6058,7 @@ function isProtectedQqAuthorityTarget(targetId) {
 function isOwnerOnlyQqCommand(normalized, compact) {
   if (parseQqManualAiTaskCommand(normalized)) return true;
   if (isQqCodexRuntimeSettingCommand(normalized)) return true;
-  return /^(跨会话|会话列表|其他会话|cross-session|bot管理员|机器人管理员|助手管理员|agent管理员|菜单权限|权限菜单|公开指令|指令权限|允许指令|开放指令|启用指令|禁用指令|关闭指令|禁止指令|状态|status|查看状态|详细配置|配置|config|settings|详细状态|会话模式|长期会话|临时会话|自动会话|session|session-mode|兴趣|主动|兴趣配置|主动配置|主动响应配置|兴趣状态|主动状态|兴趣开关|主动开关|兴趣间隔|主动间隔|兴趣分钟|主动分钟|兴趣时间|主动时间|兴趣模型|主动模型|兴趣超时|主动超时|兴趣最近|主动最近|兴趣重置|主动重置|interest|proactive|群管理|禁言|解禁言|解除禁言|踢人|移出群|全员禁言|群禁言列表|禁言列表|ban|unban|封禁|拉黑|解禁|解除封禁|取消拉黑|banlist|封禁列表|ban列表|白名单|群白名单|白名单列表|加群|添加群|加入群|群添加|群加入|白名单添加|添加白名单群|加入白名单群|删群|删除群|移除群|群删除|群移除|白名单删除|删除白名单群|移除白名单群|模型|qq模型|切模型|切换模型|智能等级|智能|思考强度|qq智能等级|qq智能|qq思考强度|推理摘要|思考摘要|reasoning-summary|人格|agent人格|personality|服务档位|服务等级|service-tier)/i.test(normalized)
+  return /^(跨会话|会话列表|其他会话|cross-session|bot管理员|机器人管理员|助手管理员|agent管理员|菜单权限|权限菜单|公开指令|指令权限|允许指令|开放指令|启用指令|禁用指令|关闭指令|禁止指令|状态|status|查看状态|详细配置|配置|config|settings|详细状态|会话模式|长期会话|临时会话|自动会话|session|session-mode|兴趣|主动|兴趣配置|主动配置|主动响应配置|兴趣状态|主动状态|兴趣开关|主动开关|兴趣间隔|主动间隔|兴趣分钟|主动分钟|兴趣时间|主动时间|兴趣模型|主动模型|兴趣超时|主动超时|兴趣最近|主动最近|兴趣重置|主动重置|interest|proactive|申请|好友申请|群申请|主动加群|群管理|禁言|解禁言|解除禁言|踢人|移出群|全员禁言|群禁言列表|禁言列表|ban|unban|封禁|拉黑|解禁|解除封禁|取消拉黑|banlist|封禁列表|ban列表|白名单|群白名单|白名单列表|加群|添加群|加入群|群添加|群加入|白名单添加|添加白名单群|加入白名单群|删群|删除群|移除群|群删除|群移除|白名单删除|删除白名单群|移除白名单群|模型|qq模型|切模型|切换模型|智能等级|智能|思考强度|qq智能等级|qq智能|qq思考强度|推理摘要|思考摘要|reasoning-summary|人格|agent人格|personality|服务档位|服务等级|service-tier)/i.test(normalized)
     || /^(5|5\.5|5\.4|5\.4mini|5\.4-mini|mini|5\.3|5\.3codex|5\.3-codex|codex)$/i.test(compact);
 }
 
@@ -6723,14 +6728,14 @@ function isQqBotHistoryCommand(command) {
 }
 
 function isQqBotSocialCommand(command) {
-  return /^\/?(?:点赞|申请|好友申请|群申请|主动加好友|加好友|添加好友|主动加群|加群|加入群|动态|识别动态|发动态|评论动态)(?:\s+.*)?$/i.test(command);
+  return /^\/?(?:点赞|申请|好友申请|群申请|主动加群|动态|识别动态|发动态|评论动态)(?:\s+.*)?$/i.test(command);
 }
 
 async function executeQqBotSocialCommand(command, event) {
   const body = String(command || "").replace(/^\/+/, "").trim();
   if (/^点赞(?:\s|$)/i.test(body)) return executeQqLikeCommand(body, event);
   if (/^(申请|好友申请|群申请)(?:\s|$)/i.test(body)) return executeQqRequestCommand(body, event);
-  if (/^(主动加好友|加好友|添加好友|主动加群|加群|加入群)(?:\s|$)/i.test(body)) return executeQqActiveAddCommand(body, event);
+  if (/^主动加群(?:\s|$)/i.test(body)) return executeQqJoinGroupCommand(body, event);
   if (/^(动态|识别动态|发动态|评论动态)(?:\s|$)/i.test(body)) return executeQqZoneCommand(body, event);
   return { ok: false, command, reply: "未识别的 QQ 社交工具命令。" };
 }
@@ -6820,12 +6825,31 @@ async function handleQqRequest(entry, { approve, note = "", handledBy = "bot", a
   const endpoint = entry.requestType === "friend"
     ? entry.subType === "doubt" ? "set_doubt_friends_add_request" : "set_friend_add_request"
     : "set_group_add_request";
-  const payload = entry.requestType === "friend"
+  const oneBotPayload = entry.requestType === "friend"
     ? entry.subType === "doubt"
       ? { flag: entry.flag, approve: true }
       : { flag: entry.flag, approve, remark: approve ? note : "" }
     : { flag: entry.flag, sub_type: entry.subType, approve, reason: approve ? "" : note };
-  const result = await callOneBotAction(endpoint, payload);
+  let transport = "onebot";
+  let result;
+  if (qqSocialBridge.configured) {
+    transport = "social-bridge";
+    result = await qqSocialBridge.handleRequest({
+      request_type: entry.requestType,
+      sub_type: entry.subType,
+      flag: entry.flag,
+      user_id: entry.userId,
+      group_id: entry.groupId,
+      approve,
+      note
+    });
+    if (result.unavailable) {
+      transport = "onebot-fallback";
+      result = await callOneBotAction(endpoint, oneBotPayload);
+    }
+  } else {
+    result = await callOneBotAction(endpoint, oneBotPayload);
+  }
   if (!result.ok) {
     const error = result.error || result.body?.message || result.body?.wording || "未知错误";
     const updated = await qqRequestStore.update(entry.id, { lastError: error, handledBy, autoHandled });
@@ -6834,15 +6858,17 @@ async function handleQqRequest(entry, { approve, note = "", handledBy = "bot", a
       requestType: entry.requestType,
       subType: entry.subType,
       endpoint,
+      transport,
       approve,
       autoHandled,
       handledBy,
       httpStatus: result.status ?? null,
       oneBotStatus: result.body?.status ?? null,
       oneBotRetCode: result.body?.retcode ?? null,
+      ambiguous: Boolean(result.ambiguous),
       error
     }, "onebot");
-    return { ok: false, entry: updated || entry, error, reply: formatOneBotActionFailure(approve ? "同意申请" : "拒绝申请", result) };
+    return { ok: false, entry: updated || entry, error, reply: formatQqRequestActionFailure(approve, result) };
   }
   const status = approve ? "approved" : "rejected";
   const updated = await qqRequestStore.update(entry.id, {
@@ -6857,6 +6883,7 @@ async function handleQqRequest(entry, { approve, note = "", handledBy = "bot", a
     requestType: entry.requestType,
     subType: entry.subType,
     endpoint,
+    transport,
     approve,
     autoHandled,
     handledBy,
@@ -6872,91 +6899,77 @@ async function handleQqRequest(entry, { approve, note = "", handledBy = "bot", a
   };
 }
 
-async function executeQqActiveAddCommand(command, event) {
-  if (!hasQqPrivilegedAccess(event)) return { ok: false, command, reply: "主动加好友或群只允许主人或 Bot 管理员触发。" };
-  const parsed = parseQqActiveAddCommand(command);
-  if (!parsed) return { ok: false, command, reply: "用法：/主动加好友 QQ号 [验证=验证信息 | 答案=正确答案 | 备注=好友备注]，或 /主动加群 群号 [答案=正确答案]。" };
-  const { kind, targetId } = parsed;
-  if (!qqSocialExtensionBase) {
+function formatQqRequestActionFailure(approve, result) {
+  const error = String(result?.error || result?.body?.error || result?.body?.message || result?.body?.wording || "");
+  if (error === "request_not_found") return "QQ 当前待处理列表中已经找不到这条申请；没有重复执行，请先用 /申请 同步 刷新列表。";
+  if (error === "request_target_mismatch") return "申请记录与 QQ 当前待处理目标不一致；为避免处理错人，本次已停止。";
+  if (error === "request_action_unconfirmed") return "QQ 原生审批已经返回，但好友列表、群列表和待处理状态都未确认变化；本次按失败处理，没有假报成功。";
+  if (error === "doubt_reject_unsupported") return "QQ 当前只能可靠同意可疑好友申请，不能可靠拒绝；申请仍保持待处理。";
+  if (error === "native_timeout" || result?.timedOut) return "QQ 原生审批超时；结果无法确认，也没有改走第二条接口重复操作。";
+  if (result?.ambiguous) return "申请审批的传输结果无法确认；为避免重复同意或拒绝，没有改走第二条接口。请先用 /申请 同步 检查当前状态。";
+  return formatOneBotActionFailure(approve ? "同意申请" : "拒绝申请", result);
+}
+
+async function executeQqJoinGroupCommand(command, event) {
+  if (!hasQqPrivilegedAccess(event)) return { ok: false, command, reply: "主动加群只允许主人或 Bot 管理员触发。" };
+  const parsed = parseQqActiveJoinGroupCommand(command);
+  if (!parsed) return { ok: false, command, reply: "用法：/主动加群 群号 [答案=正确答案]。" };
+  const { targetId } = parsed;
+  if (!qqSocialBridge.configured) {
     return {
       ok: false,
       command,
-      reply: `NapCat 的公开 OneBot 接口没有“主动加${kind === "friend" ? "好友" : "群"}”动作；当前不会伪报成功。配置 CODEX_REMOTE_CONTACT_QQ_SOCIAL_API_BASE 扩展桥后即可由 Bot 调用。`
+      reply: "NapCat 的公开 OneBot 接口没有主动加群动作；当前不会伪报成功。配置 CODEX_REMOTE_CONTACT_QQ_SOCIAL_API_BASE 扩展桥后即可由 Bot 调用。"
     };
   }
-  const endpoint = kind === "friend" ? "add-friend" : "join-group";
+  const endpoint = "join-group";
   const startedAt = Date.now();
-  const operation = kind === "friend" ? "friend.add" : "group.join";
-  const targetScopeId = kind === "friend" ? `private:${targetId}` : targetId;
   const commonLogDetails = (outcome, extra = {}) => buildQqOperationLogDetails(event, {
-    operation,
+    operation: "group.join",
     outcome,
-    targetScopeId,
-    targetType: kind === "friend" ? "user" : "group",
-    kind,
+    targetScopeId: targetId,
+    targetType: "group",
+    kind: "group",
     targetId,
     endpoint,
     ...extra
   });
   logger.info("QQ active social request started", commonLogDetails("started"), "qq", qqLogContext(event));
-  try {
-    const response = await fetch(`${qqSocialExtensionBase}/${endpoint}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(buildQqActiveAddPayload(parsed)),
-      signal: AbortSignal.timeout(oneBotRequestTimeoutMs)
-    });
-    const result = await readResponseJson(response).catch(() => ({}));
-    const ok = response.ok && (result.ok === true || result.status === "ok" || Number(result.code) === 0);
-    const alreadyFriend = kind === "friend" && result.status === "already_friend";
-    const alreadyMember = kind === "group" && result.status === "already_member";
-    const pendingApproval = result.status === "pending_approval";
-    const logDetails = commonLogDetails(ok ? "success" : "failed", {
-      durationMs: Math.max(0, Date.now() - startedAt),
-      httpStatus: response.status,
-      status: result.status ?? null,
-      errorCode: ok ? null : String(result.error || result.status || "native_request_failed"),
-      error: result.error ?? null,
-      nativeCode: result.native_code ?? null,
-      nativeMessage: result.native_message ?? null,
-      nativeApi: result.native_api ?? null,
-      nativeApiShape: result.native_api_shape ?? null,
-      verificationMode: result.verification_mode ?? null
-    });
-    if (ok) {
-      logger.success("QQ active social request completed", logDetails, "qq", qqLogContext(event));
-    } else {
-      logger.warn("QQ active social request failed", logDetails, "qq", qqLogContext(event));
-    }
-    return {
-      ok,
-      command,
-      reply: ok
-        ? alreadyFriend
-          ? `${targetId} 已经是 Bot 好友，不重复发送申请。`
-          : alreadyMember
-            ? `Bot 已经在群 ${targetId} 中，不重复发送申请。`
-            : pendingApproval
-              ? `已提交${kind === "friend" ? "好友" : "加群"}申请：${targetId}，正在等待对方审核。`
-              : `已向 QQ 提交${kind === "friend" ? "加好友" : "加群"}操作：${targetId}${result?.verification_mode ? `（${result.verification_mode}）` : ""}。`
-        : formatQqActiveAddFailure(kind, targetId, result, response.status)
-    };
-  } catch (error) {
-    const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
-    logger.warn("QQ active social request failed", commonLogDetails(timedOut ? "timeout" : "failed", {
-      durationMs: Math.max(0, Date.now() - startedAt),
-      timedOut,
-      errorCode: String(error?.code || (timedOut ? "bridge_timeout" : "bridge_request_failed")),
-      error
-    }), "qq", qqLogContext(event));
-    return {
-      ok: false,
-      command,
-      reply: timedOut
-        ? `好友/群桥在 ${Math.ceil(oneBotRequestTimeoutMs / 1000)} 秒内没有返回；已停止等待，请检查 NapCat 社交桥日志后重试。`
-        : `发起申请失败：${error.message}`
-    };
-  }
+  const bridgeResult = await qqSocialBridge.joinGroup(buildQqActiveJoinGroupPayload(parsed));
+  const result = bridgeResult.body || {};
+  const ok = bridgeResult.ok;
+  const alreadyMember = result.status === "already_member";
+  const joined = result.status === "joined";
+  const pendingApproval = result.status === "pending_approval";
+  const logDetails = commonLogDetails(ok ? "success" : bridgeResult.timedOut ? "timeout" : "failed", {
+    durationMs: Math.max(0, Date.now() - startedAt),
+    httpStatus: bridgeResult.status,
+    status: result.status ?? null,
+    errorCode: ok ? null : String(result.error || bridgeResult.error || result.status || "native_request_failed"),
+    error: result.error ?? bridgeResult.error ?? null,
+    nativeCode: result.native_code ?? null,
+    nativeMessage: result.native_message ?? null,
+    nativeApi: result.native_api ?? null,
+    nativeApiShape: result.native_api_shape ?? null,
+    verificationMode: result.verification_mode ?? null
+  });
+  if (ok) logger.success("QQ active social request completed", logDetails, "qq", qqLogContext(event));
+  else logger.warn("QQ active social request failed", logDetails, "qq", qqLogContext(event));
+  return {
+    ok,
+    command,
+    reply: ok
+      ? alreadyMember
+        ? `Bot 已经在群 ${targetId} 中，不重复发送申请。`
+        : joined
+          ? `Bot 已确认成功加入群 ${targetId}。`
+        : pendingApproval
+          ? `已提交加群申请：${targetId}，正在等待管理员审核。`
+          : `已向 QQ 提交加群操作：${targetId}${result?.verification_mode ? `（${result.verification_mode}）` : ""}。`
+      : bridgeResult.timedOut
+        ? `加群桥在 ${Math.ceil(oneBotRequestTimeoutMs / 1000)} 秒内没有返回；本次没有伪报成功。`
+        : formatQqActiveJoinGroupFailure(targetId, result.error ? result : { ...result, error: bridgeResult.error }, bridgeResult.status)
+  };
 }
 
 async function syncPendingQqRequests() {
@@ -6969,6 +6982,22 @@ async function syncPendingQqRequests() {
     if (result.isNew) added += 1;
     else duplicates += 1;
   };
+
+  if (qqSocialBridge.configured) {
+    const bridgeResult = await qqSocialBridge.listPendingRequests({ count: 200 });
+    if (bridgeResult.ok && Array.isArray(bridgeResult.body?.requests)) {
+      for (const item of bridgeResult.body.requests.slice(0, 200)) {
+        await record({ post_type: "request", ...item });
+      }
+      for (const item of Array.isArray(bridgeResult.body?.source_errors) ? bridgeResult.body.source_errors : []) {
+        errors.push(`同步 ${String(item?.source || "QQ 申请")} 失败：${String(item?.error || "未知错误")}`);
+      }
+      return { added, duplicates, errors };
+    }
+    if (!bridgeResult.unavailable) {
+      errors.push(`同步原生 QQ 申请失败：${bridgeResult.error || (bridgeResult.timedOut ? "请求超时" : "未知错误")}`);
+    }
+  }
 
   const groupResult = await callOneBotAction("get_group_system_msg", { count: 100 }).catch((error) => ({ ok: false, error: error.message }));
   if (groupResult.ok) {
