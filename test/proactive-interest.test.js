@@ -347,8 +347,15 @@ test("proactive judge resets its idle timeout while reasoning and content tokens
     humanStyle: {
       sampleSize: 120,
       messagesPerHour: 42,
+      sameSpeakerContinuationRatio: 0.42,
       multiMessageRunRatio: 0.38,
       messagesInMultiRunsRatio: 0.6,
+      runP90: 3,
+      maxRun: 5,
+      activeMinuteMedianMessages: 2,
+      activeMinuteP90Messages: 5,
+      sameSpeakerGapMedianSeconds: 18,
+      speakerSwitchGapMedianSeconds: 34,
       medianTextChars: 6,
       p90TextChars: 12,
       imageMessageRatio: 0.18,
@@ -356,6 +363,10 @@ test("proactive judge resets its idle timeout while reasoning and content tokens
       replyMessageRatio: 0.12,
       adaptiveLearning: {
         group: {
+          sampleSize: 800,
+          burstContinuationRatio: 0.21,
+          gapSampleSize: 64,
+          medianGapSeconds: 41,
           interruptionSampleSize: 48,
           interruptionRate: 0.625,
           interruptionWindowSeconds: 120
@@ -398,11 +409,31 @@ test("proactive judge resets its idle timeout while reasoning and content tokens
   const judgeInput = JSON.parse(requestBody.messages[1].content);
   assert.equal(judgeInput.recentMessages[0].sender, "测试群友(QQ 10000)");
   assert.deepEqual(judgeInput.recentMessages[0].mentions, ["被艾特者(QQ 20000)"]);
-  assert.equal(judgeInput.groupHumanRhythm.multiMessageRunRatio, 0.38);
-  assert.equal(judgeInput.groupHumanRhythm.learnedInterruptionSampleSize, 48);
-  assert.equal(judgeInput.groupHumanRhythm.learnedInterruptionRate, 0.625);
-  assert.equal(judgeInput.groupHumanRhythm.learnedInterruptionWindowSeconds, 120);
-  assert.match(requestBody.messages[0].content, /群内插话节奏/);
+  assert.deepEqual(judgeInput.groupHumanRhythm.conversationContinuity.recentRememberedWindow, {
+    sampleSize: 120,
+    sameSpeakerContinuationMessageRatio: 0.42,
+    multiMessageRunRatio: 0.38,
+    messagesInMultiMessageRunsRatio: 0.6,
+    p90SameSpeakerRunLength: 3,
+    maxSameSpeakerRunLength: 5,
+    activeMinuteMedianMessages: 2,
+    activeMinuteP90Messages: 5,
+    medianSameSpeakerGapSeconds: 18,
+    medianSpeakerSwitchGapSeconds: 34
+  });
+  assert.deepEqual(judgeInput.groupHumanRhythm.conversationContinuity.learnedHistory, {
+    humanMessageSampleSize: 800,
+    activeTransitionSampleSize: 48,
+    activeTransitionWindowSeconds: 120,
+    speakerSwitchRatioWithinActiveTransitions: 0.625,
+    sameSpeakerRatioWithinActiveTransitions: 0.375,
+    sameSpeakerContinuationMessageRatio: 0.21,
+    recentGapSampleSize: 64,
+    medianRecentAdjacentGapSeconds: 41
+  });
+  assert.match(judgeInput.groupHumanRhythm.conversationContinuity.interpretation, /当前消息与最近上下文优先/);
+  assert.match(requestBody.messages[0].content, /近期同一人连续补充/);
+  assert.match(requestBody.messages[0].content, /任何高比例都不能自动触发回复/);
 });
 
 test("ordinary interest input shows a repeated current message once with its total count", async () => {
