@@ -3,6 +3,7 @@ import { normalizeQqKnowledgeBase } from "./qq-knowledge-base.js";
 export function buildQqKnowledgeStoreLogDetails(store, details = {}) {
   const normalized = normalizeQqKnowledgeBase(store);
   return {
+    operation: "memory.knowledge_load",
     source: String(details.source || "startup"),
     outcome: String(details.outcome || "loaded"),
     created: Boolean(details.created),
@@ -24,6 +25,7 @@ export function buildQqKnowledgePatchLogDetails(result, details = {}) {
   const actionCounts = countBy(applied, (item) => item?.action || "unknown");
   const kindCounts = countBy(applied, (item) => item?.kind || "unknown");
   return {
+    operation: "memory.knowledge_update",
     source: String(details.source || "unknown"),
     outcome: applied.length > 0 ? "updated" : rejected.length > 0 ? "rejected" : "unchanged",
     groupId: optionalId(details.groupId),
@@ -50,6 +52,7 @@ export function buildQqKnowledgeMatchLogDetails(matches, usageResult = {}, detai
   const normalizedMatches = Array.isArray(matches) ? matches : [];
   const recorded = Array.isArray(usageResult?.recorded) ? usageResult.recorded : [];
   return {
+    operation: "memory.slang_usage",
     source: String(details.source || "qq-message"),
     outcome: recorded.length > 0 ? "recorded" : normalizedMatches.length > 0 ? "duplicate" : "no-match",
     groupId: optionalId(details.groupId),
@@ -73,6 +76,7 @@ export function buildQqKnowledgeMatchLogDetails(matches, usageResult = {}, detai
 
 export function buildQqKnowledgeQueryLogDetails(details = {}) {
   return {
+    operation: "memory.knowledge_query",
     source: String(details.source || "internal-tool"),
     action: String(details.action || "list"),
     outcome: "completed",
