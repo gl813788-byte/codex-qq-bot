@@ -138,9 +138,12 @@ export async function shouldProactivelyReplyToQq(event = {}, state = {}, helpers
   const elapsedMs = Math.max(0, now() - lastJudgeAt);
   const keywordTriggerDue = triggerMode === "message" && Boolean(helpers.interestKeywordMatch?.matched);
   const knowledgeTriggerDue = triggerMode === "message" && Boolean(helpers.knowledgeMatches?.length);
+  const conversationFollowUpDue = triggerMode === "message" && Boolean(helpers.conversationFollowUp?.candidate);
   const messageTriggerDue = currentCount >= judgeEveryMessages;
   const timeTriggerDue = judgeEveryMinutes > 0 && currentCount > 0 && elapsedMs >= judgeEveryMinutes * minuteMs;
-  const triggerDue = triggerMode === "time" ? timeTriggerDue : (knowledgeTriggerDue || keywordTriggerDue || messageTriggerDue);
+  const triggerDue = triggerMode === "time"
+    ? timeTriggerDue
+    : (conversationFollowUpDue || knowledgeTriggerDue || keywordTriggerDue || messageTriggerDue);
   if (!triggerDue) {
     return {
       ok: false,
@@ -171,11 +174,14 @@ export async function shouldProactivelyReplyToQq(event = {}, state = {}, helpers
       triggerMode,
       triggerReason: triggerMode === "time"
         ? "minute_interval"
-        : knowledgeTriggerDue ? "knowledge_slang" : keywordTriggerDue ? "persona_keyword" : "message_count",
+        : conversationFollowUpDue
+          ? "bot_conversation_follow_up"
+          : knowledgeTriggerDue ? "knowledge_slang" : keywordTriggerDue ? "persona_keyword" : "message_count",
       interestKeywordMatch: helpers.interestKeywordMatch || null,
       knowledgeMatches: helpers.knowledgeMatches || [],
       interestSignals: helpers.interestSignals || null,
       relationshipInterest: helpers.relationshipInterest || null,
+      conversationFollowUp: helpers.conversationFollowUp || null,
       consumedMessageCount
     };
 
@@ -217,7 +223,8 @@ export async function shouldProactivelyReplyToQq(event = {}, state = {}, helpers
           selfPersona: helpers.selfPersona || null,
           interestKeywordMatch: helpers.interestKeywordMatch || null,
           knowledgeMatches: helpers.knowledgeMatches || [],
-          interestSignals: helpers.interestSignals || null
+          interestSignals: helpers.interestSignals || null,
+          conversationFollowUp: helpers.conversationFollowUp || null
         });
         const interestMultiplier = Math.max(0.08, Math.min(1, Number(helpers.relationshipInterest?.interestMultiplier ?? 1)));
         const effectiveInterest = judge.ok ? Math.round(judge.interest * interestMultiplier * 1000) / 1000 : 0;
@@ -967,6 +974,9 @@ function buildJudgeMessages(event, assessment, config, { formatRetry = false } =
         "【判断流程】",
         "1. 结合当前消息、引用和最近上下文，还原真实语义与对象；不要按单个关键词猜。",
         "2. 站在 Bot 已形成的兴趣与关系位置上，判断它是否产生了一个具体、非复述、值得说出来的反应。",
+        config.conversationFollowUp?.candidate
+          ? "当前是‘Bot 刚回复过同一发送者’的续聊候选批次。Hub 已按自适应分钟窗与条数上限收集；达到条数上限只停止扩充批次，仍要等连续 5 秒安静后才冻结，本批只允许这一次判断。你必须独立判断整批消息是否在语义上回答、补充、追问或自然回应 Bot 的上一条；时间、条数与统计只负责把批次送来审查，不是回复依据。若话题已转给别人、已切换新话题或只是面向全群的无关发言，必须拒绝。"
+          : null,
         "3. 再用话题是否已结束、是否答错对象、Bot 最近是否说得过多、连续未获回应和群内对话节奏修正时机。groupHumanRhythm.conversationContinuity 会区分近期同一人连续补充、多人活跃衔接及长期习惯：先读实际上下文，避免抢在一段尚未说完的连续消息中间；只有内容本身值得回应时，活跃的多人对话才可作为自然接话时机。低样本、过往统计或与当前上下文冲突的统计应忽略，任何高比例都不能自动触发回复。",
         "4. shouldReply 给最终开关；interest 表示真实想接话的强度。reason 只解释决定，不得包含回复草稿。",
         "【信号边界】heuristicHints、关系数值和群节奏只是可能不准的提示，不是分数表或硬门。matchedKnowledge 只用于理解当前范围内的黑话。",
@@ -983,10 +993,14 @@ function buildJudgeMessages(event, assessment, config, { formatRetry = false } =
         proactiveJudgeInterval: {
           everyMessages: config.judgeEveryMessages,
           everyMinutes: config.judgeEveryMinutes,
-          triggeredBy: config.triggerMode === "time" ? "minute_interval" : "message_count",
+          triggeredBy: config.triggerMode === "time"
+            ? "minute_interval"
+            : config.conversationFollowUp?.candidate ? "bot_conversation_follow_up" : "message_count",
           note: config.triggerMode === "time"
             ? "这是定时兴趣检查。只在当前话题仍活跃、此刻插话不显得迟到时回复；最终是否回复只看结构化 JSON 中的 shouldReply 和 interest。"
-            : "这是消息数兴趣检查；最终是否回复只看结构化 JSON 中的 shouldReply 和 interest。"
+            : config.conversationFollowUp?.candidate
+              ? "这是同一发送者经 5 秒静默合并并已冻结的续聊候选批次；是否真的承接上一条必须由语义判断，最终是否回复只看 shouldReply 和 interest。"
+              : "这是消息数兴趣检查；最终是否回复只看结构化 JSON 中的 shouldReply 和 interest。"
         },
         currentMessage: {
           text: appendQqConsecutiveRepeatSuffix(assessment.normalized, currentRepeatCount),
@@ -999,6 +1013,20 @@ function buildJudgeMessages(event, assessment, config, { formatRetry = false } =
             imageCount: Array.isArray(event.replyContext.images) ? event.replyContext.images.length : 0
           } : null
         },
+        conversationFollowUpCandidate: config.conversationFollowUp?.candidate ? {
+          anchorText: String(config.conversationFollowUp.anchorText || "").slice(0, 320),
+          anchorAt: config.conversationFollowUp.anchorAt || null,
+          gapSeconds: Math.max(0, Number(config.conversationFollowUp.gapSeconds || 0)),
+          windowSeconds: Math.max(0, Number(config.conversationFollowUp.windowSeconds || 0)),
+          messageLimit: Math.max(0, Number(config.conversationFollowUp.messageLimit || 0)),
+          batchMessageCount: Math.max(0, Number(config.conversationFollowUp.batchMessageCount || 0)),
+          quietWindowMs: Math.max(0, Number(config.conversationFollowUp.quietWindowMs || 0)),
+          sameSenderMessageCount: Math.max(0, Number(config.conversationFollowUp.sameSenderMessageCount || 0)),
+          interveningHumanCount: Math.max(0, Number(config.conversationFollowUp.interveningHumanCount || 0)),
+          interveningOtherSenderCount: Math.max(0, Number(config.conversationFollowUp.interveningOtherSenderCount || 0)),
+          statisticalBasis: config.conversationFollowUp.statisticalBasis || null,
+          decisionRule: "只在整批消息与 Bot 锚点存在真实语义承接时批准；统计、时间窗口、条数和连发本身都不构成自动批准。"
+        } : null,
         heuristicHints: {
           possibleTopics: assessment.labels,
           possibleTimingProblems: assessment.blockers,
@@ -1199,12 +1227,15 @@ function buildDecision(reason, assessment, judge = null, meta = {}) {
     interestKeywordMatch: meta.interestKeywordMatch || null,
     interestSignals: meta.interestSignals || null,
     relationshipInterest: meta.relationshipInterest || null,
+    conversationFollowUp: meta.conversationFollowUp || null,
     consumedMessageCount: meta.consumedMessageCount,
     interestScore: assessment.score,
     interest: assessment,
     modelJudge: judge,
     replyContext: meta.replyContext || [],
-    promptHint: "兴趣模型已经批准本轮主动接话。主模型只需结合原消息和上下文自然回应，不要重新判断是否出现，也不要解释后台触发原因。",
+    promptHint: meta.conversationFollowUp?.candidate
+      ? "兴趣模型已确认这批连续消息在语义上延续 Bot 与同一人的上一轮对话。主模型结合锚点、整批消息和最近上下文自然续聊，不要解释后台触发原因。"
+      : "兴趣模型已经批准本轮主动接话。主模型只需结合原消息和上下文自然回应，不要重新判断是否出现，也不要解释后台触发原因。",
     ...createQqTwoModelProactiveApproval({
       kind: QQ_AUTONOMOUS_PROACTIVE_KINDS.ORDINARY_GROUP_REPLY,
       provider: judge?.provider || "openrouter",

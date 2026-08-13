@@ -41,9 +41,13 @@ test("scope summaries keep QQ identity only in long-term knowledge extraction", 
   assert.match(prompt, /会话待核查/);
   assert.match(prompt, /稳定标题/);
   assert.match(prompt, /previousScope 是上轮范围摘要与主要话题/);
+  assert.match(prompt, /语境含义统一使用现有黑话 knowledge/);
+  assert.match(prompt, /通用解释、当前范围的具体含义和必要边界/);
+  assert.match(prompt, /personMemorable/);
   const payload = JSON.parse(prompt.split("\n").at(-1));
   assert.equal(payload.previousScope.summary, "这个群长期讨论协作项目与发布安排。");
   assert.deepEqual(payload.previousScope.topics, ["协作项目", "发布安排"]);
+  assert.equal(payload.statisticalLanguageProfile.sampleSize, 1);
 
   const privatePrompt = buildQqSelfPersonaScopeSummaryPrompt("private:10001", [], {});
   assert.match(privatePrompt, /个人黑话用 member/);
@@ -98,6 +102,65 @@ test("scope topic context gives the main model evolving summary-derived knowledg
   assert.match(context, /话题已变化就调整归类/);
   assert.match(context, /不要预设任何领域/);
   assert.equal(formatQqSelfPersonaScopeTopicContext(store, "99999"), "");
+});
+
+test("scope summaries persist social style while punctuation meaning references slang knowledge", () => {
+  const startedAt = Date.UTC(2026, 6, 15, 8, 0);
+  let store = recordQqSelfPersonaActivity(createEmptyQqSelfPersona(), "20001", {
+    humanMessages: 80,
+    at: startedAt
+  });
+  store = applyQqSelfPersonaScopeSummary(store, "20001", {
+    summary: "这个群聊天节奏快，常用短反应接梗。",
+    socialMemory: {
+      scopeSummary: "整体轻松直接，熟人间会快速接梗",
+      scopeDetail: "讨论通常由多人短句推进，正式问题才切换到完整说明。",
+      atmosphere: ["轻松", "直接"],
+      interactionHabits: ["多人连续补充"],
+      notablePeople: []
+    },
+    languageStyle: {
+      summary: "短反应和省略式收尾较常见",
+      phrasePatterns: ["先反应再补充"],
+      sentencePatterns: ["短句自然停住"],
+      punctuationUsageRules: [{
+        symbol: "？？",
+        knowledgeTitle: "？？",
+        confidence: 0.84,
+        evidence: "多次出现在接梗后的短反应中",
+        usageBoundary: "认真求解时仍按问题理解"
+      }],
+      memberPatterns: []
+    }
+  }, { at: startedAt });
+
+  const context = formatQqSelfPersonaScopeTopicContext(store, "20001");
+  assert.match(context, /整体轻松直接/);
+  assert.match(context, /经模型审定/);
+  assert.match(context, /黑话“？？”/);
+  assert.match(context, /置信度 84%/);
+  assert.match(context, /认真求解时仍按问题理解/);
+});
+
+test("scope summary person labels are restricted to QQ ids present in reviewed history", () => {
+  let store = recordQqSelfPersonaActivity(createEmptyQqSelfPersona(), "20001", { humanMessages: 80 });
+  store = applyQqSelfPersonaScopeSummary(store, "20001", {
+    socialMemory: {
+      notablePeople: [
+        { userId: "10001", userName: "已见", summary: "有充分证据", detail: "有充分证据的详细印象" },
+        { userId: "99999", userName: "未见", summary: "模型幻觉", detail: "不应进入记忆" }
+      ]
+    },
+    languageStyle: {
+      memberPatterns: [
+        { userId: "10001", summary: "短句", phrasePatterns: [], punctuationUsageRules: [] },
+        { userId: "99999", summary: "不存在", phrasePatterns: [], punctuationUsageRules: [] }
+      ]
+    }
+  }, { allowedUserIds: ["10001"] });
+
+  assert.deepEqual(store.scopes["20001"].socialMemory.notablePeople.map((item) => item.userId), ["10001"]);
+  assert.deepEqual(store.scopes["20001"].languageStyle.memberPatterns.map((item) => item.userId), ["10001"]);
 });
 
 test("scope summaries are due by bounded message/reply thresholds and feed global generation", () => {

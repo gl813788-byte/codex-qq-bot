@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createEmptyQqConversationMemory,
+  applyQqConversationSummaryMemory,
   extractQqConversationMemoryMarkers,
   formatQqConversationMemoryContext,
   listQqConversationMemoryProfiles,
@@ -93,7 +94,7 @@ test("migrates legacy per-group people into the cross-group QQ identity layer", 
     }
   });
 
-  assert.equal(qqConversationMemoryVersion, 4);
+  assert.equal(qqConversationMemoryVersion, 5);
   assert.equal(memory.version, qqConversationMemoryVersion);
   assert.equal(memory.people["20002"].impression, "旧版已有的人物印象");
   assert.deepEqual(memory.people["20002"].groupAliases["10001"], ["旧群名片"]);
@@ -229,6 +230,70 @@ test("a substantive high-salience person impression can enter unified memory bef
 
   assert.ok(memory.people["20003"].unifiedMemory.promotedAt);
   assert.match(memory.people["20003"].unifiedMemory.reason, /长期兴趣/);
+});
+
+test("periodic scope summaries fuse group atmosphere and promote memorable people", () => {
+  const result = applyQqConversationSummaryMemory(createEmptyQqConversationMemory(), "10001", {
+    socialMemory: {
+      scopeSummary: "整体轻松直接，熟人之间接梗很快",
+      scopeDetail: "群聊以短句和多人连续补充为主，正式问题才会展开说明。",
+      atmosphere: ["轻松", "熟悉"],
+      interactionHabits: ["常用短反应承接"],
+      notablePeople: [{
+        userId: "20002",
+        userName: "群友甲",
+        summary: "很重视连续上下文和可验证实现",
+        detail: "长期围绕机器人记忆与连续对话提出具体需求，会主动补充边界，并关注方案是否真正经过验证。",
+        memorable: true,
+        promotionReason: "多轮互动形成了具体且稳定的深刻印象"
+      }]
+    },
+    languageStyle: {
+      summary: "群里习惯用短反应和省略式收尾",
+      memberPatterns: [{
+        userId: "20002",
+        userName: "群友甲",
+        summary: "常先给结论再补边界",
+        phrasePatterns: ["先结论后解释"],
+        punctuationUsageRules: []
+      }]
+    }
+  }, { now: () => new Date("2026-07-20T08:00:00.000Z") });
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.promotedUserIds, ["20002"]);
+  assert.match(result.memory.groups["10001"].impressionDetail, /整体氛围：轻松；熟悉/);
+  assert.match(result.memory.people["20002"].impressionDetail, /语言习惯：常先给结论/);
+  assert.ok(result.memory.people["20002"].unifiedMemory.promotedAt);
+});
+
+test("private scope summaries persist personality habits and punctuation knowledge references", () => {
+  const result = applyQqConversationSummaryMemory(createEmptyQqConversationMemory(), "private:30003", {
+    socialMemory: {
+      scopeSummary: "表达直接但会主动补充上下文",
+      scopeDetail: "遇到复杂问题时倾向逐步补充条件，轻松聊天时回复较短。",
+      personSummary: "表达直接、重视上下文",
+      personDetail: "长期交流中经常先给核心需求，再补充边界和验证标准；轻松话题则偏向短句回应。",
+      personMemorable: true,
+      personPromotionReason: "私聊中形成了稳定且具体的沟通画像"
+    },
+    languageStyle: {
+      summary: "句末停顿较多，具体标点含义由黑话知识维护",
+      phrasePatterns: ["先结论后补充"],
+      punctuationUsageRules: [{
+        symbol: "……",
+        knowledgeTitle: "……",
+        confidence: 0.79,
+        evidence: "多次位于补充消息之前",
+        usageBoundary: "表达无语时不能按续写理解"
+      }],
+      memberPatterns: []
+    }
+  }, { now: () => new Date("2026-07-20T09:00:00.000Z") });
+
+  assert.deepEqual(result.promotedUserIds, ["30003"]);
+  assert.match(result.memory.privateChats["30003"].impressionDetail, /标点用法引用：…… 的含义见黑话/);
+  assert.match(result.memory.people["30003"].impressionSummary, /表达直接/);
 });
 
 test("never exposes malformed invisible memory metadata to QQ", () => {
