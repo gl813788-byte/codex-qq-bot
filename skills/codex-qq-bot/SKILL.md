@@ -173,6 +173,15 @@ refactor with a behavior change.
   knowledge variants. Language profiles retain only structural usage,
   confidence/evidence, boundaries, and knowledge-title references;
   deterministic fallback must not manufacture slang meaning.
+- Keep these paths observable through structured operations:
+  `interest.follow_up_batch`, `learning.language_statistics`,
+  `learning.style_review`, `memory.scope_summary`,
+  `memory.knowledge_update`, and `memory.person_promotion`. Language-statistics
+  logs are low-noise checkpoints, contain counts/ratios rather than copied chat
+  or inferred meaning, and fire when frequent candidates change or every 25
+  text messages. Preserve stable English `message` values for JSON/API
+  compatibility while ensuring every fixed event and nested detail has a
+  complete Chinese presentation in the terminal and dashboard.
 
 ### Main prompt
 

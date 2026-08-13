@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   formatLogDetailText,
@@ -29,6 +32,89 @@ test("log presentation uses consistent Chinese event names and concise error cha
     code: null,
     cause: { message: "connect ECONNREFUSED 127.0.0.1:3000", code: "ECONNREFUSED", address: "127.0.0.1", port: 3000 }
   }), "网络请求失败；连接 127.0.0.1:3000 被拒绝；ECONNREFUSED");
+});
+
+test("every fixed logger event in src has a Chinese presentation", () => {
+  const files = [];
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const file = join(directory, entry.name);
+      if (entry.isDirectory()) visit(file);
+      else if (/\.(?:js|mjs)$/.test(entry.name)) files.push(file);
+    }
+  };
+  visit(fileURLToPath(new URL("../src", import.meta.url)));
+  const untranslated = new Set();
+  const pattern = /\b(?:logger|log)\.(?:debug|info|success|warn|error)\(\s*(["'`])([^\n]*?)\1/g;
+  for (const file of files) {
+    const source = readFileSync(file, "utf8");
+    for (const match of source.matchAll(pattern)) {
+      if (match[2].includes("${")) continue;
+      const message = match[2].replace(/\\(["'`\\])/g, "$1");
+      if (formatLogMessage(message) === message) untranslated.add(message);
+    }
+  }
+  assert.deepEqual([...untranslated].sort(), []);
+});
+
+test("new follow-up, language, summary, and slang logs are fully localized", () => {
+  assert.equal(
+    formatLogMessage("QQ conversation follow-up batch frozen for one interest judgment"),
+    "QQ 连续对话批次已冻结，开始唯一一次兴趣判定"
+  );
+  assert.equal(
+    formatLogMessage("QQ language style statistics checkpoint"),
+    "QQ 语言与标点统计检查点已更新"
+  );
+  assert.deepEqual(localizeLogDetails({
+    operation: "interest.follow_up_batch",
+    outcome: "frozen",
+    action: "interest-batch",
+    source: "qq-conversation-follow-up",
+    messageLimit: 4,
+    windowSeconds: 360,
+    quietWindowMs: 5000,
+    intakeClosed: true
+  }), {
+    操作: "连续对话兴趣合批",
+    结果: "已冻结并关闭入口",
+    来源: "QQ 连续对话",
+    自适应消息上限: 4,
+    自适应关联窗口秒数: 360,
+    静默合批窗口毫秒数: 5000,
+    判定入口是否关闭: true
+  });
+  assert.deepEqual(localizeLogDetails({
+    operation: "learning.language_statistics",
+    checkpointKinds: ["scope", "member"],
+    scopeLanguage: {
+      sampleSize: 25,
+      punctuationCandidates: [{
+        key: "repeated_question",
+        symbol: "？？/??",
+        occurrenceCount: 7,
+        containingMessageCount: 5,
+        messageRatio: 0.2
+      }]
+    },
+    slangPatchCount: 1,
+    promotedPersonCount: 2
+  }), {
+    操作: "语言与标点统计",
+    本次更新范围: ["当前范围", "当前成员"],
+    当前范围语言统计: {
+      总样本数: 25,
+      高频标点候选: [{
+        统计类别: "连续问号",
+        标点符号: "？？/??",
+        累计出现次数: 7,
+        包含该用法的消息数: 5,
+        消息出现比例: 0.2
+      }]
+    },
+    黑话知识更新数: 1,
+    提升到统一记忆的人数: 2
+  });
 });
 
 test("QQ social action logs expose safe diagnostic fields in Chinese", () => {
@@ -154,7 +240,7 @@ test("startup learning snapshots and knowledge details share recursive Chinese l
     自动学习数据: {
       总样本数: 42,
       当前活跃度: "一般",
-      常用社交时段: { 来源: "learned", 是否跨午夜: true }
+      常用社交时段: { 来源: "学习得出", 是否跨午夜: true }
     },
     主动兴趣间隔: { 消息间隔: 20, 原因: "当前活跃度一般" }
   });

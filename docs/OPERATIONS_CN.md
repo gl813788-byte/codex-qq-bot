@@ -186,7 +186,7 @@ curl -fsS 'http://127.0.0.1:3789/api/logs?category=interest&group=群号' | jq .
 curl -fsS 'http://127.0.0.1:3789/api/logs?scope=private:QQ号&operation=session' | jq .
 ```
 
-常用分类：`system`、`web`、`onebot`、`qq`、`codex`、`search`、`interest`、`learning`、`memory` 和 `lifecycle`。新日志使用兼容旧条目的 schema v3；Agent 轮次/工具、跨会话发送、好友/加群、管理员变更和设置落盘统一带 `operation`、`outcome`、操作者角色/QQ、来源/目标会话、工具名、耗时和错误代码。动态工具参数及跨会话消息正文不会写日志。优先按 trace 追踪一条完整回复，再用 `--scope` 或 `--operation` 缩小跨会话与工具范围；摘要会额外统计操作和结果。融合追问使用 `qq` 分类，中文彩色标题依次显示进入可重置的 5 秒缓冲、引导进活跃 turn、引导失败后截断并开始替代回答，以及旧草稿完成后在发送前直接开启替代轮次。原生 Agent commentary 与 plan 更新仍会以有界 `codex` debug 诊断记录；安全 commentary 还会在 `qq` 分类产生 `QQ task progress delivered` 或失败记录。若 `codex` 诊断里的 commentary 是完整 QQ Schema JSON，Hub 会先精确校验并只提取无附件回复的可见 `text`/`bubbles`，原始 JSON 本身不会进入 QQ；已删除的文字进度/预算协议也不会制造控制轮。生命周期还会显示成功/失败气泡数；失败回执为下一轮主模型保留时会另记一条 QQ 警告。
+常用分类：`system`、`web`、`onebot`、`qq`、`codex`、`search`、`interest`、`learning`、`memory` 和 `lifecycle`。新日志使用兼容旧条目的 schema v3；Agent 轮次/工具、跨会话发送、好友/加群、管理员变更和设置落盘统一带 `operation`、`outcome`、操作者角色/QQ、来源/目标会话、工具名、耗时和错误代码。动态工具参数及跨会话消息正文不会写日志。优先按 trace 追踪一条完整回复，再用 `--scope` 或 `--operation` 缩小跨会话与工具范围；摘要会额外统计操作和结果。融合追问使用 `qq` 分类，中文彩色标题依次显示进入可重置的 5 秒缓冲、引导进活跃 turn、引导失败后截断并开始替代回答，以及旧草稿完成后在发送前直接开启替代轮次。Bot 回复后的连续对话合批另用 `interest.follow_up_batch` 串起入队、达到自适应条数上限后续等 5 秒静默、冻结、唯一一次兴趣判定、关闭与失败。标点/功能短语统计只在高频候选集合变化，或群/成员每累计 25 条文字到达新检查点时写一条低噪声 `learning.language_statistics`；日志只含有界次数和比例，不复制聊天正文，也不制造含义。模型风格复盘、范围总结、黑话知识融合和深刻人物统一记忆分别使用 `learning.style_review`、`memory.scope_summary`、`memory.knowledge_update`、`memory.person_promotion`，同一链路可直接看到语言规则数、黑话更新数和人物提升数。原生 Agent commentary 与 plan 更新仍会以有界 `codex` debug 诊断记录；安全 commentary 还会在 `qq` 分类产生 `QQ task progress delivered` 或失败记录。若 `codex` 诊断里的 commentary 是完整 QQ Schema JSON，Hub 会先精确校验并只提取无附件回复的可见 `text`/`bubbles`，原始 JSON 本身不会进入 QQ；已删除的文字进度/预算协议也不会制造控制轮。生命周期还会显示成功/失败气泡数；失败回执为下一轮主模型保留时会另记一条 QQ 警告。
 
 仪表盘不再把所有功能堆在同一页，而是分成总览、通道、智能行为、记忆、实时日志和设置六个视图。通道页只处理连接、白名单和联系人；智能行为页显示并持久化 Bot 增强、联网、主动兴趣、模型厂商与判定参数，同时提供当前厂商 key、搜索 provider、安全下载模式、活动生成和待回复数量等安全诊断信息。行为状态采用独立双列流，较长的人设卡不会在另一列制造大片空白；窄屏恢复为自然单列顺序。
 
@@ -194,7 +194,7 @@ curl -fsS 'http://127.0.0.1:3789/api/logs?scope=private:QQ号&operation=session'
 
 网页日志视图每秒拉取一次完整结构化条目，按时间正序追加并默认跟随最新位置。级别、分类、trace、错误、结果和耗时分别着色，所有 `details` 字段直接显示；可暂停实时刷新、关闭自动跟随、调整显示条数、筛选并点击条目查看原始 JSON。页面隐藏时实时请求自动暂停。
 
-交互终端同样按级别、分类、trace、结果/错误和耗时使用稳定的独立颜色；`--color` 可在非 TTY 输出中强制启用，`--plain` 关闭颜色，`--json` 保留机器可读原始字段。中文查看器和中文仪表盘统一显示中文事件名，并递归中文化启动自动学习快照等嵌套详情；原始英文事件名仍保留在 JSON 的 `message`，API 同时提供 `messageZh` 与 `detailsZh`。人类可读输出会把多行字段压成单行。Codex 和兴趣模型的具体输出以 `debug` 级别保存，最长 4000 字符并经过日志密钥脱敏；完整输入提示词和删除申请聊天证据不会被再次复制到日志中，Codex 子进程错误也只保留提炼后的诊断行。
+交互终端同样按级别、分类、trace、结果/错误和耗时使用稳定的独立颜色；`--color` 可在非 TTY 输出中强制启用，`--plain` 关闭颜色，`--json` 保留机器可读原始字段。中文查看器和中文仪表盘为全部固定结构化事件统一显示中文事件名，并递归中文化启动自动学习快照、语言候选等嵌套详情；稳定的原始英文事件名仍保留在 JSON 的 `message`，API 同时提供 `messageZh` 与 `detailsZh`。人类可读输出会把多行字段压成单行。Codex 和兴趣模型的具体输出以 `debug` 级别保存，最长 4000 字符并经过日志密钥脱敏；完整输入提示词和删除申请聊天证据不会被再次复制到日志中，Codex 子进程错误也只保留提炼后的诊断行。
 
 ## 安全重启 Hub
 
