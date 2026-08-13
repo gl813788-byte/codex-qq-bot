@@ -1153,7 +1153,9 @@ function normalizeSearchText(value) {
 }
 
 function normalizeTitle(value) {
-  return normalizeSearchText(value).replace(/[\s\p{P}\p{S}]+/gu, "");
+  const source = normalizeSearchText(value);
+  const lexical = source.replace(/[\s\p{P}\p{S}]+/gu, "");
+  return lexical || source.replace(/\s+/g, "");
 }
 
 function normalizeMeaning(value) {

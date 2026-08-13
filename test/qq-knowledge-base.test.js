@@ -55,6 +55,33 @@ test("keeps the same slang title scoped to different QQ groups", () => {
   assert.equal(second[0].variants[0].scope.groupName, "饭友群");
 });
 
+test("stores punctuation interpretation in the same scoped slang path as words", () => {
+  let result = addKnowledge(createEmptyQqKnowledgeBase(), {
+    kind: "slang",
+    title: "？？",
+    content: "通用表示加强疑问；本群常用于惊讶式反问，不一定是在索要解释",
+    scope: "group"
+  }, { ...alice, groupId: "20001", groupName: "施工群" });
+
+  assert.equal(result.applied.length, 1);
+  const matches = findQqKnowledgeMatches(result.store, {
+    text: "你认真的？？",
+    groupId: "20001",
+    senderId: alice.senderId
+  });
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].title, "？？");
+  assert.match(matches[0].variants[0].content, /本群常用于惊讶式反问/);
+
+  result = addKnowledge(result.store, {
+    kind: "slang",
+    title: "！！",
+    content: "本群用于加强兴奋或催促",
+    scope: "group"
+  }, { ...alice, groupId: "20001", groupName: "施工群" });
+  assert.equal(result.store.entries.length, 2);
+});
+
 test("promotes one person's identical cross-group interpretation and keeps different interpretations local", () => {
   let store = createEmptyQqKnowledgeBase();
   store = addKnowledge(store, {

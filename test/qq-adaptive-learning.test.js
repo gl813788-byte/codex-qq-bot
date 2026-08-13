@@ -49,6 +49,23 @@ test("learns bounded per-group and per-member timing and expression statistics",
   assert.ok(ensureQqAdaptiveLearning(group).recentGapSeconds.length <= 64);
 });
 
+test("persists punctuation candidates separately for the group and current member", () => {
+  const group = {};
+  const member = {};
+  for (let index = 0; index < 16; index += 1) {
+    recordQqAdaptiveHumanMessage(group, member, humanEvent(index, {
+      text: index < 8 ? `这也行？？${index}` : `然后再看看……${index}`
+    }));
+  }
+  const signals = buildQqAdaptiveLearningSignals(group, member);
+  assert.equal(signals.group.languageStyle.sampleSize, 16);
+  assert.equal(signals.member.languageStyle.sampleSize, 16);
+  assert.equal(signals.group.languageStyle.frequentPunctuation.some((item) => item.key === "repeated_question"), true);
+  const context = formatQqAdaptiveLearningContext(signals);
+  assert.match(context, /通用及范围含义尚未标注/);
+  assert.doesNotMatch(context, /通常比单个问号更强调/);
+});
+
 test("learns human poke frequency separately for pokes to the Bot and other people", () => {
   const group = {};
   const member = {};
@@ -66,7 +83,7 @@ test("learns human poke frequency separately for pokes to the Bot and other peop
     poke: { targetId: "77777" }
   });
   const signals = buildQqAdaptiveLearningSignals(group, member);
-  assert.equal(signals.version, 6);
+  assert.equal(signals.version, 7);
   assert.equal(signals.group.humanPokeCount, 2);
   assert.equal(signals.group.humanPokeToBotCount, 1);
   assert.equal(signals.group.humanPokeToOtherCount, 1);
@@ -95,7 +112,7 @@ test("learns and backfills the group speaker-switch interjection rate from two-m
     }));
   }
   const signals = buildQqAdaptiveLearningSignals(group, null, { now: start + 500_000 });
-  assert.equal(signals.version, 6);
+  assert.equal(signals.version, 7);
   assert.equal(signals.group.interruptionWindowSeconds, 120);
   assert.equal(signals.group.interruptionSampleSize, 3);
   assert.equal(signals.group.interruptionCount, 2);

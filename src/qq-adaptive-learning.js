@@ -5,8 +5,16 @@ import {
   isQqImageStyleMessage,
   isQqStickerStyleMessage
 } from "./qq-human-behavior.js";
+import {
+  addQqLanguageFeatures,
+  analyzeQqLanguageStyle,
+  buildQqLanguageStyleProfile,
+  extractQqLanguageFeatures,
+  formatQqLanguageStyleProfile,
+  normalizeQqLanguageCountRecord
+} from "./qq-language-style.js";
 
-const profileVersion = 6;
+const profileVersion = 7;
 const bootstrapVersion = 1;
 const interruptionBootstrapVersion = 1;
 const interruptionWindowSeconds = 120;
@@ -167,12 +175,20 @@ export function maybeReviewQqAdaptiveLanguageStyle(group, entries = [], {
 
   const guidance = deriveStyleGuidance(human, bot);
   const differences = deriveStyleDifferences(human, bot);
+  const statisticalLanguageProfile = analyzeQqLanguageStyle(entries, { windowSize: 240 });
+  const languageCandidates = formatQqLanguageStyleProfile(statisticalLanguageProfile, { label: "本群" });
+  const languageProfile = normalizeStyleLanguageProfile(learning.styleLanguageProfile);
   learning.styleGuidance = compactGuidance(guidance);
+  learning.styleLanguageProfile = languageProfile;
   learning.styleReviewSummary = differences.slice(0, 3).join("；").slice(0, 420);
   learning.styleReviewDetail = [
     `样本：真人 ${human.textSampleSize} 条，Bot ${bot.textSampleSize} 条。`,
     "差异：",
     ...differences.map((item) => `- ${item}`),
+    "语言统计候选（这里只记录出现频率，含义留给模型审定）：",
+    languageCandidates || "- 当前没有达到样本门槛的标点或短语候选。",
+    formatStyleLanguageReviewItems(languageProfile).length ? "模型上一轮审定的群级语言规律：" : null,
+    ...formatStyleLanguageReviewItems(languageProfile).map((item) => `- ${item}`),
     "本轮覆盖后的优化规则：",
     ...learning.styleGuidance.map((item) => `- ${item}`)
   ].join("\n").slice(0, 2_400);
@@ -195,10 +211,12 @@ export function applyQqAdaptiveModelStyleReview(group, review, {
   const summary = String(review.summary || "").replace(/\s+/g, " ").trim().slice(0, 420);
   const detail = String(review.detail || "").trim().slice(0, 2_400);
   const guidance = compactGuidance(review.guidance);
-  if (!summary && !detail && guidance.length === 0) return false;
+  const languageProfile = normalizeStyleLanguageProfile(review.languageProfile);
+  if (!summary && !detail && guidance.length === 0 && !hasStyleLanguageProfile(languageProfile)) return false;
   learning.styleReviewSummary = summary || detail.replace(/\s+/g, " ").slice(0, 420);
   learning.styleReviewDetail = detail || summary;
   learning.styleGuidance = guidance;
+  learning.styleLanguageProfile = languageProfile;
   learning.styleHumanSampleSize = Math.max(0, Number(humanSamples) || 0);
   learning.styleBotSampleSize = Math.max(0, Number(botSamples) || 0);
   learning.lastStyleReviewSampleCount = learning.sampleCount;
@@ -588,6 +606,11 @@ export function formatQqAdaptiveLearningContext(signals = {}) {
     ? `当前群友已学习 ${member.sampleSize} 条消息：平均纯文字 ${member.averageTextChars || 0} 字，表情 ${percentage(member.stickerMessageRatio)}，emoji ${percentage(member.emojiMessageRatio)}，两分钟内连续发言 ${percentage(member.burstContinuationRatio)}，拍一拍 ${member.humanPokeCount || 0} 次（占已观察互动 ${percentage(member.humanPokeActivityRatio)}），常见时段 ${memberHours || "尚不稳定"}。`
     : "当前群友的个人样本还少，只采用群级节奏，不做强个性化。";
   const guidance = Array.isArray(group.styleGuidance) ? group.styleGuidance.slice(0, 5) : [];
+  const languageReview = formatStyleLanguageReview(group.styleLanguageProfile);
+  const groupLanguage = formatQqLanguageStyleProfile(group.languageStyle, { label: "本群" });
+  const memberLanguage = Number(member.sampleSize || 0) >= 12
+    ? formatQqLanguageStyleProfile(member.languageStyle, { label: "当前群友" })
+    : "";
   return [
     "自动适应信号（只含行为统计，不含个人原话）：",
     `- 本群已学习 ${group.sampleSize} 条，活跃日均约 ${group.messagesPerActiveDay || 0} 条，常见时段 ${groupHours || "尚不稳定"}；当前时段活跃度为 ${activityLabel(group.activityLevel)}。`,
@@ -598,9 +621,13 @@ export function formatQqAdaptiveLearningContext(signals = {}) {
       ? `- 已观察真人拍一拍 ${group.humanPokeCount} 次，占消息与拍一拍合计互动的 ${percentage(group.humanPokeActivityRatio)}；其中拍 Bot ${percentage(group.humanPokeToBotRatio)}、拍其他人 ${percentage(group.humanPokeToOtherRatio)}。可把它作为是否自然使用真实 /拍一拍 工具的弱节奏信号，但不能机械照抄或刷屏。`
       : null,
     `- ${memberLine}`,
+    groupLanguage ? `- ${groupLanguage.replace(/\n/g, "\n  ")}` : null,
+    memberLanguage ? `- ${memberLanguage.replace(/\n/g, "\n  ")}` : null,
     group.styleReviewSummary ? `- 最近一次真人/Bot 差异复盘：${group.styleReviewSummary}。` : null,
+    languageReview ? `- 专项语言风格复盘：${languageReview}` : null,
     ...guidance.map((item) => `- 已压缩的改进规则：${item}`),
-    "- 这些是弱信号：用于调整回复长度、表情、连发、拍一拍和插话节奏；不要复述统计、给群友贴标签，也不要模仿某个人的具体措辞。"
+    "- 群级高频标点和共享短语结构可在语境合适时轻量影响表达；个人级画像主要用于理解当前群友的语气。不得复述统计、给群友贴标签、逐字克隆个人口癖或为了命中指标硬塞标点。",
+    "- 这些始终是弱信号：当前消息、事实、安全与任务完整性优先。"
   ].filter(Boolean).join("\n");
 }
 
@@ -647,6 +674,10 @@ function createQqAdaptiveLearning() {
     botMultiBubbleReplyCount: 0,
     botReplyCharSum: 0,
     botReplyFollowUpCount: 0,
+    punctuationOccurrences: Object.create(null),
+    punctuationMessages: Object.create(null),
+    phraseOccurrences: Object.create(null),
+    phraseMessages: Object.create(null),
     hourCounts: Array(hourCount).fill(0),
     weekdayCounts: Array(weekdayCount).fill(0),
     activeDays: [],
@@ -667,6 +698,7 @@ function createQqAdaptiveLearning() {
     styleReviewSummary: "",
     styleReviewDetail: "",
     styleGuidance: [],
+    styleLanguageProfile: normalizeStyleLanguageProfile(),
     styleHumanSampleSize: 0,
     styleBotSampleSize: 0,
     lastColdProactiveCheckAt: null,
@@ -709,6 +741,10 @@ function normalizeQqAdaptiveLearning(value) {
     .map(Number)
     .filter((seconds) => Number.isFinite(seconds) && seconds >= 0 && seconds <= 86400)
     .slice(-recentGapLimit);
+  base.punctuationOccurrences = normalizeQqLanguageCountRecord(source.punctuationOccurrences, { type: "punctuation" });
+  base.punctuationMessages = normalizeQqLanguageCountRecord(source.punctuationMessages, { type: "punctuation" });
+  base.phraseOccurrences = normalizeQqLanguageCountRecord(source.phraseOccurrences, { type: "phrase" });
+  base.phraseMessages = normalizeQqLanguageCountRecord(source.phraseMessages, { type: "phrase" });
   for (const key of ["firstSeenAt", "lastMessageAt", "firstPokeAt", "lastPokeAt", "interruptionTrackingStartedAt", "lastBotReplyAt", "botTrackingStartedAt", "lastStyleReviewAt", "styleReviewWindowStartedAt", "lastColdProactiveCheckAt", "lastColdProactiveAt", "lastPrivateProactiveCheckAt", "lastPrivateProactiveAt"]) {
     base[key] = validIsoDate(source[key]);
   }
@@ -719,6 +755,7 @@ function normalizeQqAdaptiveLearning(value) {
   base.styleReviewSummary = String(source.styleReviewSummary || "").replace(/\s+/g, " ").trim().slice(0, 420);
   base.styleReviewDetail = String(source.styleReviewDetail || "").trim().slice(0, 2_400);
   base.styleGuidance = compactGuidance(source.styleGuidance);
+  base.styleLanguageProfile = normalizeStyleLanguageProfile(source.styleLanguageProfile);
   return base;
 }
 
@@ -737,6 +774,7 @@ function applyHumanSample(learning, features, clock, observedAt, senderId, group
   if (features.mention) increment(learning, "mentionCount");
   if (features.question) increment(learning, "questionCount");
   if (features.directBotInteraction) increment(learning, "directBotInteractionCount");
+  addQqLanguageFeatures(learning, features.language);
   if (groupLevel) {
     learning.interruptionBootstrapVersion = interruptionBootstrapVersion;
     learning.interruptionTrackingStartedAt ||= observedAt.toISOString();
@@ -810,7 +848,8 @@ function getHumanMessageFeatures(event) {
     reply: Boolean(event.replyContext || event.replyMessageId),
     mention: Boolean(event.hasAtSegment || (Array.isArray(event.atTargets) && event.atTargets.length > 0)),
     question: /[?？]/.test(visible),
-    directBotInteraction: Boolean(event.type === "group_at" || event.hasSelfAtSegment || event.isReplyToSelf || event.replyContext?.isSelf)
+    directBotInteraction: Boolean(event.type === "group_at" || event.hasSelfAtSegment || event.isReplyToSelf || event.replyContext?.isSelf),
+    language: extractQqLanguageFeatures(visible)
   };
 }
 
@@ -841,6 +880,13 @@ function summarizeLearning(learning, currentHour, { confidenceAt }) {
     replyMessageRatio: ratio(learning.replyCount, samples),
     mentionMessageRatio: ratio(learning.mentionCount, samples),
     questionMessageRatio: ratio(learning.questionCount, samples),
+    languageStyle: buildQqLanguageStyleProfile({
+      sampleCount: learning.textSampleCount,
+      punctuationOccurrences: learning.punctuationOccurrences,
+      punctuationMessages: learning.punctuationMessages,
+      phraseOccurrences: learning.phraseOccurrences,
+      phraseMessages: learning.phraseMessages
+    }),
     directBotInteractionRatio: ratio(learning.directBotInteractionCount, samples),
     burstContinuationRatio: ratio(learning.burstContinuationCount, samples),
     humanPokeCount: learning.humanPokeCount,
@@ -880,6 +926,7 @@ function summarizeLearning(learning, currentHour, { confidenceAt }) {
     styleReviewSummary: learning.styleReviewSummary,
     styleReviewDetail: learning.styleReviewDetail,
     styleGuidance: learning.styleGuidance.slice(0, 5),
+    styleLanguageProfile: normalizeStyleLanguageProfile(learning.styleLanguageProfile),
     styleHumanSampleSize: learning.styleHumanSampleSize,
     styleBotSampleSize: learning.styleBotSampleSize,
     lastBotReplyAt: learning.lastBotReplyAt,
@@ -968,6 +1015,68 @@ function compactGuidance(value) {
       return true;
     })
     .slice(0, 5);
+}
+
+function normalizeStyleLanguageProfile(value = {}) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    phrasePatterns: compactLanguageItems(source.phrasePatterns, 8),
+    sentencePatterns: compactLanguageItems(source.sentencePatterns, 8),
+    punctuationUsageRules: normalizeStylePunctuationUsageRules(
+      source.punctuationUsageRules || source.punctuationMeanings,
+      10
+    )
+  };
+}
+
+function normalizeStylePunctuationUsageRules(value, limit) {
+  return (Array.isArray(value) ? value : [])
+    .map((item) => {
+      if (typeof item === "string") {
+        return { symbol: "", knowledgeTitle: "", confidence: 0, evidence: "", usageBoundary: item.replace(/\s+/g, " ").trim().slice(0, 220) };
+      }
+      return {
+        symbol: String(item?.symbol || "").replace(/\s+/g, " ").trim().slice(0, 24),
+        knowledgeTitle: String(item?.knowledgeTitle || item?.symbol || "").replace(/\s+/g, " ").trim().slice(0, 80),
+        confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
+        evidence: String(item?.evidence || "").replace(/\s+/g, " ").trim().slice(0, 240),
+        usageBoundary: String(item?.usageBoundary || "").replace(/\s+/g, " ").trim().slice(0, 240)
+      };
+    })
+    .filter((item) => item.symbol && item.knowledgeTitle && item.confidence > 0)
+    .slice(0, limit);
+}
+
+function compactLanguageItems(value, limit) {
+  const seen = new Set();
+  return (Array.isArray(value) ? value : [])
+    .map((item) => String(item || "").replace(/^[-•\s]+/, "").replace(/\s+/g, " ").trim().slice(0, 180))
+    .filter((item) => {
+      const key = item.toLowerCase().replace(/[，。！？!?\s]/g, "");
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, limit);
+}
+
+function hasStyleLanguageProfile(value) {
+  return Object.values(value || {}).some((items) => Array.isArray(items) && items.length > 0);
+}
+
+function formatStyleLanguageReviewItems(value) {
+  const profile = normalizeStyleLanguageProfile(value);
+  return [
+    ...profile.phrasePatterns.map((item) => `短语：${item}`),
+    ...profile.sentencePatterns.map((item) => `句式：${item}`),
+    ...profile.punctuationUsageRules.map((item) => (
+      `标点 ${item.symbol}：含义引用黑话“${item.knowledgeTitle}”（置信度 ${Math.round(item.confidence * 100)}%；使用边界：${item.usageBoundary || "仍以当前上下文为准"}）`
+    ))
+  ].slice(0, 8);
+}
+
+function formatStyleLanguageReview(value) {
+  return formatStyleLanguageReviewItems(value).join("；").slice(0, 900);
 }
 
 function normalizeSocialHours(value, { allowedStartHour, allowedEndHour }) {

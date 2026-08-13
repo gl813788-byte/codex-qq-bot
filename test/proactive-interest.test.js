@@ -589,6 +589,63 @@ test("explicit mentions and replies to the bot never enter a proactive cycle", a
   assert.equal(state.proactive.messageCountByGroupId[event.groupId] || 0, 0);
 });
 
+test("a frozen post-reply message batch enters one semantic interest review before the main model", async () => {
+  const state = proactiveState(1500, { judgeEveryMessages: 20, judgeEveryMinutes: 5 });
+  let requestBody;
+  const followUpEvent = {
+    ...event,
+    senderId: "10001",
+    text: "看了，第一条是连接超时",
+    raw: { message_id: "3" }
+  };
+  const conversationFollowUp = {
+    candidate: true,
+    anchorText: "先看日志里的第一条报错",
+    anchorAt: "2026-08-13T03:59:00.000Z",
+    gapSeconds: 60,
+    windowSeconds: 240,
+    messageLimit: 4,
+    batchMessageCount: 2,
+    quietWindowMs: 5000,
+    interveningHumanCount: 0,
+    interveningOtherSenderCount: 0,
+    statisticalBasis: {
+      memberSampleSize: 40,
+      memberMedianGapSeconds: 60,
+      memberBurstContinuationRatio: 0.4
+    }
+  };
+  const result = await shouldProactivelyReplyToQq(followUpEvent, state, {
+    openRouterApiKey: "configured-for-test",
+    conversationFollowUp,
+    recentMessages: [
+      { senderId: "assistant", isAssistant: true, replyTargetId: "10001", text: conversationFollowUp.anchorText },
+      { senderId: "10001", messageId: "3", text: followUpEvent.text }
+    ],
+    fetch: async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return jsonJudgeResponse({ shouldReply: true, interest: 86 });
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.triggerReason, "bot_conversation_follow_up");
+  assert.equal(result.messageCount, 1);
+  assert.equal(result.conversationFollowUp.anchorText, conversationFollowUp.anchorText);
+  assert.match(result.promptHint, /语义上延续/);
+  assert.equal(result.modelPipeline.interestGate.task, "qq_ordinary_group_reply");
+  const systemPrompt = requestBody.messages[0].content;
+  const payload = JSON.parse(requestBody.messages[1].content);
+  assert.match(systemPrompt, /自适应分钟窗与条数上限/);
+  assert.match(systemPrompt, /本批只允许这一次判断/);
+  assert.equal(payload.proactiveJudgeInterval.triggeredBy, "bot_conversation_follow_up");
+  assert.equal(payload.conversationFollowUpCandidate.anchorText, conversationFollowUp.anchorText);
+  assert.equal(payload.conversationFollowUpCandidate.messageLimit, 4);
+  assert.equal(payload.conversationFollowUpCandidate.batchMessageCount, 2);
+  assert.equal(payload.conversationFollowUpCandidate.quietWindowMs, 5000);
+  assert.match(payload.conversationFollowUpCandidate.decisionRule, /真实语义承接/);
+});
+
 test("affirmative proactive decisions retain context images only for the formal reply", async () => {
   let requestBody;
   const result = await shouldProactivelyReplyToQq(event, proactiveState(), {

@@ -4,7 +4,7 @@ const markerPattern = /\[\[qq_memory:(\{[^\n]*?\})\]\]/g;
 const anyMarkerPattern = /\[\[qq_memory:[\s\S]*?\]\]/g;
 const maxPeoplePerGroup = 500;
 const maxGlobalPeople = 2_000;
-export const qqConversationMemoryVersion = 4;
+export const qqConversationMemoryVersion = 5;
 
 export function createEmptyQqConversationMemory() {
   return {
@@ -157,6 +157,88 @@ export function updateQqConversationMemoryFromExchange(memory, event, reply, pat
   }
   state.updatedAt = at;
   return state;
+}
+
+export function applyQqConversationSummaryMemory(memory, scopeId, summary = {}, {
+  now = () => new Date()
+} = {}) {
+  const state = ensureMemory(memory);
+  const id = String(scopeId || "");
+  const at = now().toISOString();
+  const social = summary?.socialMemory && typeof summary.socialMemory === "object"
+    ? summary.socialMemory
+    : {};
+  const language = summary?.languageStyle && typeof summary.languageStyle === "object"
+    ? summary.languageStyle
+    : {};
+  const promotedUserIds = [];
+  let changed = false;
+
+  if (/^private:\d{4,20}$/.test(id)) {
+    const userId = id.slice("private:".length);
+    const memberLanguage = findSummaryMemberLanguage(language, userId);
+    const chat = getPrivateChat(state, userId, social?.notablePeople?.[0]?.userName || memberLanguage?.userName || "");
+    const person = getGlobalPerson(state, userId, "", chat?.aliases?.at(-1) || "");
+    const description = buildSummaryPersonDescription({
+      summary: social.personSummary || social.scopeSummary,
+      detail: social.personDetail || social.scopeDetail,
+      language: memberLanguage || language
+    });
+    if (description.summary || description.detail) {
+      applyDescriptionPatch(chat, description, "impression", at);
+      applyDescriptionPatch(person, description, "impression", at);
+      changed = true;
+    }
+    if (social.personMemorable === true && markPersonUnifiedMemoryPromotion(person, {
+      at,
+      reason: social.personPromotionReason,
+      sourceScopeId: id
+    })) {
+      promotedUserIds.push(userId);
+      changed = true;
+    }
+  } else if (/^\d{4,20}$/.test(id)) {
+    const group = getGroup(state, id);
+    const groupDescription = buildSummaryScopeDescription(social, language);
+    if (groupDescription.summary || groupDescription.detail) {
+      applyDescriptionPatch(group, groupDescription, "impression", at);
+      changed = true;
+    }
+    for (const item of Array.isArray(social.notablePeople) ? social.notablePeople.slice(0, 8) : []) {
+      const userId = String(item?.userId || "");
+      if (!/^\d{4,20}$/.test(userId)) continue;
+      const memberLanguage = findSummaryMemberLanguage(language, userId);
+      const person = getGroupPerson(group, userId, item?.userName || memberLanguage?.userName || "");
+      const globalPerson = getGlobalPerson(state, userId, id, item?.userName || memberLanguage?.userName || "");
+      const description = buildSummaryPersonDescription({
+        summary: item?.summary,
+        detail: item?.detail,
+        language: memberLanguage
+      });
+      if (description.summary || description.detail) {
+        applyDescriptionPatch(person, description, "impression", at);
+        applyDescriptionPatch(globalPerson, description, "impression", at);
+        changed = true;
+      }
+      if (item?.memorable === true && markPersonUnifiedMemoryPromotion(globalPerson, {
+        at,
+        reason: item?.promotionReason,
+        sourceScopeId: id
+      })) {
+        promotedUserIds.push(userId);
+        changed = true;
+      }
+    }
+  } else {
+    return { memory: state, changed: false, promotedUserIds: [] };
+  }
+
+  if (changed) state.updatedAt = at;
+  return {
+    memory: state,
+    changed,
+    promotedUserIds: [...new Set(promotedUserIds)]
+  };
 }
 
 export function extractQqConversationMemoryMarkers(reply) {
@@ -567,6 +649,56 @@ function applyPatchToGroup(group, person, globalPerson, patch, at) {
       count: 1
     }, 12);
   }
+}
+
+function buildSummaryScopeDescription(social, language) {
+  const atmosphere = normalizeSummaryStrings(social?.atmosphere, 8, 120);
+  const interactionHabits = normalizeSummaryStrings(social?.interactionHabits, 8, 140);
+  const languageSummary = safeMemoryField(language?.summary, 320);
+  return {
+    summary: safeMemoryField(social?.scopeSummary, 96),
+    detail: safeMemoryField([
+      social?.scopeDetail,
+      atmosphere.length ? `整体氛围：${atmosphere.join("；")}` : "",
+      interactionHabits.length ? `互动习惯：${interactionHabits.join("；")}` : "",
+      languageSummary ? `语言风格：${languageSummary}` : ""
+    ].filter(Boolean).join("\n"), 1_200)
+  };
+}
+
+function buildSummaryPersonDescription({ summary, detail, language } = {}) {
+  const phrasePatterns = normalizeSummaryStrings(language?.phrasePatterns, 6, 160);
+  const punctuation = (Array.isArray(language?.punctuationUsageRules) ? language.punctuationUsageRules : [])
+    .slice(0, 6)
+    .map((item) => {
+      const symbol = safeMemoryField(item?.symbol, 24);
+      const knowledgeTitle = safeMemoryField(item?.knowledgeTitle, 80);
+      const boundary = safeMemoryField(item?.usageBoundary, 160);
+      if (!symbol || !knowledgeTitle) return "";
+      return `${symbol} 的含义见黑话“${knowledgeTitle}”${boundary ? `（使用边界：${boundary}）` : ""}`;
+    })
+    .filter(Boolean);
+  return {
+    summary: safeMemoryField(summary || language?.summary, 96),
+    detail: safeMemoryField([
+      detail,
+      language?.summary ? `语言习惯：${language.summary}` : "",
+      phrasePatterns.length ? `短语与句式：${phrasePatterns.join("；")}` : "",
+      punctuation.length ? `标点用法引用：${punctuation.join("；")}` : ""
+    ].filter(Boolean).join("\n"), 1_200)
+  };
+}
+
+function findSummaryMemberLanguage(language, userId) {
+  return (Array.isArray(language?.memberPatterns) ? language.memberPatterns : [])
+    .find((item) => String(item?.userId || "") === String(userId || "")) || null;
+}
+
+function normalizeSummaryStrings(value, limit, maxLength) {
+  return [...new Set((Array.isArray(value) ? value : [])
+    .map((item) => safeMemoryField(item, maxLength))
+    .filter(Boolean))]
+    .slice(0, limit);
 }
 
 function createGlobalPerson(userId) {

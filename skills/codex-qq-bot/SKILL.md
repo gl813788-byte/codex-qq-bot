@@ -141,6 +141,17 @@ refactor with a behavior change.
 - Ordinary unmentioned messages share a persisted per-group pending cycle.
   Message-count and non-empty minute thresholds are alternative triggers for
   the same cycle; empty cycles never call the provider.
+- After a delivered Bot reply, same-sender continuation candidates use both an
+  adaptive 3-12 minute window and an adaptive 2-6 message cap. Rapid messages
+  share a five-second quiet batch. Reaching the cap seals direct intake but
+  must not judge early; later rapid traffic renews the quiet timer and remains
+  available in rolling context. Freeze only after five continuous quiet seconds.
+  Freeze intake before exactly one interest-model call, and never reopen that
+  Bot-reply anchor during or after the judgment. Timing/count statistics only
+  bound candidacy; the model must confirm semantic continuity before the main
+  model starts. Approved later messages may join the active main-model fusion
+  buffer without another interest call. Messages directed to someone else,
+  commands, topic shifts, and expired windows stay on their normal route.
 - Human messages arriving during an ordinary judge remain pending and are
   already present in rolling context. If the judge approves, activity alone
   must not discard that approval; start the main model with the latest remembered
@@ -156,6 +167,12 @@ refactor with a behavior change.
 - Interest-model output must not contain a reply draft or style instructions.
   Invalid structure gets at most the documented format retry; transport failures
   and rate limits are not blindly retried.
+- Punctuation and functional-phrase counters produce only group/member
+  candidates and assign no meaning. Summary/style main-model tasks merge every
+  stable term, phrase, or punctuation meaning into the existing scoped `slang`
+  knowledge variants. Language profiles retain only structural usage,
+  confidence/evidence, boundaries, and knowledge-title references;
+  deterministic fallback must not manufacture slang meaning.
 
 ### Main prompt
 

@@ -37,6 +37,8 @@
 | `src/qq-main-prompt.js` | 主模型提示词边界 | 角色、执行顺序、主动任务和按需工具目录 |
 | `src/qq-proactive-pipeline.js` | 主动聊天双模型契约 | 普通接话、冷群话题/水群和主动私聊的兴趣批准凭据与主模型必经校验 |
 | `src/qq-proactive-cycle-state.js` | 普通兴趣内存周期状态 | pending 消息计数、Bot 确认送达后的重置，以及作废送达前执行中 judge 且保留后续消息 |
+| `src/qq-conversation-follow-up.js` | Bot 回复后的续聊批次状态机 | 同一发送者、自适应 3–12 分钟与 2–6 条边界、满条不提前判定的 5 秒静默合并、judge 前冻结入口及兴趣模型语义复核元数据 |
+| `src/qq-language-style.js` | QQ 语言统计候选 | 群/成员标点与功能性短语计数及高频候选，不分配任何含义 |
 | `src/qq-message-run-compaction.js` | 模型上下文连续复读压缩 | 相邻同文消息的语义签名、计数合并和中文条数标注 |
 | `src/codex-app-server-turn.js` | Codex app-server 单轮客户端 | `thread/start`/`thread/resume`、`turn/start`、运行中控制、直接截断续开、inactive turn 竞态恢复、超时和中断 |
 | `src/infrastructure/codex/qq-turn-runner.js` | QQ App Server 生命周期适配器 | 限流、隔离子进程环境、原生轮次参数、诊断、融合恢复、取消和配额刷新 |
@@ -59,7 +61,7 @@
 | `src/qq-knowledge-review.js` | 知识复杂审核提示词边界 | 兴趣模型有界初筛、主模型完整证据终审与严格结果解析 |
 | `src/qq-history-retrieval.js` | QQ 复盘历史边界 | NapCat 分页、消息归一化、本地合并和去重 |
 | `src/qq-short-term-memory.js` | QQ 短期记忆领域 | 旧数据迁移、简述/详述、覆盖和过时生命周期 |
-| `src/qq-style-review.js` | 真人/Bot 风格复盘边界 | 灵活主模型提示、结构解析和安全压缩 |
+| `src/qq-style-review.js` | 真人/Bot 风格复盘边界 | 灵活主模型提示、短语/句式用法总结、带置信度与边界的标点黑话引用、范围黑话补丁、结构解析和安全压缩 |
 | `src/qq-manual-ai-task.js` + `src/qq-menu.js` | 手动模型任务与 QQ 菜单的纯策略/呈现边界 | 修改任务别名、范围校验、强制模式说明或菜单视觉分区 |
 | `src/unified-memory/` | 跨通道统一记忆 | SQLite/FTS/语义向量混合召回、QQ 号/唯一别名人物识别、AI 画像提升、跨会话人物范围过滤和单次简述注入 |
 | `src/*.js` | 现有领域与基础设施模块 | 修改对应能力并渐进迁移 |
@@ -103,7 +105,7 @@
 - **Codex：**主回复、主人/公开文件任务、聊天总结、人设/风格总结和复杂知识终审全部走 App Server，旧的 `codex exec` 回复控制层已删除。多轮工具、计划、上下文压缩、Web Search、文件操作和 Shell 由 Codex 原生能力负责；Hub 通过 `item/tool/call` 暴露 QQ 动态工具，并按原始发送者权限执行，最终输出必须符合严格 Schema。有界的原生 commentary 会单独经过清理，再作为带回执的任务进度投递；如果 App Server 因输出 Schema 把 commentary 包进完整的 QQ 输出对象，Hub 只在精确校验对象结构、`status`、寻址字段和空附件列表后提取可见 `text`/`bubbles`。原始 JSON 外壳、plan、silent、带附件的中途结果与最终 Schema JSON 始终留在内部。融合追问的替代、完整时限续期和新线程单次恢复保持原语义；替代 turn 的协议静默检测使用同一实际“任务类型 × 思考强度”窗口，不再固定 1 分钟截断。长期 scope 续用同一 thread 时会刷新当前动态工具定义。每个子进程使用隔离白名单环境，并接收当前模型、强度、摘要、人格和服务档位。
 - **QQ 上下文：**连续复读压缩后，总会完整发送一段连续的近期窗口（群普通 20 条、群明确触发 30 条、群扩展 48 条；私聊 30 条、扩展 60 条）。语义筛选只处理保留记录中更早的部分，并同时覆盖人类与 Bot 消息。当前正文、引用和融合追问组成同一查询，也供短期记忆、知识、印象和统一记忆召回复用。
 - **QQ 投递：**主模型从完整上下文自行判断闲聊或实质任务；解题、代码、写作、总结及其短续答以完成任务为长度依据，不受闲聊字数建议限制。投递前，`src/qq-reply-chunks.js` 把超过单条安全字符上限的正文优先按段落/句子边界拆成多条有序气泡，避免把完整答案硬裁到 900 字或用一条超限消息发送。多人融合轮把有界参与者交给主模型，每位候选人都能通过结构化 `reply` 对象被选择引用或艾特；缺少或无效目标时安全回退为普通回复。旧目标 marker 会先从结构化可见正文中清掉，再进入拟人长度保护。单人轮仍沿用基于关系距离的引用/艾特/普通回复策略。OneBot 每个气泡结果都会形成投递回执，只有成功文本进入“已发送”记忆，失败项单独保留给下一轮主模型。
-- **模型职责：**已配置的 OpenRouter、DeepSeek 或自定义 OpenAI 兼容兴趣模型是后台轻量判定与杂项初筛面，厂商适配集中在 `src/interest-model-provider.js`；密钥只在环境配置中，厂商/模型选择可持久化。兴趣模型只处理有界触发、分类、风险标注和简单审核；Codex 主模型负责聊天、总结、工具检索、选题、知识提取、复杂推理和最终回复。
+- **模型职责：**已配置的 OpenRouter、DeepSeek 或自定义 OpenAI 兼容兴趣模型是后台轻量判定与杂项初筛面，厂商适配集中在 `src/interest-model-provider.js`；密钥只在环境配置中，厂商/模型选择可持久化。兴趣模型只处理有界触发、分类、风险标注、简单审核，以及 Bot 回复后同一人的冻结批次是否真实承接上一轮；Codex 主模型负责聊天、总结、工具检索、选题、词语/标点范围含义标注、知识提取、复杂推理和最终回复。词语、短语和标点的所有语境含义统一进入现有范围黑话 variant；语言画像只保存结构用法和对黑话条目的引用。
 - **存储：**设置、记忆和社交状态保存在本地文件。`data/settings.json` 通过 `src/infrastructure/storage/settings-repository.js` 加载和原子替换，纯快照包含全部 Codex 原生运行参数。QQ scope 到 Codex thread 的映射单独原子写入 `data/qq-codex-sessions.json`，不复制 Codex 线程正文。`qq-knowledge-base` 在格式错误时保留原文件并切换只读保护；其他记忆存储继续按小步抽取。
 - **周期与手动任务：**`src/wall-clock-scheduler.js` 只负责唤醒领域检查；到期时间仍保存在对应领域数据中。普通兴趣周期与短期记忆写入 `data/qq-memory.json`，知识频率复核时钟写入 `data/qq-knowledge-base.json`，自适应/人格时钟继续留在 persona 文件。启动和 QQ 通道恢复时只立即补做一轮，完成时刻成为下一周期的新起点。`/api/qq/ai-tasks`、QQ `/AI任务` 与 NCC 复用同一套总结/复盘函数、范围校验和并发锁；强制模式只跳过调度与常规样本条件。知识低频复核无论自动还是手动都先通过 `qq-enhancer` 的兴趣模型结构化通道做有界初筛，再启动 Codex 主模型读取完整证据终审。
 

@@ -82,6 +82,7 @@ import {
   normalizeQqNativeStickerTags
 } from "./qq-sticker-utils.js";
 import {
+  applyQqConversationSummaryMemory,
   createEmptyQqConversationMemory,
   extractQqConversationMemoryMarkers,
   listQqConversationMemoryProfiles,
@@ -228,6 +229,12 @@ import {
   chooseQqReplyAddressing,
   getQqRelationshipInterestPlan
 } from "./qq-relationship-interest.js";
+import {
+  createQqConversationFollowUpCoordinator,
+  detectQqConversationFollowUp,
+  QQ_CONVERSATION_FOLLOW_UP_QUIET_MS
+} from "./qq-conversation-follow-up.js";
+import { analyzeQqLanguageStyle } from "./qq-language-style.js";
 import {
   collectQqReplyTargetCandidates,
   extractQqReplyTargetDirective,
@@ -794,6 +801,16 @@ const qqReplySteering = createQqReplySteeringCoordinator({
   buildSteeringInput: buildQqPendingSteeringInput,
   consumeEntries: consumeQqPendingReplyEvents,
   onResult: logQqReplySteeringResult
+});
+const qqConversationFollowUps = createQqConversationFollowUpCoordinator({
+  delayMs: QQ_CONVERSATION_FOLLOW_UP_QUIET_MS,
+  onBatch: processQqConversationFollowUpBatch,
+  onError: (error, batch) => logger.error("QQ conversation follow-up batch failed", {
+    scopeId: batch?.scopeId || null,
+    anchorKey: batch?.anchorKey || null,
+    messageCount: batch?.eventCount || 0,
+    error
+  }, "interest")
 });
 const qqOutgoingMentionResolver = createQqOutgoingMentionResolver({
   loadGroupMembers: async (groupId) => {
@@ -2048,6 +2065,45 @@ async function processQueuedQqRepliesForScope(scopeId, source = "queued") {
   });
 }
 
+async function processQqConversationFollowUpBatch(batch = {}) {
+  const events = Array.isArray(batch.events) ? batch.events : [];
+  if (events.length === 0) return null;
+  const items = events.map((event) => ({
+    event,
+    receivedAt: event.qqConversationFollowUpReceivedAt || new Date().toISOString()
+  }));
+  const aggregate = buildAggregatedQqEvent(items);
+  if (!aggregate) return null;
+  aggregate.queuedAggregate = false;
+  aggregate.qqConversationFollowUpBatch = {
+    ...(batch.candidate || {}),
+    candidate: true,
+    anchorKey: batch.anchorKey,
+    batchMessageCount: events.length,
+    quietWindowMs: QQ_CONVERSATION_FOLLOW_UP_QUIET_MS,
+    frozenAt: batch.frozenAt || new Date().toISOString()
+  };
+  logger.info("QQ conversation follow-up batch frozen for one interest judgment", {
+    outcome: "frozen",
+    action: "interest-batch",
+    source: "qq-conversation-follow-up",
+    scopeId: batch.scopeId || null,
+    groupId: aggregate.groupId || null,
+    senderId: aggregate.senderId || null,
+    anchorKey: batch.anchorKey || null,
+    messageCount: events.length,
+    messageLimit: batch.candidate?.messageLimit || null,
+    windowSeconds: batch.candidate?.windowSeconds || null,
+    quietWindowMs: QQ_CONVERSATION_FOLLOW_UP_QUIET_MS,
+    intakeClosed: true
+  }, "interest", qqLogContext(aggregate));
+  return processQqReplyEvent(aggregate, {
+    source: aggregate.qqTransportSource || "onebot",
+    alreadyRemembered: true,
+    conversationFollowUpBatch: true
+  });
+}
+
 async function syncQqSemanticMemoryLayer(layer) {
   const items = layer === "short-term"
     ? buildShortTermSemanticItems(state.qq.memory.shortTermNotes)
@@ -2327,12 +2383,25 @@ async function runQqSelfPersonaScopeSummary(scope, {
     existingKnowledge: formatQqKnowledgeSummaryReference(scopeEvent),
     previousSummary: currentScope.summary,
     previousTopics: currentScope.topics,
+    previousSocialMemory: currentScope.socialMemory,
+    previousLanguageStyle: currentScope.languageStyle,
     reviewId: historySnapshot.snapshotId
   });
   const output = await runQqSelfPersonaModelPrompt(prompt, `scope-${currentScope.kind}`);
   const summary = parseQqSelfPersonaJson(output);
   if (!summary) throw new Error("scope summarizer did not return valid FINAL_JSON");
-  state.qq.selfPersona = applyQqSelfPersonaScopeSummary(state.qq.selfPersona, scopeId, summary);
+  state.qq.selfPersona = applyQqSelfPersonaScopeSummary(state.qq.selfPersona, scopeId, summary, {
+    allowedUserIds: entries
+      .filter((entry) => !(entry?.isAssistant || entry?.senderId === "assistant"))
+      .map((entry) => entry?.senderId)
+  });
+  const storedScopeSummary = state.qq.selfPersona.scopes[scopeId];
+  const conversationSummaryResult = applyQqConversationSummaryMemory(
+    state.qq.conversationMemory,
+    scopeId,
+    storedScopeSummary
+  );
+  state.qq.conversationMemory = conversationSummaryResult.memory;
   let knowledgeResult = null;
   if (Array.isArray(summary.knowledge) && qqKnowledgeBaseRepository.writable) {
     knowledgeResult = applyQqKnowledgePatches(
@@ -2345,8 +2414,12 @@ async function runQqSelfPersonaScopeSummary(scope, {
   }
   await Promise.all([
     saveQqSelfPersona(),
-    knowledgeResult?.changed ? saveQqKnowledgeBase() : Promise.resolve()
+    knowledgeResult?.changed ? saveQqKnowledgeBase() : Promise.resolve(),
+    conversationSummaryResult.changed ? saveQqConversationMemory() : Promise.resolve()
   ]);
+  if (conversationSummaryResult.promotedUserIds.length > 0) {
+    await syncPromotedQqPersonMemories(conversationSummaryResult.promotedUserIds);
+  }
   if (knowledgeResult && (knowledgeResult.applied.length || knowledgeResult.rejected.length)) {
     logQqKnowledgePatchResult(knowledgeResult, {
       source: sourceType,
@@ -2361,7 +2434,9 @@ async function runQqSelfPersonaScopeSummary(scope, {
     historySource: historySnapshot.history.source,
     historyMessageCount: entries.length,
     summaryRevision: Number(state.qq.selfPersona.scopes[scopeId]?.summaryRevision || 0),
-    knowledgePatchCount: Number(knowledgeResult?.applied?.length || 0)
+    knowledgePatchCount: Number(knowledgeResult?.applied?.length || 0),
+    socialMemoryUpdated: conversationSummaryResult.changed,
+    promotedPersonCount: conversationSummaryResult.promotedUserIds.length
   };
   logger.info("QQ self persona scope summarized", {
     ...result,
@@ -3007,7 +3082,8 @@ async function buildMaintenanceStatus({ force = false } = {}) {
         configuredScopes: Object.keys(state.qq.codexSession.settings.scopes || {}).length,
         activeThreads: Object.keys(state.qq.codexSession.store.threads || {}).length
       },
-      replySteering: qqReplySteering.snapshot()
+      replySteering: qqReplySteering.snapshot(),
+      conversationFollowUps: qqConversationFollowUps.snapshot()
     }
   };
 }
@@ -3894,6 +3970,8 @@ async function shouldRespondToQq(event) {
     return { ok: true, reason: "Explicit mention or reply to bot" };
   }
   if (state.qq.enhancer.enabled) {
+    const conversationFollowUpDecision = routeQqConversationFollowUpEvent(event);
+    if (conversationFollowUpDecision) return conversationFollowUpDecision;
     rememberLatestQqProactiveEvent(event);
     const proactiveDecision = await judgeQqProactiveEvent(event);
     if (proactiveDecision.ok) return proactiveDecision;
@@ -3904,11 +3982,100 @@ async function shouldRespondToQq(event) {
   return { ok: true };
 }
 
+function routeQqConversationFollowUpEvent(event) {
+  if (!event?.groupId || event.qqConversationFollowUpBatch) return null;
+  const scopeId = getQqMemoryScopeId(event);
+  const adaptive = getQqAdaptiveRuntimeForEvent(event);
+  const detection = detectQqConversationFollowUp(event, {
+    recentMessages: state.qq.memory.recentMessages[scopeId] || [],
+    adaptiveSignals: adaptive.signals
+  });
+  if (detection.reason === "continuation_window_elapsed") {
+    qqConversationFollowUps.cancel(scopeId);
+    return null;
+  }
+  const existing = detection.anchorKey
+    ? qqConversationFollowUps.inspect(scopeId, detection.anchorKey)
+    : null;
+  if (existing && existing.phase !== "collecting") {
+    event.qqConversationFollowUpSession = existing;
+    if (existing.phase === "approved"
+      && (getActiveQqReplyScopeForEvent(event) || getActiveQqGenerationForEvent(event))) {
+      return {
+        ok: true,
+        reason: "Approved conversation follow-up joined active reply fusion",
+        triggerMode: "approved_conversation_follow_up"
+      };
+    }
+    return {
+      ok: false,
+      reason: existing.phase === "approved"
+        ? "Approved conversation follow-up is starting; message retained in rolling context"
+        : "Conversation follow-up batch no longer accepts messages",
+      triggerMode: "conversation_follow_up_batch_closed",
+      conversationFollowUpPhase: existing.phase
+    };
+  }
+  if (existing?.phase === "collecting" && !detection.candidate) {
+    qqConversationFollowUps.touch(scopeId, detection.anchorKey);
+    return {
+      ok: false,
+      reason: "Conversation follow-up message limit reached; waiting for five-second quiet window",
+      triggerMode: "conversation_follow_up_batch_capped",
+      conversationFollowUpPhase: "collecting"
+    };
+  }
+  if (!detection.candidate) return null;
+
+  const queuedEvent = cloneQqEventForPendingReply(event);
+  queuedEvent.qqConversationFollowUpReceivedAt = new Date().toISOString();
+  const offered = qqConversationFollowUps.offer(scopeId, queuedEvent, detection);
+  event.qqConversationFollowUpSession = {
+    ...offered,
+    anchorKey: detection.anchorKey,
+    windowSeconds: detection.windowSeconds,
+    messageLimit: detection.messageLimit
+  };
+  if (!offered.accepted) {
+    return {
+      ok: false,
+      reason: "Conversation follow-up batch no longer accepts messages",
+      triggerMode: "conversation_follow_up_batch_closed",
+      conversationFollowUpPhase: offered.phase || "closed"
+    };
+  }
+  logger.debug("QQ conversation follow-up message entered quiet-window batch", {
+    outcome: "queued",
+    action: "interest-batch",
+    source: "qq-conversation-follow-up",
+    scopeId,
+    groupId: event.groupId,
+    senderId: event.senderId,
+    anchorKey: detection.anchorKey,
+    messageCount: offered.eventCount,
+    messageLimit: offered.messageLimit,
+    windowSeconds: detection.windowSeconds,
+    quietWindowMs: offered.delayMs,
+    freezeReason: offered.reason
+  }, "interest", qqLogContext(event));
+  return {
+    ok: false,
+    reason: "Conversation follow-up waiting for five-second quiet batch",
+    triggerMode: "conversation_follow_up_batch_collecting",
+    conversationFollowUp: detection,
+    batchMessageCount: offered.eventCount,
+    batchMessageLimit: offered.messageLimit
+  };
+}
+
 async function judgeQqProactiveEvent(event, { triggerMode = "message", countMessage = true } = {}) {
   const activeInterestModel = getActiveQqInterestModelConfig();
   const activityVersion = Number(event.groupActivityVersion || 0);
   const adaptive = getQqAdaptiveRuntimeForEvent(event);
   const recentMessages = state.qq.memory.recentMessages[event.groupId] || [];
+  event.qqConversationFollowUp = event.qqConversationFollowUpBatch?.candidate
+    ? event.qqConversationFollowUpBatch
+    : null;
   const interestKeywordMatch = matchQqSelfPersonaInterestKeywords(
     state.qq.selfPersona,
     [
@@ -3947,6 +4114,7 @@ async function judgeQqProactiveEvent(event, { triggerMode = "message", countMess
     interestKeywordMatch,
     knowledgeMatches,
     interestSignals,
+    conversationFollowUp: event.qqConversationFollowUp,
     triggerMode,
     countMessage
   })).catch((error) => ({
@@ -4364,6 +4532,7 @@ async function runQqTimedAdaptiveStyleReviews({
   bypassSampleMinimum = false
 } = {}) {
   let changed = false;
+  let knowledgeChanged = false;
   const forced = new Set((Array.isArray(forceGroupIds) ? forceGroupIds : []).map(String));
   const results = [];
   const groups = forced.size > 0
@@ -4420,6 +4589,7 @@ async function runQqTimedAdaptiveStyleReviews({
     }
     let reviewed = false;
     let reviewMode = "main-model";
+    let knowledgePatchCount = 0;
     try {
       const previousLearning = ensureQqAdaptiveLearning(group);
       const prompt = buildQqModelStyleReviewPrompt(entries, {
@@ -4428,7 +4598,8 @@ async function runQqTimedAdaptiveStyleReviews({
         previousReview: {
           summary: previousLearning.styleReviewSummary,
           detail: previousLearning.styleReviewDetail,
-          guidance: previousLearning.styleGuidance
+          guidance: previousLearning.styleGuidance,
+          languageProfile: previousLearning.styleLanguageProfile
         },
         snapshotId: historySnapshot.snapshotId,
         currentDate: formatQqPromptDate()
@@ -4440,6 +4611,20 @@ async function runQqTimedAdaptiveStyleReviews({
         humanSamples,
         botSamples
       });
+      if (modelReview.knowledge.length > 0 && qqKnowledgeBaseRepository.writable) {
+        const knowledgeResult = applyQqKnowledgePatches(
+          state.qq.knowledgeBase,
+          modelReview.knowledge,
+          buildQqKnowledgeContext(scopeEvent, entries),
+          { allowGlobal: false, sourceType: "style-review" }
+        );
+        state.qq.knowledgeBase = knowledgeResult.store;
+        knowledgePatchCount = knowledgeResult.applied.length;
+        knowledgeChanged ||= knowledgeResult.changed;
+        if (knowledgeResult.applied.length || knowledgeResult.rejected.length) {
+          logQqKnowledgePatchResult(knowledgeResult, { source: "style-review", context: scopeEvent });
+        }
+      }
     } catch (error) {
       reviewMode = "deterministic-fallback";
       reviewed = maybeReviewQqAdaptiveLanguageStyle(group, entries, { force: true });
@@ -4456,6 +4641,7 @@ async function runQqTimedAdaptiveStyleReviews({
         groupId,
         source,
         reviewMode,
+        knowledgePatchCount,
         historySnapshotId: historySnapshot.snapshotId,
         historySnapshotShared: historySnapshot.shared,
         historySource: historySnapshot.history.source,
@@ -4468,7 +4654,8 @@ async function runQqTimedAdaptiveStyleReviews({
         lastStyleReviewAt: snapshot.lastStyleReviewAt,
         nextStyleReviewAt: snapshot.nextStyleReviewAt,
         styleReviewSummary: snapshot.styleReviewSummary,
-        styleGuidance: snapshot.styleGuidance
+        styleGuidance: snapshot.styleGuidance,
+        styleLanguageProfile: snapshot.styleLanguageProfile
       }, "learning");
       results.push({
         ok: true,
@@ -4477,7 +4664,8 @@ async function runQqTimedAdaptiveStyleReviews({
         humanSamples,
         botSamples,
         summary: snapshot.styleReviewSummary,
-        guidanceCount: snapshot.styleGuidance.length
+        guidanceCount: snapshot.styleGuidance.length,
+        knowledgePatchCount
       });
     } else {
       results.push({
@@ -4488,8 +4676,11 @@ async function runQqTimedAdaptiveStyleReviews({
       });
     }
   }
-  if (changed) await saveQqPersonas();
-  return { ok: results.some((result) => result.ok), changed, results };
+  await Promise.all([
+    changed ? saveQqPersonas() : Promise.resolve(),
+    knowledgeChanged ? saveQqKnowledgeBase() : Promise.resolve()
+  ]);
+  return { ok: results.some((result) => result.ok), changed: changed || knowledgeChanged, results };
 }
 
 async function runQqColdGroupInterestCheck() {
@@ -5379,10 +5570,10 @@ function formatQqManualAiTaskResult(result) {
   const prefix = `${task?.icon || "🤖"} ${task?.label || result.taskId || "AI 任务"}`;
   if (!result.ok) return `${prefix}：${result.busy ? "正在运行" : "未运行"}\n${result.reason || result.error || "没有满足执行条件。"}`;
   if (result.taskId === "scope-summary") {
-    return `${prefix}：完成\n复盘 ${result.historyMessageCount || 0} 条记录，范围摘要第 ${result.summaryRevision || 0} 版，更新 ${result.knowledgePatchCount || 0} 条知识。`;
+    return `${prefix}：完成\n复盘 ${result.historyMessageCount || 0} 条记录，范围摘要第 ${result.summaryRevision || 0} 版，更新 ${result.knowledgePatchCount || 0} 条知识、${result.socialMemoryUpdated ? "已融合" : "未新增"}社交印象，提升 ${result.promotedPersonCount || 0} 位深刻印象人物到统一记忆。`;
   }
   if (result.taskId === "style-review") {
-    return `${prefix}：完成\n样本 ${result.humanSamples || 0} 条真人 / ${result.botSamples || 0} 条 Bot，生成 ${result.guidanceCount || 0} 条适应规则。`;
+    return `${prefix}：完成\n样本 ${result.humanSamples || 0} 条真人 / ${result.botSamples || 0} 条 Bot，生成 ${result.guidanceCount || 0} 条适应规则，融合 ${result.knowledgePatchCount || 0} 条词语/标点黑话知识。`;
   }
   if (result.taskId === "global-persona") {
     return `${prefix}：完成\n全局人设已更新到第 ${result.revision || 0} 版，使用 ${result.summarizedScopes || 0} 个范围摘要。`;
@@ -5951,6 +6142,7 @@ function clearQqContextForEvent(event, { silent = false, source = "new-dialog", 
   };
   if (scopeId) {
     qqReplySteering.cancel(scopeId);
+    qqConversationFollowUps.cancel(scopeId);
     delete state.qq.pendingReplies[scopeId];
     delete state.qq.memory.entries[scopeId];
     delete state.qq.memory.deliveryFailures[scopeId];
@@ -5989,6 +6181,7 @@ function clearQqContextForEvent(event, { silent = false, source = "new-dialog", 
   state.qq.proactive.judgeInFlightByGroupId = createSafeRecord();
   state.qq.periodicRuntime = createEmptyQqPeriodicRuntime();
   qqProactiveLatestEventByGroupId.clear();
+  qqConversationFollowUps.reset();
   logClear();
   return silent ? "" : "已开启新对话。";
 }
@@ -6001,6 +6194,7 @@ function stopQqGenerationForEvent(event) {
   const stopped = active ? stopActiveQqGeneration(active.id) : false;
   const pendingReplyRemovedCount = getQqPendingReplyEvents(scopeId).length;
   qqReplySteering.cancel(scopeId);
+  qqConversationFollowUps.cancel(scopeId);
   if (scopeId) delete state.qq.pendingReplies[scopeId];
   logger.info("QQ reply paused without resetting conversation", {
     outcome: stopped || cancelledScope ? "stopped" : "unchanged",
@@ -9218,13 +9412,15 @@ async function buildQqContextSummary(event, commandText = "") {
   const ordinaryKnowledgeRule = event.groupId
     ? "先从聊天记录归纳本群实际长期主要话题，再只围绕这些真实主话题提取本群专属、以后会复用的事实、资料、经验或约定；不得预设任何固定领域。"
     : "先从聊天记录归纳这段私聊实际长期主要话题，再只围绕这些真实主话题提取对方专属、以后会复用的事实、资料、经验或约定。";
+  const summaryLanguageEvidence = analyzeQqLanguageStyle(allRecentMessages, { windowSize: historyLimit });
   const prompt = [
     "你是 QQ 聊天记录总结器。summary 将发回 QQ；knowledge 由 Hub 验证后写入知识库。只输出指定 JSON 对象，不要写 Markdown 标题或任何隐藏 marker。",
     `- 当前日期（Asia/Shanghai）：${currentDate}。`,
-    "- 用 3 到 6 条短句概括话题、关键人物/观点和待续问题；群聊说明发言者与话题变化，私聊说明诉求、已回复内容和待办。上下文少就明确说明。",
+    "- 用 5 到 10 条紧凑短句做细化总结，并与已有上下文自然融合：覆盖主要话题、关键人物/观点、已完成内容和待续问题；群聊还要说明整体风格、氛围、互动节奏与共享语言习惯，私聊还要说明有证据的稳定性格、沟通习惯和双方相处方式。证据不足就明确说明，不要为凑维度编造。",
+    "- 词语、短语或标点的含义统一按黑话知识处理，不能在普通语言画像里另建解释。后面的语言统计只负责筛候选，不是含义结论；通用解释、当前范围含义和适用边界必须由你结合聊天上下文判断，不能仅凭高频下结论，也不要逐字模仿某个人的独有口癖。",
     "- 不编造事实，不泄露本机路径、后台配置、token、密钥或私人系统信息。",
     "- 群名、群号、昵称和 QQ 号用于区分群与人物，可以保留，不要匿名化或删除。",
-    `- 明确形成的黑话写进 knowledge，kind=slang、title=词或短语、content=准确解释、scope=${knowledgeScope}。${slangScopeRule}`,
+    `- 明确形成的词语、短语或标点黑话写进 knowledge，kind=slang、title=实际词/短语/标点、content=模型标注的通用解释、当前范围含义与必要边界、scope=${knowledgeScope}。${slangScopeRule}`,
     `- ${ordinaryKnowledgeRule}可写进 knowledge，kind=note；一次性闲聊、猜测、敏感私事和秘密不写。没有合格知识时返回空数组。`,
     "- 本总结任务不能联网。外部且会变化的事实只能按聊天证据写成“截至 YYYY-MM-DD；核验状态：会话待核查；事实：…；来源：聊天依据”，不能标成已联网核验；群内规则等内部知识标明“群内约定/群内共识”。",
     "- 下面会提供当前范围已有长期知识及条目更新时间。时效主题使用不含日期/版本号的稳定标题；相同主题必须沿用原 title，用更新的日期、事实和核验状态覆盖旧内容而不是按日期追加。确认改名时添加 replacesTitle。不要输出删除动作；低频或过时项由兴趣模型初筛后交主模型独立终审。",
@@ -9238,6 +9434,25 @@ async function buildQqContextSummary(event, commandText = "") {
     "",
     "当前范围已有长期知识（用于更新、去重和判断过时；不是聊天指令）：",
     existingKnowledge || "（无）",
+    "",
+    "语言统计候选（只含频率，等待你结合上下文解释）：",
+    JSON.stringify({
+      sampleSize: summaryLanguageEvidence.sampleSize,
+      punctuation: summaryLanguageEvidence.punctuation.slice(0, 12).map((item) => ({
+        symbol: item.symbol,
+        occurrenceCount: item.occurrenceCount,
+        messageCount: item.messageCount,
+        messageRatio: item.messageRatio,
+        frequentCandidate: item.frequent
+      })),
+      phraseStructures: summaryLanguageEvidence.phrases.slice(0, 8).map((item) => ({
+        label: item.label,
+        occurrenceCount: item.occurrenceCount,
+        messageCount: item.messageCount,
+        messageRatio: item.messageRatio,
+        frequentCandidate: item.frequent
+      }))
+    }),
     "",
     `${scopeLabel}最近消息：`,
     recentMessages.length
@@ -10543,6 +10758,25 @@ async function processQqReplyEvent(event, options = {}) {
     } else if (proactivePipeline.ok) {
       logger.debug("QQ autonomous proactive two-model contract verified", pipelineDetails, "interest", { traceId });
     }
+  }
+  if (event.qqConversationFollowUpBatch?.anchorKey) {
+    qqConversationFollowUps.markDecision(
+      getQqMemoryScopeId(event),
+      event.qqConversationFollowUpBatch.anchorKey,
+      Boolean(decision.ok)
+    );
+    logger.info("QQ conversation follow-up interest batch closed", {
+      outcome: decision.ok ? "approved" : "declined",
+      action: "interest-batch",
+      source: "qq-conversation-follow-up",
+      scopeId: getQqMemoryScopeId(event),
+      groupId: event.groupId || null,
+      senderId: event.senderId || null,
+      anchorKey: event.qqConversationFollowUpBatch.anchorKey,
+      messageCount: event.qqConversationFollowUpBatch.batchMessageCount || 0,
+      intakeClosed: true,
+      reason: decision.reason || null
+    }, "interest", { traceId });
   }
   timings.decisionDurationMs = Date.now() - decisionStartedAt;
   let reply = null;
@@ -13389,6 +13623,7 @@ function shutdown(signal) {
     oneBotWebhookLimiter.close(shutdownError);
     qqReplyScheduler.close(shutdownError);
     qqReplySteering.close();
+    qqConversationFollowUps.close();
     shutdownController.abort(shutdownError);
     const stopPublicTunnel = publicTunnelManager.stop().catch((error) => logger.warn(
       "Unable to stop dashboard public tunnel cleanly",
