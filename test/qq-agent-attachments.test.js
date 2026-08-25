@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -134,6 +134,141 @@ test("does not import arbitrary generated files or fake image payloads", async (
     event: { qqTaskWorkspace: { outputDir } },
     projectDir: root
   }), "");
+});
+
+test("recovers the latest valid current-turn image when an explicit image task omits attachments", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "codex-qq-agent-attachments-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const generatedImagesDir = join(root, "generated_images");
+  const threadDir = join(generatedImagesDir, "thread-current");
+  const otherThreadDir = join(generatedImagesDir, "thread-other");
+  const outputDir = join(root, "task", "output");
+  await Promise.all([threadDir, otherThreadDir, outputDir].map((path) => mkdir(path, { recursive: true })));
+
+  const startedAt = Date.now() - 10_000;
+  const baseImage = join(threadDir, "base.png");
+  const finalImage = join(threadDir, "final.png");
+  const newerFakeImage = join(threadDir, "fake.png");
+  const otherThreadImage = join(otherThreadDir, "other.png");
+  const finalBytes = Buffer.concat([pngBytes, Buffer.from("-final")]);
+  await Promise.all([
+    writeFile(baseImage, Buffer.concat([pngBytes, Buffer.from("-base")])),
+    writeFile(finalImage, finalBytes),
+    writeFile(newerFakeImage, "not an image"),
+    writeFile(otherThreadImage, Buffer.concat([pngBytes, Buffer.from("-other")]))
+  ]);
+  await Promise.all([
+    utimes(baseImage, new Date(startedAt + 1_000), new Date(startedAt + 1_000)),
+    utimes(finalImage, new Date(startedAt + 2_000), new Date(startedAt + 2_000)),
+    utimes(newerFakeImage, new Date(startedAt + 3_000), new Date(startedAt + 3_000)),
+    utimes(otherThreadImage, new Date(startedAt + 4_000), new Date(startedAt + 4_000))
+  ]);
+
+  const parsed = await parseQqAgentOutputWithAttachmentImport(JSON.stringify({
+    status: "reply",
+    text: "图片已生成，但本轮文件沙箱异常，无法复制到 QQ 附件输出目录；生成结果已显示在当前任务中。",
+    bubbles: [],
+    reply: { mode: "plain", targetUserId: "" },
+    attachments: []
+  }), {
+    threadId: "thread-current",
+    generatedImagesDir,
+    outputDir,
+    generatedAfterMs: startedAt,
+    maxImageBytes: 1024,
+    recoverUnlistedGeneratedImage: true
+  });
+
+  assert.equal(parsed.importedImageCount, 1);
+  assert.equal(parsed.recoveredUnlistedImageCount, 1);
+  assert.equal(parsed.rejectedGeneratedImageCount, 0);
+  assert.equal(parsed.value.attachments.length, 1);
+  assert.match(parsed.output, /\[\[qq_image:.*codex-generated-1-.*\.png\]\]/);
+  assert.doesNotMatch(parsed.output, /沙箱异常|无法复制|显示在当前任务/);
+  assert.deepEqual(await readFile(parsed.value.attachments[0].path), finalBytes);
+});
+
+test("does not recover unlisted generated images unless explicitly enabled", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "codex-qq-agent-attachments-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const generatedImagesDir = join(root, "generated_images");
+  const threadDir = join(generatedImagesDir, "thread-1");
+  const outputDir = join(root, "task", "output");
+  await Promise.all([threadDir, outputDir].map((path) => mkdir(path, { recursive: true })));
+  await writeFile(join(threadDir, "unlisted.png"), pngBytes);
+
+  const parsed = await parseQqAgentOutputWithAttachmentImport(JSON.stringify({
+    status: "reply",
+    text: "普通回复",
+    bubbles: [],
+    reply: { mode: "plain", targetUserId: "" },
+    attachments: []
+  }), {
+    threadId: "thread-1",
+    generatedImagesDir,
+    outputDir,
+    generatedAfterMs: Date.now() - 1_000,
+    maxImageBytes: 1024
+  });
+
+  assert.equal(parsed.importedImageCount, 0);
+  assert.equal(parsed.recoveredUnlistedImageCount, 0);
+  assert.deepEqual(parsed.value.attachments, []);
+  assert.deepEqual(await readdir(outputDir), []);
+});
+
+test("unlisted-image recovery rejects stale, silent, and thread-directory escape candidates", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "codex-qq-agent-attachments-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const generatedImagesDir = join(root, "generated_images");
+  const staleThreadDir = join(generatedImagesDir, "thread-stale");
+  const silentThreadDir = join(generatedImagesDir, "thread-silent");
+  const outsideThreadDir = join(root, "outside-thread");
+  const outputDir = join(root, "task", "output");
+  await Promise.all([staleThreadDir, silentThreadDir, outsideThreadDir, outputDir]
+    .map((path) => mkdir(path, { recursive: true })));
+
+  const staleImage = join(staleThreadDir, "stale.png");
+  await Promise.all([
+    writeFile(staleImage, pngBytes),
+    writeFile(join(silentThreadDir, "silent.png"), pngBytes),
+    writeFile(join(outsideThreadDir, "escape.png"), pngBytes)
+  ]);
+  await utimes(staleImage, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+  await symlink(outsideThreadDir, join(generatedImagesDir, "thread-link"));
+
+  const reply = (status = "reply") => JSON.stringify({
+    status,
+    text: "",
+    bubbles: [],
+    reply: { mode: "plain", targetUserId: "" },
+    attachments: []
+  });
+  const common = {
+    generatedImagesDir,
+    outputDir,
+    generatedAfterMs: Date.now() - 1_000,
+    maxImageBytes: 1024,
+    recoverUnlistedGeneratedImage: true
+  };
+
+  const stale = await parseQqAgentOutputWithAttachmentImport(reply(), {
+    ...common,
+    threadId: "thread-stale"
+  });
+  const silent = await parseQqAgentOutputWithAttachmentImport(reply("silent"), {
+    ...common,
+    threadId: "thread-silent"
+  });
+  const escaped = await parseQqAgentOutputWithAttachmentImport(reply(), {
+    ...common,
+    threadId: "thread-link"
+  });
+
+  assert.equal(stale.recoveredUnlistedImageCount, 0);
+  assert.equal(silent.recoveredUnlistedImageCount, 0);
+  assert.equal(escaped.recoveredUnlistedImageCount, 0);
+  assert.deepEqual(await readdir(outputDir), []);
 });
 
 function escapeRegExp(value) {

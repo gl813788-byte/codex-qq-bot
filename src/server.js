@@ -9721,7 +9721,8 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
       generatedImagesDir: codexGeneratedImagesDir,
       outputDir: taskWorkspace.outputDir,
       generatedAfterMs: taskStartedAt,
-      maxImageBytes: qqImageMaxBytes
+      maxImageBytes: qqImageMaxBytes,
+      recoverUnlistedGeneratedImage: isImageGeneration
     });
     logQqGeneratedAttachmentImport(parsed, event, result);
     event.qqAgentStructuredOutput = parsed.structured;
@@ -11889,13 +11890,15 @@ function logCodexModelOutput(output, { event = null, taskType = "", label = "" }
 function logQqGeneratedAttachmentImport(parsed, event, result) {
   const importedImageCount = Number(parsed?.importedImageCount || 0);
   const rejectedGeneratedImageCount = Number(parsed?.rejectedGeneratedImageCount || 0);
+  const recoveredUnlistedImageCount = Number(parsed?.recoveredUnlistedImageCount || 0);
   if (importedImageCount <= 0 && rejectedGeneratedImageCount <= 0) return;
   const details = {
     groupId: event?.groupId || null,
     senderId: event?.senderId || null,
     threadId: result?.threadId || null,
     importedImageCount,
-    rejectedGeneratedImageCount
+    rejectedGeneratedImageCount,
+    recoveredUnlistedImageCount
   };
   if (importedImageCount > 0) {
     logger.info("Codex generated image imported into QQ task output", details, "qq", qqLogContext(event));

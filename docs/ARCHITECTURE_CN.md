@@ -46,7 +46,7 @@
 | `src/qq-cross-session.js` | 跨会话目录与事件重绑定 | 列出/解析群聊私聊 selector，或把已验证角色安全绑定到目标会话 |
 | `src/qq-operation-log.js` | QQ 操作日志统一字段 | 统一 Agent、管理员、社交和跨会话的操作者及来源/目标范围 |
 | `src/infrastructure/codex/qq-agent-output.js` | QQ 结构化最终输出边界 | 回复/静默/寻址/附件 Schema 与投递兼容转换 |
-| `src/infrastructure/codex/qq-agent-attachments.js` | Codex 生成图导入边界 | 仅把当前轮、当前线程且通过图片签名校验的生成图复制进活动 QQ 任务输出目录，普通文件策略保持不变 |
+| `src/infrastructure/codex/qq-agent-attachments.js` | Codex 生成图导入边界 | 仅把当前轮、当前线程且通过图片签名校验的生成图复制进活动 QQ 任务输出目录；明确生图任务漏填附件时回收最新有效图片，普通文件策略保持不变 |
 | `src/qq-inbound-files.js` | QQ 入站文件信任与传输边界 | 提取并脱敏当前/引用文件元数据、分配本轮 selector、构造群聊/私聊 URL 查询，并把有界下载限制在活动任务 input |
 | `src/infrastructure/storage/settings-repository.js` | 原子设置 I/O | 加载或持久化 `data/settings.json`，不把文件系统逻辑塞回组合根 |
 | `src/qq-codex-turn-recovery.js` | 融合 turn 故障隔离 | 识别超过“任务类型 × 思考强度”协议静默窗口的替代 turn，并用原始 prompt 与已接收融合输入重建一次全新线程尝试 |
