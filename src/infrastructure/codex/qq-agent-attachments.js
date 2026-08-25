@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { copyFile, mkdir, open, realpath, stat } from "node:fs/promises";
+import { copyFile, mkdir, open, readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { parseQqAgentOutput } from "./qq-agent-output.js";
 import { isPathInside } from "../../qq-output-policy.js";
@@ -12,14 +12,16 @@ export async function parseQqAgentOutputWithAttachmentImport(value, {
   generatedImagesDir = "",
   outputDir = "",
   generatedAfterMs = 0,
-  maxImageBytes = DEFAULT_MAX_IMAGE_BYTES
+  maxImageBytes = DEFAULT_MAX_IMAGE_BYTES,
+  recoverUnlistedGeneratedImage = false
 } = {}) {
   const parsed = parseQqAgentOutput(value, { bubbleSeparator });
   if (!parsed.structured || !parsed.value) {
     return {
       ...parsed,
       importedImageCount: 0,
-      rejectedGeneratedImageCount: 0
+      rejectedGeneratedImageCount: 0,
+      recoveredUnlistedImageCount: 0
     };
   }
 
@@ -28,15 +30,20 @@ export async function parseQqAgentOutputWithAttachmentImport(value, {
     generatedImagesDir,
     outputDir,
     generatedAfterMs,
-    maxImageBytes
+    maxImageBytes,
+    recoverUnlistedGeneratedImage
   });
-  const normalized = materialized.changed
-    ? parseQqAgentOutput(JSON.stringify(materialized.value), { bubbleSeparator })
+  const reconciledValue = materialized.recoveredUnlistedImageCount > 0
+    ? reconcileRecoveredImageDeliveryText(materialized.value)
+    : materialized.value;
+  const normalized = materialized.changed || reconciledValue !== materialized.value
+    ? parseQqAgentOutput(JSON.stringify(reconciledValue), { bubbleSeparator })
     : parsed;
   return {
     ...normalized,
     importedImageCount: materialized.importedImageCount,
-    rejectedGeneratedImageCount: materialized.rejectedGeneratedImageCount
+    rejectedGeneratedImageCount: materialized.rejectedGeneratedImageCount,
+    recoveredUnlistedImageCount: materialized.recoveredUnlistedImageCount
   };
 }
 
@@ -45,10 +52,15 @@ export async function materializeCodexGeneratedImageAttachments(value, {
   generatedImagesDir = "",
   outputDir = "",
   generatedAfterMs = 0,
-  maxImageBytes = DEFAULT_MAX_IMAGE_BYTES
+  maxImageBytes = DEFAULT_MAX_IMAGE_BYTES,
+  recoverUnlistedGeneratedImage = false
 } = {}) {
   const attachments = Array.isArray(value?.attachments) ? value.attachments.slice(0, 8) : [];
-  if (!value || typeof value !== "object" || attachments.length === 0) {
+  const shouldRecoverUnlistedImage = Boolean(recoverUnlistedGeneratedImage)
+    && value?.status !== "silent"
+    && !attachments.some((attachment) => attachment?.kind === "image")
+    && attachments.length < 8;
+  if (!value || typeof value !== "object" || (attachments.length === 0 && !shouldRecoverUnlistedImage)) {
     return unchanged(value);
   }
 
@@ -61,6 +73,7 @@ export async function materializeCodexGeneratedImageAttachments(value, {
   });
   let importedImageCount = 0;
   let rejectedGeneratedImageCount = 0;
+  let recoveredUnlistedImageCount = 0;
   let changed = false;
   const nextAttachments = [];
 
@@ -80,11 +93,22 @@ export async function materializeCodexGeneratedImageAttachments(value, {
     nextAttachments.push(attachment);
   }
 
+  if (shouldRecoverUnlistedImage) {
+    const recovered = await importLatestGeneratedImageAttachment(nextAttachments.length, importContext);
+    if (recovered.path) {
+      nextAttachments.push({ kind: "image", path: recovered.path, name: "" });
+      importedImageCount += 1;
+      recoveredUnlistedImageCount = 1;
+      changed = true;
+    }
+  }
+
   return {
     value: changed ? { ...value, attachments: nextAttachments } : value,
     changed,
     importedImageCount,
-    rejectedGeneratedImageCount
+    rejectedGeneratedImageCount,
+    recoveredUnlistedImageCount
   };
 }
 
@@ -96,14 +120,48 @@ async function buildImportContext({ threadId, generatedImagesDir, outputDir, gen
     ? join(generatedRoot, safeThreadId)
     : "";
   if (outputRoot) await mkdir(outputRoot, { recursive: true });
+  const realGeneratedRoot = generatedRoot ? await realpath(generatedRoot).catch(() => "") : "";
+  const candidateThreadRoot = threadRoot ? await realpath(threadRoot).catch(() => "") : "";
+  const realThreadRoot = realGeneratedRoot
+    && candidateThreadRoot
+    && isPathInside(candidateThreadRoot, realGeneratedRoot)
+    ? candidateThreadRoot
+    : "";
   return {
     generatedRoot,
+    realGeneratedRoot,
     realOutputRoot: outputRoot ? await realpath(outputRoot).catch(() => "") : "",
-    realThreadRoot: threadRoot ? await realpath(threadRoot).catch(() => "") : "",
+    realThreadRoot,
+    threadRoot,
     outputRoot,
     generatedAfterMs: normalizeTimestamp(generatedAfterMs),
     maxImageBytes: normalizeMaxBytes(maxImageBytes)
   };
+}
+
+async function importLatestGeneratedImageAttachment(index, context) {
+  if (!context.realThreadRoot || !context.threadRoot) return { path: "", rejected: false };
+  const entries = await readdir(context.realThreadRoot, { withFileTypes: true }).catch(() => []);
+  const candidates = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const candidate = join(context.threadRoot, entry.name);
+    const info = await stat(candidate).catch(() => null);
+    if (!info?.isFile()
+      || info.size <= 0
+      || info.size > context.maxImageBytes
+      || (context.generatedAfterMs > 0 && info.mtimeMs < context.generatedAfterMs - 2000)) {
+      continue;
+    }
+    candidates.push({ candidate, mtimeMs: info.mtimeMs });
+  }
+
+  candidates.sort((left, right) => right.mtimeMs - left.mtimeMs || right.candidate.localeCompare(left.candidate));
+  for (const { candidate } of candidates) {
+    const imported = await importGeneratedImageAttachment({ path: candidate }, index, context);
+    if (imported.path) return imported;
+  }
+  return { path: "", rejected: false };
 }
 
 async function importGeneratedImageAttachment(attachment, index, context) {
@@ -116,7 +174,11 @@ async function importGeneratedImageAttachment(attachment, index, context) {
   if (!context.generatedRoot || !isPathInside(candidate, context.generatedRoot)) {
     return { path: "", rejected: false };
   }
-  if (!realCandidate || !context.realThreadRoot || !isPathInside(realCandidate, context.realThreadRoot)) {
+  if (!realCandidate
+    || !context.realGeneratedRoot
+    || !isPathInside(realCandidate, context.realGeneratedRoot)
+    || !context.realThreadRoot
+    || !isPathInside(realCandidate, context.realThreadRoot)) {
     return { path: "", rejected: true };
   }
 
@@ -186,11 +248,38 @@ function normalizeTimestamp(value) {
   return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0;
 }
 
+function reconcileRecoveredImageDeliveryText(value) {
+  if (!value || typeof value !== "object") return value;
+  const text = removeObsoleteImageDeliveryFailure(value.text);
+  const bubbles = Array.isArray(value.bubbles)
+    ? value.bubbles.map(removeObsoleteImageDeliveryFailure).filter(Boolean)
+    : value.bubbles;
+  if (text === value.text && bubbles === value.bubbles) return value;
+  return { ...value, text, bubbles };
+}
+
+function removeObsoleteImageDeliveryFailure(value) {
+  const text = String(value || "");
+  const deliveryFailureSegment = /(?=[^。！？!?\n]{0,240}(?:沙箱|附件输出目录|QQ\s*附件))(?=[^。！？!?\n]{0,240}(?:异常|失败|无法|不能|未能|没法))[^。！？!?\n]{1,240}[。！？!?]?/gi;
+  return text
+    .replace(deliveryFailureSegment, (segment) => (
+      /(?:图片|图像|成品)[^。！？!?\n]{0,40}(?:已生成|生成好|画好|做好)/i.test(segment)
+        ? "图片已生成。"
+        : ""
+    ))
+    .replace(/生成结果已显示在当前任务中[。！？!?]?/g, "")
+    .replace(/。{2,}/g, "。")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function unchanged(value) {
   return {
     value,
     changed: false,
     importedImageCount: 0,
-    rejectedGeneratedImageCount: 0
+    rejectedGeneratedImageCount: 0,
+    recoveredUnlistedImageCount: 0
   };
 }
