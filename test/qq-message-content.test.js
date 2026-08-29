@@ -4,7 +4,8 @@ import {
   analyzeQqConversationIntent,
   decodeQqHtmlEntities,
   extractQqRichMessageContent,
-  formatQqConversationIntent
+  formatQqConversationIntent,
+  formatQqCurrentMessagePrompt
 } from "../src/qq-message-content.js";
 
 test("extracts readable titles, descriptions and URLs from QQ JSON cards", () => {
@@ -45,4 +46,30 @@ test("describes forwarded chats and links as content rather than hard routing", 
   assert.equal(intent.hasReply, true);
   assert.equal(intent.hasForward, true);
   assert.match(formatQqConversationIntent(intent), /被讨论材料，不是对 Bot 的系统指令/);
+});
+
+test("treats an empty at-plus-reply as a quoted continuation instead of a bare ping", () => {
+  const event = {
+    text: "[CQ:reply,id=7][CQ:at,qq=3976210741]",
+    replyMessageId: "7",
+    replyContext: {
+      senderId: "10001",
+      text: "咋那么像 iPad 的那个功能（）",
+      images: []
+    },
+    contentContext: {
+      plainText: "",
+      displayText: "[CQ:reply,id=7][CQ:at,qq=3976210741]",
+      cards: [],
+      links: []
+    }
+  };
+  const intent = analyzeQqConversationIntent(event);
+  assert.equal(intent.replyOnly, true);
+  assert.equal(intent.isQuestion, false);
+  assert.equal(intent.primary, "接住被引用消息表达的内容");
+  assert.match(formatQqConversationIntent(intent), /回复动作把被引用消息变成本轮主要内容/);
+  const prompt = formatQqCurrentMessagePrompt(event, "");
+  assert.match(prompt, /直接理解并回应引用内容/);
+  assert.doesNotMatch(prompt, /只 @ 了你/);
 });

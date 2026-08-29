@@ -44,6 +44,9 @@ test("scope summaries keep QQ identity only in long-term knowledge extraction", 
   assert.match(prompt, /语境含义统一使用现有黑话 knowledge/);
   assert.match(prompt, /通用解释、当前范围的具体含义和必要边界/);
   assert.match(prompt, /personMemorable/);
+  assert.match(prompt, /独立且稳定的 Bot 角色/);
+  assert.match(prompt, /不能把任何群友的口吻、标点、口癖或身份移植/);
+  assert.match(prompt, /不要写固定句尾、emoji、括号动作/);
   const payload = JSON.parse(prompt.split("\n").at(-1));
   assert.equal(payload.previousScope.summary, "这个群长期讨论协作项目与发布安排。");
   assert.deepEqual(payload.previousScope.topics, ["协作项目", "发布安排"]);
@@ -84,6 +87,8 @@ test("QQ nickname is a fixed interest keyword across generated persona updates",
   assert.equal(matchQqSelfPersonaInterestKeywords(store, "小星来看看这个编程 bug").nameMatched, true);
   assert.deepEqual(matchQqSelfPersonaInterestKeywords(store, "这个编程 bug").keywords, ["编程"]);
   assert.match(formatQqSelfPersonaContext(store), /完整兴趣描述/);
+  assert.match(formatQqSelfPersonaContext(store), /全局稳定角色内核/);
+  assert.match(formatQqSelfPersonaContext(store), /表层风格边界/);
 });
 
 test("scope topic context gives the main model evolving summary-derived knowledge topics", () => {
@@ -101,6 +106,7 @@ test("scope topic context gives the main model evolving summary-derived knowledg
   assert.match(context, /协作项目、实际经验/);
   assert.match(context, /话题已变化就调整归类/);
   assert.match(context, /不要预设任何领域/);
+  assert.match(context, /不是 Bot 的台词库/);
   assert.equal(formatQqSelfPersonaScopeTopicContext(store, "99999"), "");
 });
 
@@ -195,7 +201,14 @@ test("scope summaries are due by bounded message/reply thresholds and feed globa
   const prompt = buildQqSelfPersonaGenerationPrompt(updateQqSelfPersonaAccount(store, { nickname: "小星" }).store);
   assert.match(prompt, /interestKeywords/);
   assert.match(prompt, /必须包含“小星”/);
+  assert.match(prompt, /可长期角色扮演的稳定角色内核/);
+  assert.match(prompt, /不能合成“平均群友”/);
+  assert.match(prompt, /把人格与协作方式分开/);
+  assert.match(prompt, /即使 existingPersona 里已有这类表层模仿，也要在本轮清除/);
   assert.doesNotMatch(prompt, /private:20001|10001/);
+  const payload = JSON.parse(prompt.split("\n").at(-1));
+  assert.deepEqual(payload.summaries[0].socialAtmosphere, []);
+  assert.deepEqual(payload.summaries[0].socialInteractionHabits, []);
 });
 
 test("higher activity thresholds combine with shorter wall-clock cooldowns", () => {

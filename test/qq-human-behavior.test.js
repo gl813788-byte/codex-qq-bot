@@ -94,6 +94,25 @@ test("plans reactions, short answers and tasks with different behavior budgets",
   assert.equal(taskPlan.completionDriven, true);
 });
 
+test("plans quoted content without falling back to an online-status ping", () => {
+  const style = analyzeQqHumanChatStyle([
+    { senderId: "1", text: "咋那么像 iPad 的那个功能", at: "2026-08-29T11:00:00.000Z" }
+  ]);
+  const plan = buildQqHumanBehaviorPlan({
+    groupId: "g",
+    senderId: "u",
+    text: "",
+    replyContext: { text: "咋那么像 iPad 的那个功能" }
+  }, {
+    replyOnly: true,
+    isQuestion: false,
+    hasReply: true
+  }, style, { text: "" });
+  assert.equal(plan.mode, "quoted_continuation");
+  assert.match(plan.goal, /把被引用消息当作当前话头自然接住/);
+  assert.doesNotMatch(plan.goal, /怎么了|在场/);
+});
+
 test("cold-group interest keeps normal reply freedom for model-led research and topic opening", () => {
   const style = analyzeQqHumanChatStyle([{ senderId: "1", text: "这个挺好玩" }]);
   const plan = buildQqHumanBehaviorPlan({
