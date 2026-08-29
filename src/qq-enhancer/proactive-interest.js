@@ -9,6 +9,7 @@ import {
   compactConsecutiveQqMessages,
   getQqMessageConsecutiveRepeatCount
 } from "../qq-message-run-compaction.js";
+import { formatQqContextTime } from "../qq-context-time.js";
 import {
   buildInterestModelChatCompletion,
   getDefaultInterestModel,
@@ -728,6 +729,8 @@ export async function judgeQqColdGroupTopicStart(options = {}) {
       "场景：群里已经安静一段时间，当前没有群友刚刚发消息。",
       "你只决定是否唤醒主模型，以及批准哪种活动：topic（让主模型按自身兴趣选题，必要时搜索）或 chatter（少见的轻量水群）；不批准则 silent。",
       "判断顺序：先看当前是否适合出现，再看 Bot 的长期兴趣是否让它产生主动探索/分享冲动，最后用连续未获回应和抑制系数降低打扰欲望。",
+      "recentMessages 可能已经是几小时前或几天前的记录；必须结合其中的时间和 coldInterest.idleHours 判断新鲜度。旧聊天只能证明群里可能关心什么，不能当作正在进行的对话，也不能仅因旧消息命中 Bot 兴趣词就批准。",
+      "批准 topic 的标准是：Bot 此刻有一个脱离旧句也成立、自足且不显得迟到的新分享冲动。若唯一可想到的内容只是补答、回梗或追问最后一条旧消息，应选择 silent。",
       "topic 不要求你给出题目；chatter 也不要求你写句子。你不能提供具体话题、搜索词、回复草稿或聊天风格，这些全部由主模型完成。",
       "冷群检查本身已经低频。不要因为没有现成话题就机械拒绝，也不要把每次检查都当成露面机会。",
       "shouldStart 是最终开关；mode 必须与它一致：true 对应 topic/chatter，false 对应 silent。interest 必须是 0 到 100 的数字，reason 必须是非空字符串。",
@@ -1268,6 +1271,7 @@ function formatRecentMessages(recentMessages = [], maxRecentMessages = 8, {
         sender: item.isAssistant || item.senderId === "assistant"
           ? "bot"
           : formatQqIdentity(item),
+        ...(item.at ? { time: formatQqContextTime(item.at) } : {}),
         text: appendQqConsecutiveRepeatSuffix(String(item.text || "").slice(0, 220), item),
         replyToBot: Boolean(item.replyContext?.isSelf),
         ...(mentions.length > 0 ? { mentions } : {}),

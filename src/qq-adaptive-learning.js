@@ -626,7 +626,7 @@ export function formatQqAdaptiveLearningContext(signals = {}) {
     group.styleReviewSummary ? `- 最近一次真人/Bot 差异复盘：${group.styleReviewSummary}。` : null,
     languageReview ? `- 专项语言风格复盘：${languageReview}` : null,
     ...guidance.map((item) => `- 已压缩的改进规则：${item}`),
-    "- 群级高频标点和共享短语结构可在语境合适时轻量影响表达；个人级画像主要用于理解当前群友的语气。不得复述统计、给群友贴标签、逐字克隆个人口癖或为了命中指标硬塞标点。",
+    "- 共享句式只用于理解本群的节奏；标点规则首先用于读懂语气和遵守使用边界，不是写作清单。不要因为某个符号、尾缀或短语高频就主动塞进回复，也不要连续复用同一口癖。个人级画像只用于理解当前群友，不得逐字克隆。",
     "- 这些始终是弱信号：当前消息、事实、安全与任务完整性优先。"
   ].filter(Boolean).join("\n");
 }

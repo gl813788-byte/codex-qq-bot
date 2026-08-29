@@ -23,7 +23,7 @@ test("cold-group interest model decides only whether to start before the main mo
       interestMultiplier: 1,
       socialHours: { label: "13:00–03:00" }
     },
-    recentMessages: [{ sender: "群友", text: "最近在折腾新工具" }],
+    recentMessages: [{ sender: "群友", text: "最近在折腾新工具", at: "2026-08-26T14:00:00.000Z" }],
     fetch: async (_url, init) => {
       requestBody = JSON.parse(init.body);
       return new Response(JSON.stringify({
@@ -39,6 +39,9 @@ test("cold-group interest model decides only whether to start before the main mo
   assert.equal(requestBody.temperature, 0.8);
   assert.match(requestBody.messages[0].content, /不能提供具体话题、搜索词、回复草稿或聊天风格/);
   assert.match(requestBody.messages[0].content, /topic（让主模型按自身兴趣选题/);
+  assert.match(requestBody.messages[0].content, /几小时前或几天前/);
+  const payload = JSON.parse(requestBody.messages[1].content);
+  assert.match(payload.recentMessages[0].time, /2026年8月26日|8月26日|昨天|今天/);
   assert.deepEqual(requestBody.response_format.json_schema.schema.required, ["shouldStart", "mode", "interest", "reason"]);
 });
 

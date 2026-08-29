@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatQqColdProactivePrompt } from "../src/qq-cold-proactive-prompt.js";
+import {
+  formatQqColdProactiveCompletionInstruction,
+  formatQqColdProactivePrompt
+} from "../src/qq-cold-proactive-prompt.js";
 
 test("approved cold topic prompt makes the main model execute instead of judging again", () => {
   const prompt = formatQqColdProactivePrompt({
@@ -8,11 +11,22 @@ test("approved cold topic prompt makes the main model execute instead of judging
   });
   assert.match(prompt, /已批准的冷群主动发言/);
   assert.match(prompt, /兴趣模型已批准启动主模型/);
-  assert.match(prompt, /不需要你再次判断发不发/);
-  assert.match(prompt, /自己的全局兴趣、长期记忆和最近群聊/);
+  assert.match(prompt, /不代表必须硬凑一句/);
+  assert.match(prompt, /自主开一个新话题/);
   assert.match(prompt, /可自由调用现有工具、多轮换查询角度/);
+  assert.match(prompt, /不是刚发生的对话/);
+  assert.match(prompt, /不能把几小时前或几天前的原句当作即时消息/);
+  assert.match(prompt, /status 设为 silent/);
   assert.doesNotMatch(prompt, /静默时长|兴趣抑制系数|未回复次数/);
   assert.doesNotMatch(prompt, /只允许|最多 4 轮|全部禁止/);
+});
+
+test("cold proactive completion keeps silence available for stale or forced output", () => {
+  const instruction = formatQqColdProactiveCompletionInstruction();
+  assert.match(instruction, /独立、自足/);
+  assert.match(instruction, /迟到续旧话/);
+  assert.match(instruction, /status 设为 silent/);
+  assert.doesNotMatch(instruction, /只有安全边界/);
 });
 
 test("approved cold chatter prompt stays lightweight without forbidding tools", () => {

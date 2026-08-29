@@ -139,7 +139,10 @@ import {
   parseQqKnowledgeMainDeletionReview,
   qqKnowledgeDeletionReviewOutputSchema
 } from "./qq-knowledge-review.js";
-import { formatQqColdProactivePrompt } from "./qq-cold-proactive-prompt.js";
+import {
+  formatQqColdProactiveCompletionInstruction,
+  formatQqColdProactivePrompt
+} from "./qq-cold-proactive-prompt.js";
 import {
   createQqTwoModelProactiveApproval,
   QQ_AUTONOMOUS_PROACTIVE_KINDS,
@@ -164,8 +167,10 @@ import {
   analyzeQqConversationIntent,
   extractQqUrls,
   extractQqRichMessageContent,
-  formatQqConversationIntent
+  formatQqConversationIntent,
+  formatQqCurrentMessagePrompt
 } from "./qq-message-content.js";
+import { formatQqContextTime as formatMemoryTime } from "./qq-context-time.js";
 import {
   appendQqConsecutiveRepeatSuffix,
   compactConsecutiveQqMessages,
@@ -4837,6 +4842,7 @@ async function runQqColdGroupInterestCheck() {
         mode: topicStartJudge.value.mode
       }),
       replyContext: compactConsecutiveQqMessages(entries).slice(-10).map((entry) => ({
+        at: entry.at || null,
         sender: entry.isAssistant ? assistantName : entry.senderLabel || "群友",
         text: appendQqConsecutiveRepeatSuffix(entry.text || "（非文字消息）", entry),
         imageCount: Array.isArray(entry.images) ? entry.images.length : 0,
@@ -9145,14 +9151,19 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       priorDraft ? "第一轮草稿（内部标记已移除，仅供参考，可改写）：" : null,
       priorDraft || null,
       priorDraft ? "" : null,
-      event.proactiveDecision?.replyContext?.length ? "主动兴趣判定所依据的群聊上下文（正式回复必须结合这些消息理解语境，不能只回复当前一句）：" : null,
+      event.proactiveDecision?.replyContext?.length
+        ? event.qqColdProactive
+          ? "冷群兴趣判断参考过的旧聊天线索（只用于了解人群和主题，不是刚发生的消息；禁止按即时对话直接接最后一句）："
+          : "主动兴趣判定所依据的群聊上下文（正式回复必须结合这些消息理解语境，不能只回复当前一句）："
+        : null,
       ...(event.proactiveDecision?.replyContext || []).map((item) => {
         const contextText = item.text || "（纯图片消息）";
         const imageNote = item.imageCount ? `（附图 ${item.imageCount} 张）` : "";
         const mentionNote = Array.isArray(item.mentions) && item.mentions.length > 0
           ? `（@ ${item.mentions.join("、")}）`
           : "";
-        return `- ${item.sender}: ${contextText}${mentionNote}${imageNote}${item.replyToBot ? "（回复 bot）" : ""}`;
+        const contextTime = item.at ? `${formatMemoryTime(item.at)} ` : "";
+        return `- ${contextTime}${item.sender}: ${contextText}${mentionNote}${imageNote}${item.replyToBot ? "（回复 bot）" : ""}`;
       }),
       event.proactiveDecision?.replyContext?.length ? "" : null,
       event.pendingImageRequestText ? `触发原因：${ownerLabel}刚刚说“${event.pendingImageRequestText}”，随后这张 QQ 图片到达。请直接看这张图并回应。` : null,
@@ -9179,10 +9190,10 @@ async function buildModelReply(event, { replyScope = null } = {}) {
         ? "当前没有新消息；执行上面的已批准模式。"
         : event.qqPrivateProactive
         ? "当前没有新消息；执行上面的已批准私聊联系任务。"
-        : currentMessageText || "对方只 @ 了你，没有附加具体内容。",
+        : formatQqCurrentMessagePrompt(event, currentMessageText),
       "",
       event.qqColdProactive
-        ? "现在完成任务；只有安全边界或关键事实无法可靠确认时才把 status 设为 silent。"
+        ? formatQqColdProactiveCompletionInstruction()
         : event.qqPrivateProactive
         ? "现在只输出一句要发给对方的自然消息；只有安全边界或关键事实无法可靠确认时才把 status 设为 silent。"
         : isQqPrivateEvent(event)
@@ -11254,14 +11265,6 @@ function extractPossibleTargetNames(text) {
     .map((name) => name.replace(/^@+/, "").trim())
     .filter((name) => name.length >= 2 && !/^(xxx|这个|那个|他|她|它|他们|她们|大家|群里|这群|这帮|刚刚|刚才|两个群友|群友)$/.test(name))
     .slice(0, 4);
-}
-
-function formatMemoryTime(value) {
-  try {
-    return new Date(value).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-  } catch {
-    return "";
-  }
 }
 
 function compactMemoryText(text) {

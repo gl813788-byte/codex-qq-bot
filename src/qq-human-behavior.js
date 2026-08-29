@@ -157,6 +157,14 @@ export function buildQqHumanBehaviorPlan(event = {}, intent = {}, style = {}, { 
     maxSentences = 3;
     compact = false;
     openEnded = true;
+  } else if (intent.replyOnly) {
+    mode = "quoted_continuation";
+    goal = intent.isQuestion
+      ? "直接回答被引用消息里的问题，不退回无内容的在线确认或让对方重说"
+      : "把被引用消息当作当前话头自然接住，不退回无内容的在线确认或索取重复说明";
+    maxChars = Math.min(Number(style.answerMax || (privateChat ? 96 : 60)), privateChat ? 110 : 72);
+    maxSentences = 2;
+    compact = true;
   } else if (barePing) {
     mode = "ping";
     goal = "短促回应自己在场，必要时只问一句怎么了";
@@ -339,7 +347,7 @@ function getMultiBubbleChance(mode, privateChat, style) {
   const socialBase = Number.isFinite(learned) && learned > 0
     ? clamp(learned + 0.08, privateChat ? 0.28 : 0.36, privateChat ? 0.48 : 0.58)
     : (privateChat ? 0.34 : 0.44);
-  if (["casual", "social_emotion", "social_request", "opinion", "shared_content", "casual_answer"].includes(mode)) return socialBase;
+  if (["casual", "social_emotion", "social_request", "opinion", "shared_content", "casual_answer", "quoted_continuation"].includes(mode)) return socialBase;
   if (["answer", "context_answer", "task", "multi_turn"].includes(mode)) return socialBase * 0.68;
   if (mode === "visual_reaction") return socialBase * 0.5;
   return 0;
