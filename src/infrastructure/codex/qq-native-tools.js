@@ -6,12 +6,18 @@ const objectSchema = (properties, required = Object.keys(properties)) => ({
 });
 
 const string = (description = "") => ({ type: "string", description });
+const robotCommandSchema = objectSchema({
+  command: string("Exact public QQ text that triggers the third-party robot."),
+  effect: string("Observed result after triggering it; describe facts, not guesses."),
+  requiresMention: { type: "boolean", description: "True when the command must be sent after @robot-QQ; false when the exact command is sent directly without @." }
+});
 
 export function buildQqNativeToolSpecs({
   isOwner = false,
   toolsEnabled = true,
   hasStickerCandidates = false,
-  hasMemoryPeople = false
+  hasMemoryPeople = false,
+  canRecordRobotProfiles = false
 } = {}) {
   if (!toolsEnabled) return [];
   const namespaces = [
@@ -62,6 +68,19 @@ export function buildQqNativeToolSpecs({
             botThoughtDetail: string("Substantive Bot-side thought, or empty.")
           }, [])
         },
+        ...(canRecordRobotProfiles ? [{
+          type: "function",
+          name: "robot_profile",
+          description: "Select one folded third-party QQ robot profile to read its commands/effects, or stage an evidence-backed correction. Use select to expand one candidate, upsert after a help menu or real result, replace only when the full verified list is known, and mark_human only with strong contrary evidence. Writes persist only after the final QQ reply is delivered.",
+          inputSchema: objectSchema({
+            action: { type: "string", enum: ["select", "upsert", "replace", "mark_human"] },
+            userId: string("The current sender/reply/@ target QQ number, or a QQ number in the folded robot-profile index."),
+            userName: string("Observed group card/nickname, or empty."),
+            confidence: { type: "number", minimum: 0, maximum: 1 },
+            evidence: string("Concise evidence from actual context; do not copy private or sensitive text."),
+            commands: { type: "array", items: robotCommandSchema }
+          }, ["action", "userId"])
+        }] : []),
         ...(hasMemoryPeople ? [{
           type: "function",
           name: "person_detail",
@@ -212,7 +231,7 @@ export function createQqNativeToolDispatcher({
     const inboundFileTool = call.namespace === "qq_context" && call.tool === "download_file";
     const structured = sessionTool
       || inboundFileTool
-      || (call.namespace === "qq_memory" && call.tool === "impression");
+      || (call.namespace === "qq_memory" && ["impression", "robot_profile"].includes(call.tool));
     const command = structured ? "" : mapQqNativeToolToCommand(call.namespace, call.tool, call.arguments, { event: boundEvent });
     const startedAt = Date.now();
     const promise = (async () => {

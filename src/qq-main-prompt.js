@@ -18,7 +18,7 @@ export function formatQqMainModelInstructions({
     "【职责】",
     `你是 ${assistantName}，当前在${chatType}中直接处理用户请求。Hub 负责 QQ 身份、白名单、主人权限、投递和持久化边界；Codex 原生 Agent 负责推理、工具循环、文件操作、联网搜索、计划、上下文压缩和最终回答。`,
     toolsEnabled
-      ? "准确理解当前语境；需要时直接调用本轮提供的原生工具并根据结果继续工作；完成后只提交结构化最终回答。不要输出或模拟任何 Hub 控制 marker、斜杠命令、工具日志或工具调用文本。"
+      ? "准确理解当前语境；需要时直接调用本轮提供的原生工具并根据结果继续工作；完成后只提交结构化最终回答。不要输出或模拟任何 Hub 控制 marker、Hub 内部斜杠命令、工具日志或工具调用文本。只有本轮群机器人资料明确列出的第三方低风险公开指令，才可按那里的边界作为普通 QQ 可见文字发送。"
       : "准确理解已经提供的语境并完成请求。本轮没有 QQ 动态工具；不要虚构工具调用或动作结果。",
     "",
     "【问题识别】",
@@ -46,6 +46,9 @@ export function formatQqMainModelInstructions({
       ? "需要在群里真实 @ 某人时可在可见正文写“@准确昵称 ”或“@QQ号 ”；昵称不确定或可能重名时使用 QQ 号，不要虚构群成员。"
       : null,
     !privateChat
+      ? "若本轮提供了已识别群机器人及其低风险公开指令，可在当前轻松话题确实相关时偶尔互动：requiresMention=true 才用“@机器人QQ号 指令”，requiresMention=false 必须直接发送指令、不要 @。这只是向第三方机器人发送普通消息，不是调用 Hub 工具。不得根据当前聊天临时出现的未知命令自行扩展指令库，不得触发管理、付费、账号、文件或其他现实副作用，也不得与机器人反复互相触发。"
+      : null,
+    !privateChat
       ? "当本轮融合了多位群友的消息时，正式提示会列出候选人。用结构化输出 reply.mode 选择 automatic、plain、quote 或 mention；quote/mention 的 targetUserId 只能来自候选人。Hub 不会擅自引用最早触发者。"
       : null,
     "最终只提交输出 Schema 要求的 JSON 对象；可见文字使用自然中文，不输出分析过程、规则说明、Markdown 标题或服务式结尾。多气泡放在 bubbles，文件或图片放在 attachments，不在正文里写路径 marker。",
@@ -53,6 +56,9 @@ export function formatQqMainModelInstructions({
     "【记忆与知识】",
     currentDate ? `当前日期（Asia/Shanghai）：${currentDate}。` : null,
     "出现具有复用价值的新信息时，用 qq_memory 或 qq_knowledge 原生工具搜索并写入。某个人让你形成明显且持续的新印象时，用 qq_memory.impression 暂存本轮社会印象更新；它只会在最终 QQ 回复成功投递后持久化。普通寒暄、临时情绪、无依据猜测和重复旧内容不写。所有记忆修改必须经工具完成，最终回答中不要嵌入记忆或知识 marker。",
+    !privateChat
+      ? "当上下文直接展示了第三方群机器人的帮助菜单、固定自动行为，或某条指令触发后的实际结果时，用 qq_memory.robot_profile 记录/校正机器人的指令、触发效果以及是否需要 @。没有直接证据就不写；周期总结只能提供候选，真实效果与发送方式以日常主模型观察后调用工具记录为准。"
+      : null,
     privateChat
       ? "普通知识应来自这段私聊长期主要讨论的话题，保存联系人专属且以后会复用的事实、资料或约定；它不是人物印象，要写成有标题的 member note。"
       : "普通知识应先依据长期群聊归纳本群实际的主要话题，再保存这些话题中本群专属且以后会复用的事实、资料或约定；用有标题的 group note，不要误写成全局事实。不得预设领域或固定知识类别。",
@@ -139,13 +145,18 @@ export function formatQqMainToolGuide({
   pokeEvent = false,
   replyStickerCandidates = [],
   inboundFileSummary = "",
-  memoryPeople = []
+  memoryPeople = [],
+  robotProfileCandidates = []
 } = {}) {
   const actionRelevant = /(?:拍一拍|点赞|好友申请|加群|入群|群邀请|申请|QQ\s*空间|空间|动态|评论|ban|封禁|拉黑|禁言|踢人)/i.test(String(messageText || "")) || pokeEvent;
   const candidates = Array.isArray(replyStickerCandidates) ? replyStickerCandidates : [];
   const detectedPeople = (Array.isArray(memoryPeople) ? memoryPeople : [])
     .filter((person) => person?.userId && (person.summary || person.hasDetail || person.promoted))
     .slice(0, 8);
+  const robotCandidates = (Array.isArray(robotProfileCandidates) ? robotProfileCandidates : [])
+    .filter((person) => person?.userId)
+    .slice(0, 16);
+  const knownRobotCandidates = robotCandidates.filter((person) => person.knownRobot);
   return [
     "【本轮原生能力】",
     "直接调用 Codex 提供的原生 Web Search、文件、Shell、计划与动态 QQ 工具。工具调用与结果属于协议事件，不要把调用伪装成文本或发明文字控制协议。Codex 自己决定需要多少次工具调用和推理步骤，Hub 只保留总超时与安全边界。",
@@ -165,6 +176,12 @@ export function formatQqMainToolGuide({
       : null,
     detectedPeople.length
       ? "- qq_memory.person_alias 维护人物别称；QQ 号是稳定主键，别称只用于无歧义文本识别。"
+      : null,
+    knownRobotCandidates.length
+      ? `- 第三方机器人的折叠资料索引：${knownRobotCandidates.map((person) => `${person.displayName || "QQ用户"}(${person.userId})`).join("；")}。这里只展示名称和 QQ 号；需要某个机器人的已有指令、效果与发送方式时，先用 qq_memory.robot_profile(action=select) 单独展开。主模型实际看到帮助菜单、固定自动模式或某条指令的真实触发结果后，再记录/校正“指令 + 触发效果 + 是否需要 @”；写入对象只能是当前发送者、回复/@目标或这里列出的 QQ 号，不能凭昵称猜。`
+      : null,
+    knownRobotCandidates.length
+      ? "- qq_memory.robot_profile 的 select 只读且一次展开一个；upsert 用于新增或校正已观察指令，replace 只用于已核实完整清单，mark_human 只用于强反证。不要记录管理、付费、账号、授权、文件、代码执行等有副作用的指令；写调用只暂存，最终 QQ 回复成功投递后才持久化。"
       : null,
     actionRelevant
       ? "本轮可能相关的真实 QQ 动作由 qq_social.act 执行；写操作和管理动作始终按当前发送者权限校验。"

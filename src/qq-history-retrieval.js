@@ -1,3 +1,5 @@
+import { normalizeQqOfficialRobotMarker } from "./qq-robot-profile.js";
+
 export async function fetchQqHistoryForSummary({
   event,
   callAction,
@@ -107,6 +109,12 @@ export function normalizeOneBotHistoryMessage(raw, event = {}) {
     .filter((segment) => segment?.type === "at")
     .map((segment) => normalizeId(segment?.data?.qq))
     .filter(Boolean);
+  const officialRobotMarker = normalizeQqOfficialRobotMarker(
+    raw.sender?.is_robot,
+    raw.sender?.isRobot,
+    raw.is_robot,
+    raw.isRobot
+  );
   return {
     at: normalizeMessageTime(raw.time || raw.timestamp),
     messageId: raw.message_id == null ? (raw.id == null ? undefined : String(raw.id)) : String(raw.message_id),
@@ -114,6 +122,7 @@ export function normalizeOneBotHistoryMessage(raw, event = {}) {
     senderId,
     senderLabel: compactText(raw.sender?.card || raw.sender?.nickname || raw.sender?.name || senderId || "群友", 80),
     senderName: compactText(raw.sender?.nickname || raw.sender?.card || "", 80),
+    ...(officialRobotMarker === undefined ? {} : { officialRobotMarker }),
     selfId,
     isAssistant: Boolean(senderId && selfId && senderId === selfId),
     text: text || "（图片消息）",

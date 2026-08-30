@@ -85,14 +85,18 @@ import {
   applyQqConversationSummaryMemory,
   createEmptyQqConversationMemory,
   extractQqConversationMemoryMarkers,
+  formatQqRobotProfilesContext,
+  getQqConversationRobotProfile,
   listQqConversationMemoryProfiles,
   normalizeQqConversationMemory,
   qqConversationMemoryVersion,
   stripQqConversationMemoryMarkers,
   summarizeQqConversationMemory,
   updateQqConversationMemoryFromEvent,
-  updateQqConversationMemoryFromExchange
+  updateQqConversationMemoryFromExchange,
+  updateQqConversationRobotProfile
 } from "./qq-conversation-memory.js";
+import { normalizeQqOfficialRobotMarker, normalizeQqRobotCommands } from "./qq-robot-profile.js";
 import {
   archiveQqShortTermEntry,
   normalizeQqShortTermNoteScopes,
@@ -2473,7 +2477,12 @@ async function runQqSelfPersonaScopeSummary(scope, {
     memberLanguagePatternCount: Number(storedLanguageStyle.memberPatterns?.length || 0),
     atmosphereCount: Number(storedSocialMemory.atmosphere?.length || 0),
     interactionHabitCount: Number(storedSocialMemory.interactionHabits?.length || 0),
-    notablePersonCount: Number(storedSocialMemory.notablePeople?.length || 0)
+    notablePersonCount: Number(storedSocialMemory.notablePeople?.length || 0),
+    robotProfileCount: Number(storedSocialMemory.robotProfiles?.filter((item) => item?.isRobot).length || 0),
+    robotCommandCount: Number(storedSocialMemory.robotProfiles?.reduce(
+      (sum, item) => sum + (Array.isArray(item?.commands) ? item.commands.length : 0),
+      0
+    ) || 0)
   };
   logger.info("QQ self persona scope summarized", {
     operation: "memory.scope_summary",
@@ -6627,6 +6636,53 @@ function formatQqAllowedGroups() {
   return `当前 QQ 群白名单：\n${groups}`;
 }
 
+function collectQqRobotProfileCandidates(event) {
+  const candidates = new Map();
+  const selfId = String(event?.selfId || "");
+  let order = 0;
+  const add = (userId, displayName, priority, knownRobot = false) => {
+    const id = String(userId || "").trim();
+    if (!/^\d{4,20}$/.test(id) || id === selfId) return;
+    const name = String(displayName || "").replace(/[\u0000-\u001f\u007f]/g, " ")
+      .replace(/\s+/g, " ").trim().slice(0, 48);
+    const previous = candidates.get(id);
+    const next = {
+      userId: id,
+      displayName: name || previous?.displayName || `QQ ${id}`,
+      knownRobot: Boolean(knownRobot || previous?.knownRobot),
+      priority: Math.max(Number(priority) || 0, previous?.priority || 0),
+      order: previous?.order ?? order++
+    };
+    candidates.set(id, next);
+  };
+
+  add(event?.senderId, event?.senderName || event?.senderLabel, 100);
+  if (event?.replyContext?.senderId && !event.replyContext.isSelf) {
+    add(event.replyContext.senderId, event.replyContext.senderName || event.replyContext.senderLabel, 95);
+  }
+  for (const mention of getQqMentionIdentities(event, { excludeSelf: true })) {
+    add(mention.userId, mention.name, 90);
+  }
+
+  if (event?.groupId) {
+    const group = state.qq.conversationMemory?.groups?.[String(event.groupId)];
+    for (const userId of Object.keys(group?.people || {})) {
+      const profile = getQqConversationRobotProfile(state.qq.conversationMemory, event, userId);
+      if (profile) add(userId, profile.displayName, 80, true);
+    }
+  } else if (event?.senderId) {
+    const profile = getQqConversationRobotProfile(state.qq.conversationMemory, event, event.senderId);
+    if (profile) add(profile.userId, profile.displayName, 110, true);
+  }
+
+  return [...candidates.values()]
+    .sort((left, right) => right.priority - left.priority
+      || Number(right.knownRobot) - Number(left.knownRobot)
+      || left.order - right.order)
+    .slice(0, 16)
+    .map(({ priority, order: candidateOrder, ...candidate }) => candidate);
+}
+
 function formatQqBotInternalToolContext(event) {
   const scopeId = getQqMemoryScopeId(event);
   const scopeLabel = getQqMemoryScopeLabel(event);
@@ -6654,7 +6710,8 @@ function formatQqBotInternalToolContext(event) {
     pokeEvent: isQqPokeEvent(event),
     replyStickerCandidates,
     inboundFileSummary: formatQqInboundFileCandidates(inboundFiles, { maxBytes: qqFileMaxBytes }),
-    memoryPeople: event.qqMemoryPeople || []
+    memoryPeople: event.qqMemoryPeople || [],
+    robotProfileCandidates: event.qqRobotProfileCandidates || []
   });
 }
 
@@ -6664,6 +6721,9 @@ async function executeQqStructuredNativeTool(call, event, context = {}) {
   }
   if (call?.namespace === "qq_session" && call?.tool === "manage") {
     return executeQqCrossSessionNativeTool(call, event, context);
+  }
+  if (call?.namespace === "qq_memory" && call?.tool === "robot_profile") {
+    return executeQqRobotProfileNativeTool(call, event, context);
   }
   if (call?.namespace !== "qq_memory" || call?.tool !== "impression") {
     return { ok: false, error: "Unsupported structured QQ tool." };
@@ -6699,6 +6759,84 @@ async function executeQqStructuredNativeTool(call, event, context = {}) {
   return {
     ok: true,
     reply: `${event.qqCrossSessionScopeId ? `会话 ${event.qqCrossSessionScopeId} 的` : ""}社会印象更新已暂存；只有本轮最终 QQ 回复成功投递后才会持久化。`
+  };
+}
+
+function executeQqRobotProfileNativeTool(call, event, { rootEvent = event } = {}) {
+  const source = call?.arguments && typeof call.arguments === "object" && !Array.isArray(call.arguments)
+    ? call.arguments
+    : {};
+  const action = String(source.action || "").trim();
+  const userId = String(source.userId || "").trim();
+  const candidates = Array.isArray(event.qqRobotProfileCandidates) && event.qqRobotProfileCandidates.length
+    ? event.qqRobotProfileCandidates
+    : collectQqRobotProfileCandidates(event);
+  const candidate = candidates.find((item) => String(item?.userId || "") === userId);
+  if (!candidate) {
+    return { ok: false, error: "机器人 QQ 号不属于本轮折叠资料索引；不能凭昵称或未列出的 QQ 号操作。" };
+  }
+
+  if (action === "select") {
+    const selected = getQqConversationRobotProfile(state.qq.conversationMemory, event, userId);
+    if (!selected) return { ok: false, error: `${candidate.displayName || `QQ ${userId}`} 尚无已确认的机器人资料。` };
+    const profile = selected.robotProfile;
+    const sourceLabel = profile.source === "official"
+      ? "QQ/OneBot 官方标记"
+      : `上下文判断 ${Math.round(profile.confidence * 100)}%`;
+    const commands = profile.commands.length
+      ? profile.commands.map((item) => `- ${item.requiresMention ? `@${userId} ${item.command}` : item.command}（${item.requiresMention ? "需要 @ 该机器人" : "无需 @，直接发送"}）→ ${item.effect || "效果尚未可靠记录"}`)
+      : ["- 尚未记录可靠的低风险公开指令"];
+    return {
+      ok: true,
+      reply: [
+        `${selected.displayName}(${userId}) 的机器人资料：`,
+        `识别来源：${sourceLabel}`,
+        profile.evidence ? `依据：${profile.evidence}` : null,
+        "已记录的指令与触发效果：",
+        ...commands,
+        "这些只是第三方机器人的低风险公开用法；不要触发管理、付费、账号、文件、代码执行等动作，也不要形成机器人循环。"
+      ].filter(Boolean).join("\n")
+    };
+  }
+
+  if (!["upsert", "replace", "mark_human"].includes(action)) {
+    return { ok: false, error: "未知机器人资料动作；只能 select、upsert、replace 或 mark_human。" };
+  }
+  const currentProfile = getQqConversationRobotProfile(state.qq.conversationMemory, event, userId);
+  if (action === "mark_human" && currentProfile?.robotProfile?.officialMarker === true) {
+    return { ok: false, error: "QQ/OneBot 官方正向机器人标记不能被上下文判断改写为真人。" };
+  }
+  const confidence = Number(source.confidence);
+  const evidence = String(source.evidence || "").replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ").trim().slice(0, 240);
+  if (!Number.isFinite(confidence) || confidence < 0.72 || confidence > 1 || evidence.length < 4) {
+    return { ok: false, error: "写入机器人资料需要 confidence ≥ 0.72 且提供至少 4 个字的直接证据。" };
+  }
+  const rawCommands = Array.isArray(source.commands) ? source.commands : [];
+  const commands = normalizeQqRobotCommands(rawCommands);
+  if (["upsert", "replace"].includes(action)
+    && ((rawCommands.length > 0 && commands.length === 0) || commands.some((item) => !item.effect))) {
+    return { ok: false, error: "指令被安全策略拒绝，或缺少准确的已观察触发效果；仅识别机器人但尚无指令时可传空 commands。" };
+  }
+  const patch = {
+    action,
+    userId,
+    userName: String(source.userName || candidate.displayName || "").trim().slice(0, 48),
+    confidence,
+    evidence,
+    commands
+  };
+  if (rootEvent && rootEvent !== event) {
+    rootEvent.qqCrossSessionRobotProfilePatches = [
+      ...(rootEvent.qqCrossSessionRobotProfilePatches || []),
+      { event, patch }
+    ].slice(-8);
+  } else {
+    event.qqRobotProfilePatches = [...(event.qqRobotProfilePatches || []), patch].slice(-8);
+  }
+  return {
+    ok: true,
+    reply: `${candidate.displayName || `QQ ${userId}`}(${userId}) 的机器人资料更新已暂存；只有本轮最终 QQ 回复成功投递后才会持久化。`
   };
 }
 
@@ -8970,7 +9108,9 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   event.qqKnowledgeMatches = knowledgeMatches;
   const selfPersonaContext = formatQqSelfPersonaContext(state.qq.selfPersona);
   const scopeTopicContext = formatQqSelfPersonaScopeTopicContext(state.qq.selfPersona, scopeId);
+  const robotProfilesContext = formatQqRobotProfilesContext(state.qq.conversationMemory, event);
   event.qqMemoryPeople = resolveQqMemoryPeople(state.qq.conversationMemory, event);
+  event.qqRobotProfileCandidates = collectQqRobotProfileCandidates(event);
   event.qqSemanticPersonIds = event.qqMemoryPeople.map((person) => person.userId);
   const semanticRecall = await recallQqChatSemantics(event, {
     includeImpressions: true,
@@ -9004,7 +9144,8 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     isOwner: hasQqPrivilegedAccess(event),
     toolsEnabled: !event.qqPrivateProactive,
     hasStickerCandidates: replyStickerCandidates.length > 0 || stickerCatalog.length > 0,
-    hasMemoryPeople: event.qqMemoryPeople.length > 0
+    hasMemoryPeople: event.qqMemoryPeople.length > 0,
+    canRecordRobotProfiles: event.qqRobotProfileCandidates.length > 0
   });
   const dispatchNativeTool = createQqNativeToolDispatcher({
     executeCommand: async (command, toolEvent) => {
@@ -9131,6 +9272,8 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       !persistentResume && selfPersonaContext ? "" : null,
       !persistentResume ? scopeTopicContext : null,
       !persistentResume && scopeTopicContext ? "" : null,
+      robotProfilesContext || null,
+      robotProfilesContext ? "" : null,
       !persistentResume ? publicMemoryContext : null,
       !persistentResume && publicMemoryContext ? "" : null,
       includeSemanticMemory ? semanticMemoryContext : null,
@@ -10705,6 +10848,9 @@ async function rememberQqGroupMessage(event) {
     senderId: event.senderId,
     senderLabel: event.senderLabel || event.senderName || "群友",
     senderName: event.senderName || "",
+    ...(typeof event.officialRobotMarker === "boolean"
+      ? { officialRobotMarker: event.officialRobotMarker }
+      : {}),
     selfId: event.selfId,
     isOwner: Boolean(event.isOwner),
     isBotAdmin: Boolean(event.isBotAdmin),
@@ -11010,7 +11156,33 @@ async function processQqReplyEvent(event, options = {}) {
               [crossSessionPatch.patch]
             );
           }
+          const robotProfileUpdates = [];
+          for (const patch of event.qqRobotProfilePatches || []) {
+            const result = updateQqConversationRobotProfile(state.qq.conversationMemory, event, patch);
+            state.qq.conversationMemory = result.memory;
+            if (result.changed) robotProfileUpdates.push({ userId: patch.userId, action: patch.action });
+          }
+          for (const entry of event.qqCrossSessionRobotProfilePatches || []) {
+            if (!entry?.event || !entry?.patch) continue;
+            const result = updateQqConversationRobotProfile(
+              state.qq.conversationMemory,
+              entry.event,
+              entry.patch
+            );
+            state.qq.conversationMemory = result.memory;
+            if (result.changed) robotProfileUpdates.push({
+              userId: entry.patch.userId,
+              action: entry.patch.action,
+              scopeId: getQqMemoryScopeId(entry.event)
+            });
+          }
           await saveQqConversationMemory();
+          if (robotProfileUpdates.length) {
+            logger.info("QQ robot profiles persisted after reply delivery", {
+              scopeId: getQqMemoryScopeId(event),
+              updates: robotProfileUpdates
+            }, "memory", qqLogContext(event));
+          }
           const personMemoryChanged = (event.qqConversationMemoryPatches || []).some((patch) => (
             patch?.personImpressionSummary
             || patch?.personImpressionDetail
@@ -12284,6 +12456,35 @@ async function fetchOneBotGroupMemberIdentity(groupId, userId) {
   return result.ok && result.body?.data ? result.body.data : null;
 }
 
+async function attachQqRobotIdentity(event, { allowPayloadMarker = false } = {}) {
+  if (!event?.senderId) return event;
+  const directMarker = allowPayloadMarker
+    ? normalizeQqOfficialRobotMarker(
+      event.officialRobotMarker,
+      event.raw?.sender?.is_robot,
+      event.raw?.sender?.isRobot,
+      event.raw?.is_robot,
+      event.raw?.isRobot
+    )
+    : undefined;
+  if (directMarker !== undefined) return { ...event, officialRobotMarker: directMarker };
+
+  const knownProfile = state.qq.conversationMemory?.people?.[String(event.senderId)]?.robotProfile;
+  const knownMarker = normalizeQqOfficialRobotMarker(knownProfile?.officialMarker);
+  if (knownMarker !== undefined) return { ...event, officialRobotMarker: knownMarker };
+  if (!event.groupId) return event;
+
+  const member = await fetchOneBotGroupMemberIdentity(event.groupId, event.senderId).catch(() => null);
+  const fetchedMarker = normalizeQqOfficialRobotMarker(member?.is_robot, member?.isRobot);
+  if (fetchedMarker === undefined) return event;
+  logger.debug("QQ robot marker resolved", {
+    groupId: event.groupId,
+    senderId: event.senderId,
+    officialRobotMarker: fetchedMarker
+  }, "memory", qqLogContext(event));
+  return { ...event, officialRobotMarker: fetchedMarker };
+}
+
 async function fetchOneBotGroupIdentity(groupId) {
   const result = await callOneBotAction("get_group_info", {
     group_id: Number(groupId),
@@ -13533,10 +13734,10 @@ async function handleApi(req, res) {
     const normalizedEvent = await attachQqRichMessageContext(
       trustedOneBotRequest ? normalizedOneBotEvent : stripUntrustedQqLocalImagePaths(normalizedOneBotEvent)
     );
-    const event = enrichQqEvent(
+    const event = await attachQqRobotIdentity(enrichQqEvent(
       await attachQqMentionIdentities(await attachReplyContext(normalizedEvent)),
       { allowOwner: trustedOneBotRequest }
-    );
+    ), { allowPayloadMarker: trustedOneBotRequest });
     if (!event.senderId || (payload.message_type === "group" && !event.groupId)) {
       return sendJson(res, 400, { error: "Invalid OneBot QQ identifier" });
     }

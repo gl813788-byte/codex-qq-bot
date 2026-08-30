@@ -60,6 +60,7 @@
 | `src/dashboard-knowledge-base.js` | 网页知识管理领域边界 | 校验并精确增删改单个标题范围解释，处理并发冲突且保留频率证据 |
 | `src/qq-knowledge-review.js` | 知识复杂审核提示词边界 | 兴趣模型有界初筛、主模型完整证据终审与严格结果解析 |
 | `src/qq-history-retrieval.js` | QQ 复盘历史边界 | NapCat 分页、消息归一化、本地合并和去重 |
+| `src/qq-robot-profile.js` | QQ 机器人人物元数据策略 | 官方 `is_robot` 优先级、上下文判断归一化、低风险指令过滤和有界机器人画像状态 |
 | `src/qq-short-term-memory.js` | QQ 短期记忆领域 | 旧数据迁移、简述/详述、覆盖和过时生命周期 |
 | `src/qq-style-review.js` | 真人/Bot 风格复盘边界 | 灵活主模型提示、短语/句式用法总结、带置信度与边界的标点黑话引用、范围黑话补丁、结构解析和安全压缩 |
 | `src/qq-manual-ai-task.js` + `src/qq-menu.js` | 手动模型任务与 QQ 菜单的纯策略/呈现边界 | 修改任务别名、范围校验、强制模式说明或菜单视觉分区 |

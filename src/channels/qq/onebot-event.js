@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 import { extractQqRichMessageContent } from "../../qq-message-content.js";
 import { extractOneBotFileInputs, redactQqFileCqCodes } from "../../qq-inbound-files.js";
+import { normalizeQqOfficialRobotMarker } from "../../qq-robot-profile.js";
 import { normalizeMentionIdentity } from "./mention-identities.js";
 
 export function normalizeOneBotEvent(payload, { extractImageInputs = () => [] } = {}) {
@@ -38,6 +39,12 @@ export function normalizeOneBotEvent(payload, { extractImageInputs = () => [] } 
   for (const match of String(payload.raw_message || "").matchAll(/\[CQ:forward,[^\]]*\bid=([^,\]]+)/gi)) {
     if (match[1]) forwardIds.push(match[1]);
   }
+  const officialRobotMarker = normalizeQqOfficialRobotMarker(
+    payload.sender?.is_robot,
+    payload.sender?.isRobot,
+    payload.is_robot,
+    payload.isRobot
+  );
 
   return {
     type: payload.message_type === "group" && hasSelfAtSegment ? "group_at" : messageType,
@@ -46,6 +53,7 @@ export function normalizeOneBotEvent(payload, { extractImageInputs = () => [] } 
     groupName: compactGroupName(payload.group_name || payload.group?.name),
     senderId: normalizeQqIdentifier(payload.user_id),
     senderName: payload.sender?.card || payload.sender?.nickname || String(payload.user_id || "群友"),
+    ...(officialRobotMarker === undefined ? {} : { officialRobotMarker }),
     text: contentContext.displayText || safeFallbackText || textFromSegments,
     contentContext: {
       ...contentContext,
@@ -89,6 +97,12 @@ export function normalizeOneBotPokeEvent(payload) {
   const selfId = normalizeQqIdentifier(payload.self_id);
   const isGroup = payload.group_id != null;
   const senderName = payload.sender?.card || payload.sender?.nickname || `QQ ${senderId || "群友"}`;
+  const officialRobotMarker = normalizeQqOfficialRobotMarker(
+    payload.sender?.is_robot,
+    payload.sender?.isRobot,
+    payload.is_robot,
+    payload.isRobot
+  );
   const targetLabel = targetId && targetId === selfId ? "你" : targetId ? `QQ ${targetId}` : "某人";
   return {
     type: isGroup ? "group_poke" : "private_poke",
@@ -96,6 +110,7 @@ export function normalizeOneBotPokeEvent(payload) {
     groupId: isGroup ? normalizeQqIdentifier(payload.group_id) : undefined,
     senderId,
     senderName,
+    ...(officialRobotMarker === undefined ? {} : { officialRobotMarker }),
     text: `${senderName} 拍了拍${targetLabel}。`,
     images: [],
     files: [],

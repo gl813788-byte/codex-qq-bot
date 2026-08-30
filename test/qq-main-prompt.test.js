@@ -26,6 +26,11 @@ test("main prompt delegates agent control to Codex native capabilities", () => {
   assert.match(prompt, /不需要向 Hub 申请额外轮数/);
   assert.match(prompt, /结构化输出的 status 设为 silent/);
   assert.match(prompt, /reply\.mode.*automatic、plain、quote 或 mention/);
+  assert.match(prompt, /第三方低风险公开指令/);
+  assert.match(prompt, /@机器人QQ号 指令/);
+  assert.match(prompt, /requiresMention=false.*直接发送指令、不要 @/);
+  assert.match(prompt, /qq_memory\.robot_profile.*指令、触发效果以及是否需要 @/);
+  assert.match(prompt, /不得与机器人反复互相触发/);
   assert.match(prompt, /输出 Schema 要求的 JSON 对象/);
   assert.match(prompt, /原生 Web Search/);
   assert.match(prompt, /原生文件能力.*task output 工作区/);
@@ -102,6 +107,16 @@ test("tool guide describes native tools and server-bound permissions", () => {
   assert.match(withPerson, /小林\(20002\)【统一人物】/);
   assert.match(withPerson, /qq_memory\.person_detail/);
   assert.match(withPerson, /qq_memory\.person_alias/);
+
+  const withRobotIndex = formatQqMainToolGuide({
+    robotProfileCandidates: [
+      { userId: "30003", displayName: "骰子姬", knownRobot: true },
+      { userId: "20002", displayName: "普通群友", knownRobot: false }
+    ]
+  });
+  assert.match(withRobotIndex, /折叠资料索引：骰子姬\(30003\)/);
+  assert.match(withRobotIndex, /robot_profile\(action=select\)/);
+  assert.doesNotMatch(withRobotIndex, /普通群友/);
 
   const withFile = formatQqMainToolGuide({
     inboundFileSummary: "触发消息中检测到 1 个文件：file-1 · report.pdf"
