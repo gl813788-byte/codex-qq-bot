@@ -5,12 +5,15 @@ import {
   applyQqConversationSummaryMemory,
   extractQqConversationMemoryMarkers,
   formatQqConversationMemoryContext,
+  formatQqRobotProfilesContext,
+  getQqConversationRobotProfile,
   listQqConversationMemoryProfiles,
   normalizeQqConversationMemory,
   qqConversationMemoryVersion,
   updateQqConversationMemoryFromEvent,
   updateQqConversationMemoryFromExchange,
-  updateQqConversationPersonAlias
+  updateQqConversationPersonAlias,
+  updateQqConversationRobotProfile
 } from "../src/qq-conversation-memory.js";
 
 test("tracks group topics, people, links, impressions and bot thoughts", () => {
@@ -94,7 +97,7 @@ test("migrates legacy per-group people into the cross-group QQ identity layer", 
     }
   });
 
-  assert.equal(qqConversationMemoryVersion, 5);
+  assert.equal(qqConversationMemoryVersion, 6);
   assert.equal(memory.version, qqConversationMemoryVersion);
   assert.equal(memory.people["20002"].impression, "旧版已有的人物印象");
   assert.deepEqual(memory.people["20002"].groupAliases["10001"], ["旧群名片"]);
@@ -294,6 +297,137 @@ test("private scope summaries persist personality habits and punctuation knowled
   assert.deepEqual(result.promotedUserIds, ["30003"]);
   assert.match(result.memory.privateChats["30003"].impressionDetail, /标点用法引用：…… 的含义见黑话/);
   assert.match(result.memory.people["30003"].impressionSummary, /表达直接/);
+});
+
+test("registers a robot marker for every QQ person and trusts a positive official marker", () => {
+  const ordinary = updateQqConversationMemoryFromEvent(createEmptyQqConversationMemory(), {
+    groupId: "10001",
+    senderId: "20002",
+    senderName: "普通群友",
+    text: "晚上好"
+  });
+  assert.deepEqual(ordinary.people["20002"].robotProfile, {
+    isRobot: false,
+    source: "unknown",
+    confidence: 0,
+    evidence: "",
+    officialMarker: null,
+    officialMarkerUpdatedAt: null,
+    commands: [],
+    updatedAt: null
+  });
+
+  const official = updateQqConversationMemoryFromEvent(ordinary, {
+    groupId: "10001",
+    senderId: "30003",
+    senderName: "天气机器人",
+    officialRobotMarker: true,
+    text: "发送 /天气 城市 查询天气"
+  }, { now: () => new Date("2026-08-30T08:00:00.000Z") });
+  assert.equal(official.people["30003"].robotProfile.isRobot, true);
+  assert.equal(official.people["30003"].robotProfile.source, "official");
+  assert.equal(official.groups["10001"].people["30003"].robotProfile.confidence, 1);
+});
+
+test("scope summaries infer unofficial robots, retain safe commands and expose bounded play context", () => {
+  let memory = updateQqConversationMemoryFromEvent(createEmptyQqConversationMemory(), {
+    groupId: "10001",
+    senderId: "30003",
+    senderName: "骰子姬",
+    officialRobotMarker: false,
+    text: "帮助：/roll 1d100"
+  });
+  const result = applyQqConversationSummaryMemory(memory, "10001", {
+    socialMemory: {
+      robotProfiles: [{
+        userId: "30003",
+        userName: "骰子姬",
+        isRobot: true,
+        confidence: 0.94,
+        evidence: "长期按固定格式自动响应掷骰命令，并反复展示帮助菜单",
+        commands: [
+          { command: "/roll 1d100", effect: "掷一个百分骰", requiresMention: false },
+          { command: "/禁言 12345", effect: "管理群成员" }
+        ]
+      }]
+    }
+  }, { now: () => new Date("2026-08-30T09:00:00.000Z") });
+  memory = result.memory;
+
+  const profile = memory.people["30003"].robotProfile;
+  assert.equal(profile.isRobot, true);
+  assert.equal(profile.source, "context");
+  assert.deepEqual(profile.commands, [{ command: "/roll 1d100", effect: "掷一个百分骰", requiresMention: false }]);
+  const context = formatQqRobotProfilesContext(memory, {
+    groupId: "10001",
+    senderId: "20002",
+    selfId: "99999",
+    atTargets: ["30003"]
+  });
+  assert.match(context, /骰子姬\(30003\).*上下文判断 94%/);
+  assert.match(context, /严格按每条指令标注的发送方式/);
+  assert.match(context, /\/roll 1d100/);
+  assert.match(context, /无需 @，直接发送/);
+  assert.doesNotMatch(context, /禁言/);
+  assert.equal(formatQqRobotProfilesContext(memory, {
+    groupId: "10001",
+    senderId: "20002",
+    selfId: "99999"
+  }), "");
+});
+
+test("main-model robot profile updates merge corrected effects and support scoped selection", () => {
+  const event = { groupId: "10001", senderId: "20002", senderName: "群友" };
+  let result = updateQqConversationRobotProfile(createEmptyQqConversationMemory(), event, {
+    action: "upsert",
+    userId: "30003",
+    userName: "骰子姬",
+    confidence: 0.93,
+    evidence: "帮助菜单明确展示掷骰命令",
+    commands: [{ command: "/roll 1d6", effect: "返回一枚六面骰结果", requiresMention: true }]
+  }, { now: () => new Date("2026-08-30T10:00:00.000Z") });
+  assert.equal(result.changed, true);
+  result = updateQqConversationRobotProfile(result.memory, event, {
+    action: "upsert",
+    userId: "30003",
+    userName: "骰子姬",
+    confidence: 0.97,
+    evidence: "群里实际触发后返回了点数",
+    commands: [
+      { command: "/roll 1d6", effect: "随机返回 1 到 6 的点数", requiresMention: true },
+      { command: "/今日运势", effect: "返回当天的娱乐运势", requiresMention: false }
+    ]
+  }, { now: () => new Date("2026-08-30T10:05:00.000Z") });
+  const selected = getQqConversationRobotProfile(result.memory, event, "30003");
+  assert.equal(selected.displayName, "骰子姬");
+  assert.deepEqual(selected.robotProfile.commands, [
+    { command: "/roll 1d6", effect: "随机返回 1 到 6 的点数", requiresMention: true },
+    { command: "/今日运势", effect: "返回当天的娱乐运势", requiresMention: false }
+  ]);
+});
+
+test("an official robot identity cannot be downgraded by a model summary", () => {
+  let memory = updateQqConversationMemoryFromEvent(createEmptyQqConversationMemory(), {
+    groupId: "10001",
+    senderId: "30003",
+    senderName: "官方机器人",
+    officialRobotMarker: true,
+    text: "欢迎"
+  });
+  memory = applyQqConversationSummaryMemory(memory, "10001", {
+    socialMemory: {
+      robotProfiles: [{
+        userId: "30003",
+        userName: "官方机器人",
+        isRobot: false,
+        confidence: 0.99,
+        evidence: "本轮没有观察到自动响应",
+        commands: []
+      }]
+    }
+  }).memory;
+  assert.equal(memory.people["30003"].robotProfile.isRobot, true);
+  assert.equal(memory.people["30003"].robotProfile.source, "official");
 });
 
 test("never exposes malformed invisible memory metadata to QQ", () => {

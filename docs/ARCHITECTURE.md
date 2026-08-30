@@ -60,6 +60,7 @@ environment + runtime paths
 | `src/dashboard-knowledge-base.js` | Dashboard knowledge-management boundary | validating exact scoped upserts/deletes, stale conflicts, and frequency-evidence preservation |
 | `src/qq-knowledge-review.js` | Complex knowledge-review prompt boundary | bounded interest triage, full-evidence main review, and strict result parsing |
 | `src/qq-history-retrieval.js` | QQ review-history boundary | NapCat pagination, normalization, local merging and deduplication |
+| `src/qq-robot-profile.js` | QQ robot-person metadata policy | official `is_robot` precedence, context-assessment normalization, low-risk command filtering and bounded robot-profile state |
 | `src/qq-short-term-memory.js` | QQ short-term memory domain | legacy migration, brief/detail, overwrite and stale lifecycle |
 | `src/qq-style-review.js` | Human/Bot style-review boundary | flexible main-model prompt, phrase/sentence usage review, punctuation-to-slang references with confidence/boundaries, scoped slang patches, structured parsing and safe compaction |
 | `src/qq-manual-ai-task.js` + `src/qq-menu.js` | Pure manual-model-task and QQ-menu policy/presentation boundaries | changing task aliases, scope validation, force-mode guidance, or visual menu sections |

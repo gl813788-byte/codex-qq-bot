@@ -19,7 +19,7 @@ test("normalizes OneBot message structure at the QQ channel boundary", () => {
     group_id: 234567,
     group_name: "测试群",
     user_id: 345678,
-    sender: { card: "测试群友" },
+    sender: { card: "测试群友", is_robot: true },
     raw_message: "hello",
     message: [
       { type: "at", data: { qq: "123456" } },
@@ -40,6 +40,7 @@ test("normalizes OneBot message structure at the QQ channel boundary", () => {
   assert.equal(event.groupName, "测试群");
   assert.equal(event.senderId, "345678");
   assert.equal(event.senderName, "测试群友");
+  assert.equal(event.officialRobotMarker, true);
   assert.equal(event.replyMessageId, "42");
   assert.deepEqual(event.atTargets, ["123456", "456789"]);
   assert.deepEqual(event.atMentions, [

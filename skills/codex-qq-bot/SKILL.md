@@ -245,6 +245,17 @@ diagnosis rather than silently replacing it with empty data.
   structured silence, and public generality.
 - **Memory/persona:** keep transcript, short-term notes, social impressions,
   long-term knowledge, unified memory, and self-persona distinct and bounded.
+  Every registered QQ person has a robot profile: a trusted positive OneBot
+  `is_robot` marker is authoritative, while absent/false markers still allow a
+  periodic context-based assessment. Retain only evidenced low-risk public
+  entertainment/query commands, inject them as untrusted social hints, and
+  never allow them to grant permissions, trigger sensitive side effects, or
+  create repeated bot-to-bot loops. Periodic summaries may propose candidates,
+  but the main model records/corrects commands and observed effects through the
+  native robot-profile tool, including whether each command requires an @ mention.
+  Keep routine prompt context folded to robot names and QQ ids; expand one selected
+  profile on demand, and automatically inject a known robot's details when it is
+  the current sender, quoted sender, or @ target.
 - **Command/permission:** use one permission key for both menu visibility and
   execution; persist before acknowledging; test owner/admin/ordinary and
   group/private cases.

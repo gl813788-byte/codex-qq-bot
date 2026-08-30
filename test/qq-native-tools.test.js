@@ -12,6 +12,7 @@ test("native QQ tools expose owner runtime controls only to verified owners", ()
   assert.ok(ordinary.find((entry) => entry.name === "qq_context").tools.some((tool) => tool.name === "download_file"));
   assert.ok(ordinary.some((entry) => entry.name === "qq_search"));
   assert.ok(ordinary.find((entry) => entry.name === "qq_memory").tools.some((tool) => tool.name === "impression"));
+  assert.equal(ordinary.find((entry) => entry.name === "qq_memory").tools.some((tool) => tool.name === "robot_profile"), false);
   assert.equal(ordinary.some((entry) => entry.name === "qq_runtime"), false);
 
   const owner = buildQqNativeToolSpecs({ isOwner: true, hasMemoryPeople: true, hasStickerCandidates: true });
@@ -25,6 +26,13 @@ test("native QQ tools expose owner runtime controls only to verified owners", ()
   assert.deepEqual(socialSchema.required, ["action"]);
   assert.equal(socialSchema.properties.action.enum.includes("add_friend"), false);
   assert.equal(socialSchema.properties.action.enum.includes("join_group"), true);
+
+  const withRobots = buildQqNativeToolSpecs({ canRecordRobotProfiles: true });
+  const robotTool = withRobots.find((entry) => entry.name === "qq_memory").tools
+    .find((tool) => tool.name === "robot_profile");
+  assert.deepEqual(robotTool.inputSchema.required, ["action", "userId"]);
+  assert.deepEqual(robotTool.inputSchema.properties.action.enum, ["select", "upsert", "replace", "mark_human"]);
+  assert.deepEqual(robotTool.inputSchema.properties.commands.items.required, ["command", "effect", "requiresMention"]);
 });
 
 test("native file download remains structured and bound to the original trigger event", async () => {
@@ -111,6 +119,29 @@ test("structured impression updates stay bound to the turn event and are dedupli
     arguments: { personImpressionSummary: "喜欢研究 Agent 架构" }
   };
   assert.deepEqual(await dispatch(request), await dispatch(request));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].boundEvent, event);
+});
+
+test("structured robot profile calls stay native and bound to the turn event", async () => {
+  const event = { groupId: "10001", senderId: "20002" };
+  const calls = [];
+  const dispatch = createQqNativeToolDispatcher({
+    event,
+    executeCommand: async () => ({ ok: false }),
+    executeStructured: async (call, boundEvent) => {
+      calls.push({ call, boundEvent });
+      return { ok: true, reply: "已展开" };
+    }
+  });
+  const result = await dispatch({
+    callId: "robot-select-1",
+    namespace: "qq_memory",
+    tool: "robot_profile",
+    arguments: { action: "select", userId: "30003" }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.result, "已展开");
   assert.equal(calls.length, 1);
   assert.equal(calls[0].boundEvent, event);
 });

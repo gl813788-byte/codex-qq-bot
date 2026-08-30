@@ -11,6 +11,7 @@ import {
   getDueQqSelfPersonaScopes,
   matchQqSelfPersonaInterestKeywords,
   parseQqSelfPersonaJson,
+  qqSelfPersonaScopeOutputSchema,
   recordQqSelfPersonaActivity,
   shouldRegenerateQqSelfPersona,
   updateQqSelfPersonaAccount
@@ -44,6 +45,9 @@ test("scope summaries keep QQ identity only in long-term knowledge extraction", 
   assert.match(prompt, /语境含义统一使用现有黑话 knowledge/);
   assert.match(prompt, /通用解释、当前范围的具体含义和必要边界/);
   assert.match(prompt, /personMemorable/);
+  assert.match(prompt, /officialRobotMarker=true/);
+  assert.match(prompt, /个人 QQ 号运行的机器人/);
+  assert.match(prompt, /低风险公开娱乐\/查询指令/);
   assert.match(prompt, /独立且稳定的 Bot 角色/);
   assert.match(prompt, /不能把任何群友的口吻、标点、口癖或身份移植/);
   assert.match(prompt, /不要写固定句尾、emoji、括号动作/);
@@ -51,6 +55,13 @@ test("scope summaries keep QQ identity only in long-term knowledge extraction", 
   assert.equal(payload.previousScope.summary, "这个群长期讨论协作项目与发布安排。");
   assert.deepEqual(payload.previousScope.topics, ["协作项目", "发布安排"]);
   assert.equal(payload.statisticalLanguageProfile.sampleSize, 1);
+  assert.equal(payload.messages[0].officialRobotMarker, null);
+  assert.ok(qqSelfPersonaScopeOutputSchema.properties.socialMemory.required.includes("robotProfiles"));
+  assert.deepEqual(
+    qqSelfPersonaScopeOutputSchema.properties.socialMemory.properties.robotProfiles.items
+      .properties.commands.items.required,
+    ["command", "effect", "requiresMention"]
+  );
 
   const privatePrompt = buildQqSelfPersonaScopeSummaryPrompt("private:10001", [], {});
   assert.match(privatePrompt, /个人黑话用 member/);
@@ -155,6 +166,10 @@ test("scope summary person labels are restricted to QQ ids present in reviewed h
       notablePeople: [
         { userId: "10001", userName: "已见", summary: "有充分证据", detail: "有充分证据的详细印象" },
         { userId: "99999", userName: "未见", summary: "模型幻觉", detail: "不应进入记忆" }
+      ],
+      robotProfiles: [
+        { userId: "10001", userName: "已见Bot", isRobot: true, confidence: 0.9, evidence: "固定响应命令", commands: [] },
+        { userId: "99999", userName: "未见Bot", isRobot: true, confidence: 1, evidence: "模型幻觉", commands: [] }
       ]
     },
     languageStyle: {
@@ -166,6 +181,7 @@ test("scope summary person labels are restricted to QQ ids present in reviewed h
   }, { allowedUserIds: ["10001"] });
 
   assert.deepEqual(store.scopes["20001"].socialMemory.notablePeople.map((item) => item.userId), ["10001"]);
+  assert.deepEqual(store.scopes["20001"].socialMemory.robotProfiles.map((item) => item.userId), ["10001"]);
   assert.deepEqual(store.scopes["20001"].languageStyle.memberPatterns.map((item) => item.userId), ["10001"]);
 });
 

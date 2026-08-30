@@ -34,6 +34,7 @@ test("summary history paginates NapCat records and recognizes Bot messages", asy
   assert.equal(result.pages, 3);
   assert.deepEqual(result.messages.map((entry) => entry.messageId), ["9", "10", "11", "12"]);
   assert.equal(result.messages.find((entry) => entry.messageId === "11").isAssistant, true);
+  assert.equal(result.messages.find((entry) => entry.messageId === "12").officialRobotMarker, true);
 });
 
 test("remote and Hub-local history are merged by message id without duplicates", () => {
@@ -54,6 +55,6 @@ function historyMessage(messageId, time, userId, text) {
     time,
     user_id: userId,
     raw_message: text,
-    sender: { user_id: userId, nickname: `用户${userId}` }
+    sender: { user_id: userId, nickname: `用户${userId}`, ...(messageId === "12" ? { is_robot: true } : {}) }
   };
 }
