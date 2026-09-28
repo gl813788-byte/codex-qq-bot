@@ -2,7 +2,9 @@
 
 简体中文 | [English](FEATURES.md)
 
-Codex QQ Bot 是本地运行的消息中枢：OneBot 负责 QQ 协议，Hub 负责权限、上下文、工具、记忆与投递，Codex CLI 负责理解和执行任务。仓库不分发 QQ、NapCat 或 LLBot 二进制。
+Codex QQ Bot 是本地运行的消息中枢：OneBot 负责 QQ 协议，Hub 负责权限、上下文、工具、记忆与投递，Codex CLI 或 Claude Code 负责理解和执行任务（启动时二选一，见[运维文档](OPERATIONS_CN.md#切换-ai-引擎)）。仓库不分发 QQ、NapCat 或 LLBot 二进制。
+
+下文按 Codex 描述。换成 Claude Code 时，回复链、QQ 工具、融合追问、会话模式和记忆都一样，区别只有：不能生成图片；普通群友触发的任务没有 Shell；联网只有搜索没有网页抓取；额度信息不显示；每轮多出 `claude -p` 的冷启动时间。
 
 ## QQ 接入与触发
 

@@ -2,7 +2,7 @@
   "name": "codex-qq-bot",
   "version": "1.1.9",
   "private": false,
-  "description": "Codex QQ Bot 中文一键安装器",
+  "description": "把 QQ 接到本机 Codex 或 Claude Code 的机器人，附中文一键安装器",
   "type": "module",
   "bin": {
     "codex-qq-bot": "bin/codex-qq-bot.mjs"
@@ -25,6 +25,7 @@
   "homepage": "https://github.com/gl813788-byte/codex-qq-bot#readme",
   "keywords": [
     "codex",
+    "claude-code",
     "qq",
     "onebot",
     "napcat"

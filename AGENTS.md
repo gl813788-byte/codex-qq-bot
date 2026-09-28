@@ -1,8 +1,10 @@
-# Repository guidance for Codex
+# Repository guidance for coding agents
+
+Codex reads this file directly; Claude Code reads it through `CLAUDE.md`.
 
 ## Purpose
 
-This repository runs a local Hub between QQ/OneBot and Codex CLI. Treat it as a stateful local service: code can be replaced deliberately, but user configuration, runtime data, login state and secrets must be preserved.
+This repository runs a local Hub between QQ/OneBot and a local agent CLI (Codex by default, or Claude Code). Treat it as a stateful local service: code can be replaced deliberately, but user configuration, runtime data, login state and secrets must be preserved.
 
 ## Read before changing
 
@@ -19,6 +21,7 @@ This repository runs a local Hub between QQ/OneBot and Codex CLI. Treat it as a 
 - Put application state construction and startup composition in `src/app/`.
 - Normalize untrusted transport input in `src/channels/` before domain logic consumes it.
 - Keep domain behavior in focused existing modules such as `src/qq-enhancer/` and `src/unified-memory/`.
+- Keep engine-specific agent code in `src/infrastructure/codex/` or `src/infrastructure/claude/`; only the turn runner chooses between Codex and Claude Code.
 - Keep network, filesystem and child-process side effects behind small exported interfaces.
 - Prefer small behavior-preserving extractions with focused tests over broad file moves.
 
