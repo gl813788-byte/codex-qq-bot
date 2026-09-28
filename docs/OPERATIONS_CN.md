@@ -71,6 +71,20 @@ ncc connect
 
 本机控制器在启动前只读取一次 `/proc/meminfo` 的 `MemAvailable`，自动选择标准、均衡或低内存档；不会启动常驻内存检测。档位会同时限制 QQ 的 V8 堆/渲染进程和 Hub 的 Node 堆/Codex 并发与队列。`ncc resources` 可预览选择结果。`ncc all` 始终以“Hub 就绪后启动 QQ”的顺序启动两项；若 QQ 启动失败，会清理本次新启动的 Hub，避免只留下半套服务。QQ 和 Xvfb 由两个独立 `screen` 会话直接托管，不再使用会在 Termux/PRoot 中空转的后台 `wait` supervisor。
 
+### 切换 AI 引擎
+
+Bot 可以由 Codex 或 Claude Code 驱动。在终端里执行 `npm run ncc -- start` 时会先问这次用哪个，直接回车沿用上次的选择；非交互启动（launchd、脚本）不问，直接用 `config/local.env` 里保存的值。也可以单独切换：
+
+```bash
+npm run ncc -- engine            # 查看当前引擎
+npm run ncc -- engine claude     # 或 codex
+npm run ncc -- claude-login      # Claude Code 登录和鉴权测试
+```
+
+已经在跑的 Hub 要重启后才会换引擎。本机全局控制器提供对应的 `ncc engine [codex|claude]` 和 `ncc claude-status`，`ncc all` / `ncc hub` 在终端里同样会先问；如果发现正在运行的 Hub 用的是另一个引擎，会问是否重启。`/api/maintenance` 的 `agent.engine` 字段显示当前 Hub 实际用的引擎。
+
+Claude Code 默认使用本机 `claude` 的官方登录。要走中转服务，在 `~/.claude/ncc-profiles/active.env` 里写 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_AUTH_TOKEN`（或 `ANTHROPIC_API_KEY`），每轮都会重新读取，不用重启 Hub。
+
 会话模式可从 QQ 菜单或 `ncc` 调整：
 
 ```bash

@@ -288,6 +288,7 @@ import {
 } from "./infrastructure/codex/qq-native-tools.js";
 import { createQqNativeProgressReporter } from "./infrastructure/codex/qq-native-progress.js";
 import { createQqCodexTurnRunner } from "./infrastructure/codex/qq-turn-runner.js";
+import { isExecutableOnPath } from "./infrastructure/claude/claude-child-env.js";
 import {
   parseQqContextSummaryOutput,
   qqContextSummaryOutputSchema
@@ -423,6 +424,10 @@ const {
   oneBotHealthTtlMs,
   oneBotMaxConcurrency,
   oneBotMaxPending,
+  agentEngine,
+  claudeCliPath,
+  claudeModel,
+  claudeReasoningEffort,
   codexCliPath,
   codexModel,
   codexReasoningEffort,
@@ -3063,6 +3068,7 @@ function normalizeMemoryEntries(entries, limit) {
 
 async function buildMaintenanceStatus({ force = false } = {}) {
   const codexPathOk = await access(codexCliPath).then(() => true).catch(() => false);
+  const claudePathOk = agentEngine === "claude" ? await isExecutableOnPath(claudeCliPath) : null;
   const [quota] = await Promise.all([
     getCachedCodexQuotaSnapshot({ force }),
     checkOneBotHealth({ force })
@@ -3078,6 +3084,14 @@ async function buildMaintenanceStatus({ force = false } = {}) {
       providerPreset: qqWebSearchPreset,
       configuredProviders: webLookupProviderPlan,
       effectiveProvider: state.maintenance.webLookup.effectiveProvider || webLookupProviderPlan[0] || null
+    },
+    agent: {
+      engine: agentEngine,
+      ...(agentEngine === "claude" ? {
+        claudePathExists: claudePathOk,
+        claudeModel,
+        claudeReasoningEffort: claudeReasoningEffort || state.ai.reasoningEffort
+      } : {})
     },
     codex: {
       ...codexMaintenance,
@@ -9873,6 +9887,7 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
       sandbox: "workspace-write",
       sandboxPolicy: turn.sandboxPolicy,
       runtimeWorkspaceRoots: turn.runtimeWorkspaceRoots,
+      shellAccess: turn.shellAccess,
       onDynamicToolCall: dispatchNativeTool,
       onProgress: nativeProgress.observe
     });
@@ -12036,6 +12051,10 @@ const runSteerableQqCodexTurn = createQqCodexTurnRunner({
   limiter: codexRunLimiter,
   state,
   codexPath: codexCliPath,
+  engine: agentEngine,
+  claudePath: claudeCliPath,
+  claudeModel,
+  claudeReasoningEffort,
   activeChildren: activeCodexChildren,
   stoppedGenerationIds: stoppedQqGenerationIds,
   getReplyScope: getActiveQqReplyScopeForEvent,

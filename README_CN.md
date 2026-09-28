@@ -2,9 +2,7 @@
 
 # Codex QQ Bot
 
-### 让 Codex 把本机能力接入 QQ
-
-**QQ / OneBot + Codex CLI 的本地助手中枢**
+把 QQ 接到你电脑上的 Codex 或 Claude Code，做一个能聊天、也能干活的 QQ 机器人。
 
 简体中文 | [English](README.md)
 
@@ -12,15 +10,36 @@
 ![Linux](https://img.shields.io/badge/Linux-supported-blue)
 ![macOS](https://img.shields.io/badge/macOS-supported-blue)
 ![Windows / WSL](https://img.shields.io/badge/Windows-WSL%20recommended-blue)
-![Codex](https://img.shields.io/badge/deploy%20with-Codex-111111)
 
 </div>
 
 ---
 
-## 最简单安装：终端粘贴一行
+## 它是什么
 
-已安装 Node.js 时，直接运行下面任意一条；不需要打开 GitHub、手动下载或解压：
+QQ 这边通过 NapCat（或其他 OneBot 实现）收发消息，模型这边调用你本机已经登录好的 Codex CLI 或 Claude Code。中间是一个跑在本机的 Node.js 服务（下面叫 Hub），负责：
+
+- 决定哪些消息该回、回给谁；
+- 把聊天记录、记忆、群里的说话习惯整理好交给模型；
+- 给模型提供一组 QQ 工具（翻历史、查记忆、发文件、群管理等），并按发消息的人的权限执行；
+- 把模型的回复拆成气泡发回 QQ，并记下哪些真正发出去了。
+
+```text
+QQ / NapCat / OneBot
+        │
+        ▼
+   Hub（本机，:3789）──── 仪表盘
+        │
+        ├── Codex CLI  或  Claude Code
+        ├── 记忆、人设、群聊习惯
+        └── 联网搜索、日志、维护状态
+```
+
+它是跑在自己机器上的工具，不是托管服务。账号、聊天数据和密钥都留在本机。
+
+## 安装
+
+已经有 Node.js 的话，一行就够：
 
 ```bash
 npx -y "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"
@@ -28,125 +47,99 @@ npx -y "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"
 pnpm dlx "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"
 ```
 
-如果还没有 Node.js，可以使用轻量引导命令：
+没有 Node.js 就用引导脚本，它会自己补齐：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
-# 只有 wget 时也可以：
+# 只有 wget：
 wget -qO- https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
 ```
 
-npm/pnpm 入口是完整安装路径：下载或升级源码后，识别当前环境，补齐 Node.js 20+ 与官方 Codex CLI，安装项目依赖并运行 `npm run verify`。curl/wget 入口不要求预装 Node、Git 或 zsh，完成后提供可用的 `ncc`；如希望立刻把依赖也装完，可追加 `--prepare`。源码、PRoot、Node/Codex、npm 和验证阶段都有校验与续跑标记，重新运行同一个命令会从第一个未完成阶段继续。Git 工作区、本地修改、运行数据和其他同名全局 `ncc` 都会保留。
+安装器会下载或升级源码，装好 Node.js 20+ 和 Codex CLI，装依赖，然后跑一遍 `npm run verify`。中途断了就重新运行同一条命令，已经完成的步骤会跳过。已有的 Git 工作区、本地改动、`data/`、`config/local.env` 和机器上别的 `ncc` 都不会被覆盖。
 
-探测器覆盖 macOS、原生 Linux、WSL、容器、原生 Termux、已有 Termux PRoot、权限类型、架构和 libc。原生 Termux 的 Android 层只准备 `proot-distro`，Node、Codex、依赖、验证和日常 `ncc` 全部进入受管 Debian；已经位于 PRoot 时直接使用，不再嵌套。Termux/PRoot、WSL 和容器使用外部 OneBot，受支持的原生 apt-get/dnf glibc Linux 才会自动安装 NapCat。完整决策表、参数、缓存、root 规则和恢复方法见[一键安装与环境方案](docs/INSTALLATION_CN.md)。
+各平台的处理方式不一样：原生 Linux（apt-get / dnf，glibc）会自动装 NapCat；Termux、PRoot、WSL 和容器需要你自己准备 OneBot。细节见[安装说明](docs/INSTALLATION_CN.md)。
 
-## 也可以直接让 Codex 部署
+已经下载了源码的话，运行根目录的 `一键部署.command` 也可以（macOS 双击，Linux / WSL 在终端里 `./一键部署.command`）。
 
-如果你希望 Codex 同时负责启动 OneBot、扫码后的连接和最终验收，可以把下面的提示词直接交给它。Codex 会检查系统、保护已有配置、安装依赖、验证项目、启动 Hub，并把扫码登录或缺失凭据等必须由你完成的步骤单独指出。
+想让 AI 帮你装，可以把[部署指南](docs/DEPLOY_WITH_CODEX_CN.md)里的提示词整段交给 Codex 或 Claude Code，它会检查环境、安装、启动，并在需要扫码或填密钥时停下来问你。
 
-把整段复制到 Codex：
+## 选择 Codex 还是 Claude Code
 
-```text
-请帮我在当前机器部署 Codex QQ Bot：
-https://github.com/gl813788-byte/codex-qq-bot.git
+两个都能用，启动时选。
 
-目标：让 QQ / OneBot 接入当前 Codex CLI，并在本机启动可访问的 Hub 与仪表盘。
+| | Codex | Claude Code |
+| --- | --- | --- |
+| 安装 | 安装器自动装 | 自己装：`curl -fsSL https://claude.ai/install.sh \| bash` |
+| 登录 | `codex login` | `claude auth login`，或在 `~/.claude/ncc-profiles/active.env` 里配中转地址和 key |
+| 模型 | 仪表盘或 QQ 命令里切换 | `CODEX_REMOTE_CONTACT_CLAUDE_MODEL`，默认 `opus` |
+| 思考强度 | 仪表盘或 QQ 命令里切换 | 默认跟 Bot 的设置走，也可以用 `CODEX_REMOTE_CONTACT_CLAUDE_EFFORT` 单独指定 |
+| 生成图片 | 支持 | 不支持 |
+| 额度显示 | 仪表盘里能看到 | 不显示，用 `claude` 里的 `/usage` 查 |
 
-请直接执行部署，不要只给我命令清单。按以下要求持续推进到可验证的最终状态：
-1. 先检查操作系统、CPU 架构、Git、Node.js、npm、zsh、curl、Codex CLI、现有 OneBot/NapCat 和现有 ncc；Node.js 必须为 20 或更高。
-2. 如果项目不存在，克隆到稳定目录；Linux root 环境默认用 /root/Codex-QQ-Bot，其他环境选合适的用户目录。如果已存在旧版 /root/Codex-Remote-Contact，继续复用而不要强制迁移。先检查 Git remote、分支和工作区，绝不覆盖本地改动、配置、data 或 runtime。
-3. 阅读仓库 README_CN.md、docs/INSTALLATION_CN.md、docs/DEPLOY_WITH_CODEX_CN.md、docs/ARCHITECTURE_CN.md，以及 skills/codex-qq-bot/SKILL.md（如果适用于当前环境）。
-4. 安装依赖并运行 npm run verify；任何失败都要定位并修复，不能跳过验证。
-5. 如果 data/settings.json 不存在，从 config/settings.example.json 创建；已有文件只做必要的合并，不重置。需要主人 QQ 号、群白名单、OneBot 地址或密钥时再向我询问，并避免在输出中泄露密钥。
-6. 检查当前 ncc 到底是仓库自带快捷配置器还是独立 NapCat 控制器，先运行帮助再使用，不能覆盖一个正在使用的同名控制脚本。仓库自带入口始终可用 npm run ncc -- <command> 调用。
-7. 检查 OneBot。如果 NapCat/LLBot 已安装就复用；如果未安装，按当前平台选择受支持的 OneBot 实现并说明来源。涉及下载、系统安装或提权时先请求授权。
-8. 启动 Hub 和 OneBot。若 QQ 需要扫码，只在此时把二维码 URL、WebUI 地址和最短操作告诉我；我确认登录后，你继续完成连接与白名单配置。
-9. 最后实际验证：npm run verify、Hub /api/state、仪表盘首页、OneBot get_login_info、QQ 通道状态和最近错误日志。分别报告每一项成功或失败，不要在必需组件仍不可用时声称部署完成。
-10. 保持 Hub 默认仅监听回环地址；除非我明确要求局域网访问，否则不要开放远程监听。不要把 token 写进 Git 跟踪文件。
-```
-
-更完整的部署说明、升级提示词和验收表见 [Codex 部署指南](docs/DEPLOY_WITH_CODEX_CN.md)。
-
-## 已下载源码时的一键部署文件
-
-如果已下载并解压本项目，可以只运行根目录的 `一键部署.command`。macOS 可直接双击，Linux / WSL 可在终端执行：
+切换方法：
 
 ```bash
-chmod +x 一键部署.command
-./一键部署.command
+npm run ncc -- engine claude   # 或 codex
+npm run ncc -- start           # 在终端里启动时也会问一次，直接回车沿用上次的选择
 ```
 
-该入口会进入仓库版 `ncc`，显示环境决策，补齐缺失依赖，运行 `npm run verify`，再引导填写主人 QQ、群白名单、OneBot 地址、助手名称与联网配置。已有 `data/settings.json`、`config/local.env` 和其他同名全局 `ncc` 都会保留。仓库不重新分发 QQ/NapCat 二进制，首次 QQ 扫码仍需由你本人完成。
+用 Claude Code 时，每一轮回复都会单独起一个 `claude -p` 进程，因此比 Codex 多几秒启动时间，在性能较弱的 PRoot 环境里可能要十几秒。权限方面的处理是：
 
-## 你只需要准备什么
+- 所有轮次都用 `--restricted` 模式运行，读写文件只能在本轮的任务目录里；
+- 只有主人和 Bot 管理员的文件任务能用 Shell，普通群友触发的回复拿不到 Shell；
+- 不开放 WebFetch，免得模型去访问本机的 OneBot 和 Hub 接口；联网搜索只在开启联网时提供；
+- 不读取你个人的 Claude Code 设置、hooks 和 MCP 连接器，所以 Gmail、网盘这类连接器不会暴露给 QQ 用户。
 
-| 项目 | 用途 |
+## 需要准备什么
+
+| 东西 | 说明 |
 | --- | --- |
-| Codex | 负责部署、修改、排障和实际调用模型。可使用 Codex CLI、IDE 或桌面端打开项目。 |
-| Bash + 可用包管理器 | 启动自举；缺失系统包时使用真实 root、sudo/doas，原生 Termux 使用普通应用用户与 `pkg`。Windows 推荐使用 WSL。 |
-| Node.js 20+、zsh、Codex CLI | 一键部署会自动补齐，不需要预装。 |
-| QQ + OneBot 实现 | 受支持的原生 apt-get/dnf Linux 默认自动安装官方 NapCat/LinuxQQ；Termux/PRoot、WSL、容器等复用外部 OneBot。 |
-| 主人 QQ 号与群号 | 用于权限和群白名单；部署到相应步骤时再提供。 |
-| 约 3GB 可用内存 | 同时运行 QQ、OneBot、Hub 和 Codex 时建议保留。 |
+| Codex 或 Claude Code | 至少一个，并且已经登录。 |
+| QQ 小号和 OneBot | NapCat、LLBot 都可以。首次扫码登录要你自己来。 |
+| 主人 QQ 号、群号 | 用来设置权限和群白名单，安装到那一步再填。 |
+| 大约 3GB 空闲内存 | QQ、OneBot、Hub 和模型进程一起跑时比较稳。 |
+| Windows 用户 | 建议在 WSL 里装。 |
 
-Codex CLI 的官方登录方式是运行 `codex login` 完成浏览器登录；也支持 API key 登录。参考 [OpenAI Codex 身份验证文档](https://learn.chatgpt.com/docs/auth)。
+## 主要功能
 
-## 项目解决什么问题
+- **群聊和私聊**：群里默认要 @ 或回复才会说话；也能被兴趣模型判断为值得接话时主动开口。支持图片、文件、合并转发、卡片、拍一拍，回复里的 `@昵称` 会变成真的艾特。
+- **回复过程中的追问**：模型还在写的时候又有人问，会先等 5 秒看还有没有下文，然后把新消息塞进当前这一轮；塞不进去才中断重写，最后只发一份回复。
+- **会话模式**：每个群或私聊可以选临时对话、长期对话，或者自动判断。长期对话会续用同一个模型会话，只补发新消息。
+- **记忆**：分短期笔记、长期知识库、对群和对人的印象，以及跨群的统一记忆。人按 QQ 号识别，群名片改了也认得。检索用本地 SQLite 全文索引加一套简单的中文特征向量（不是神经网络模型）。
+- **学说话方式**：统计群里的节奏、回复长短、表情和标点习惯；定期让主模型对比真人和 Bot 的说话方式，调整规则。
+- **QQ 里直接管理**：切模型、改思考强度、白名单、权限、禁言、群管理、处理好友和入群申请、发 QQ 空间。主人可以设 Bot 管理员，管理员不能再授权别人，也不能让模型做破坏性的文件操作。
+- **手动任务**：在 QQ 里发 `/AI任务`，或用 `ncc ai-run`，可以立刻跑聊天总结、风格复盘、人设刷新、知识库审核。
+- **仪表盘**：浏览器打开 `http://127.0.0.1:3789/`，能看运行状态、通道、记忆、知识库和日志。macOS 另有一个原生壳。
 
-```text
-QQ / NapCat / OneBot
-          |
-          v
-       Codex QQ Bot Hub --------> 本地仪表盘
-          |
-          +-----> Codex CLI / 当前登录模型
-          +-----> QQ 记忆、人格、兴趣与表情系统
-          +-----> 联网搜索、日志和维护状态
-          +-----> 浏览器与 macOS 仪表盘客户端
-```
+更完整的说明见[功能说明](docs/FEATURES_CN.md)。
 
-主要能力：
+## 常用命令
 
-- QQ 群聊与私聊：接收 @，并把回复中的 `@准确昵称 ` / `@QQ号 ` 转成真实 QQ 艾特；多人融合回复可由模型为任意候选人选择引用、艾特或普通回复，另支持拍一拍、图片、文件、合并转发、卡片和带投递回执的多气泡消息。
-- Codex App Server 原生 Agent：多轮工具、计划、上下文压缩、Web Search 和文件/Shell 操作由 Codex 原生能力负责；Hub 以动态工具补充带可信角色权限的 QQ 历史、记忆、知识、中文搜索兜底、真实社交动作、特权运行时设置和跨会话焦点。最终回复使用严格结构化 Schema，不再依赖命令/进度/预算文字 marker。
-- 融合追问与会话模式：生成期间的 @、回复、兴趣命中等触发先去重并补齐中间语境，静默满 5 秒后优先引导当前 turn，失败时才中断并开始替代回答；替代 turn 只有在完整的“任务类型 × 思考强度”协议静默时限内都无进展时才会隔离旧进程，并把原始完整上下文与融合输入放进新 app-server 线程重试一次。支持按群/私聊选择临时、长期或自动 Codex 线程，长期模式只补增量上下文。
-- 自适应社交行为：学习群聊节奏、回复长度、表情/贴纸习惯和合适的主动发言时机；独立的主模型风格复盘会精准比较真人/Bot 语气并保存简述、详诊和覆盖式优化规则。兴趣模型只承担有界的轻量判定、分类和初筛；复杂后台审核采用“兴趣模型初筛 → 主模型终审”。
-- AI 手动任务中心：QQ `/AI任务` 与 NCC 可统一触发聊天总结、范围记忆总结、群风格复盘、全局人设刷新、知识库审核或当前范围的全部适用任务；显式“强制执行”可跳过到期、冷却和常规样本门槛，但不会绕过权限、群白名单、并发锁、OneBot 身份或空数据保护。
-- 分层记忆与聊天召回：普通聊天和融合追问都会完整发送连续的近期窗口，只对更早的人类/Bot 聊天片段按当前消息、引用和融合追问做语义筛选；同一查询同时召回短期记忆、长期知识、群/人物印象和跨端统一记忆。本地 SQLite + FTS 混合层使用确定性的中文短语/概念特征向量，并非 BERT 神经模型。人物以 QQ 号为稳定主键，并合并各群名片、私聊昵称及 Bot 维护别称；AI 判定完整的非敏感人物画像会提升到统一记忆，之后在其他群聊/私聊识别到此人时扩展召回其各会话 AI 画像。自动上下文只注入简述，详细画像使用本轮按人物动态开放的工具读取。
-- QQ 管理：模型、思考强度、推理摘要、Agent 人格、服务档位、会话模式、白名单、权限、ban、群管理、可容错好友/入群申请、跨会话读写和 QQ 空间动态。主人可持久授予独立 Bot 管理员完整菜单与 Agent；管理员不能继续授权、冒充主人或让 Agent 执行关键破坏性文件操作。配置会在确认成功前原子持久化，schema v3 日志统一记录 Agent/工具、跨会话、管理员、社交和设置结果。
-- 兴趣模型厂商：可在仪表盘或 QQ 命令中选择 OpenRouter、DeepSeek 和自定义 OpenAI 兼容服务，密钥仍只保存在环境中。
-- 本地仪表盘：七个专注视图覆盖运行状态、通道、行为、短期记忆、可编辑长期知识库、结构化日志、主题和可选局域网访问。
-- macOS 客户端与浏览器仪表盘共用同一条 QQ/OneBot Hub 链路，不需要 Messages 数据库或 iMessage 自动化权限。
-
-完整功能边界见 [功能说明](docs/FEATURES_CN.md)。
-
-## 部署完成后的常用入口
-
-仓库自带控制器建议通过 npm 调用，避免与机器上已有的同名 `ncc` 冲突：
+仓库自带的控制器用 npm 调，免得和机器上别的 `ncc` 撞名：
 
 ```bash
-npm run ncc -- status
-npm run ncc -- setup
-npm run ncc -- start
-npm run ncc -- session
+npm run ncc -- status          # 看状态
+npm run ncc -- setup           # 配置菜单
+npm run ncc -- start           # 启动 Hub
+npm run ncc -- engine          # 查看当前 AI 引擎；后面跟 codex / claude 可切换
+npm run ncc -- claude-login    # Claude Code 登录和测试
 npm run ncc -- session-mode persistent 群号
-npm run ncc -- ai-tasks
 npm run ncc -- ai-run style-review 群号 --force
 npm run ncc -- logs --errors --since 30m --summary
 ```
 
-如果 Codex 检测到机器已经安装独立的 NapCat 控制器，请先执行 `ncc help`，再按它显示的命令操作。本机定制控制器可能提供 `ncc all`、`ncc connect`、`ncc hub` 等额外命令，但这些不是公共仓库的通用前提。
+如果机器上已经有别的 NapCat 控制脚本也叫 `ncc`，先 `ncc help` 看清楚它支持什么再用。
 
 默认地址：
 
 - 仪表盘：`http://127.0.0.1:3789/`
 - Hub 状态：`http://127.0.0.1:3789/api/state`
-- 维护状态：`http://127.0.0.1:3789/api/maintenance`
+- 维护信息：`http://127.0.0.1:3789/api/maintenance`
 - OneBot：`http://127.0.0.1:3000`
 
-## 最小配置
+## 最少要配的东西
 
-首次部署时，Codex 会在缺失时从 `config/settings.example.json` 创建 `data/settings.json`。至少确认：
+`data/settings.json` 不存在时会从 `config/settings.example.json` 复制一份。至少改这几项：
 
 ```json
 {
@@ -162,55 +155,49 @@ npm run ncc -- logs --errors --since 30m --summary
 }
 ```
 
-本地密钥、OneBot token、OpenRouter/DeepSeek/Tavily key 和网络绑定应放在未跟踪的环境文件或进程环境中，不要提交到仓库。详细字段和优先级见 [配置参考](docs/CONFIGURATION_CN.md)。
+OneBot token、OpenRouter / DeepSeek / Tavily 的 key 这类东西放在 `config/local.env` 或进程环境变量里，别提交进仓库。所有配置项见[配置参考](docs/CONFIGURATION_CN.md)。
 
-## 项目结构
+## 目录
 
 ```text
 src/
-  app/                 应用初始状态与组合边界
-  channels/qq/         QQ / OneBot 不可信输入边界
-  config/              环境变量默认值、校验与归一化
-  qq-enhancer/         QQ 回复、图片与主动兴趣增强
-  unified-memory/      统一记忆与最近 Codex 上下文
-  server.js            组合根与仍在渐进拆分的运行时逻辑
-modules/               共享客户端、启动器和 NapCat 扩展
-scripts/               部署、ncc、日志与静态检查
-data/                  本地持久状态；多数运行文件不跟踪
-runtime/               日志、回复、临时任务与生成物；不跟踪
-test/                  Node.js 回归测试
-skills/                随仓库分发的 Codex Skill
-docs/                  部署、架构、配置、功能和运维文档
+  app/                   启动时的状态和组装
+  channels/              QQ / HTTP 输入的校验和归一化
+  config/                环境变量解析和默认值
+  infrastructure/codex/  Codex 调用、QQ 工具、结构化输出
+  infrastructure/claude/ Claude Code 调用和 QQ 工具桥
+  qq-enhancer/           图片处理、主动接话
+  unified-memory/        统一记忆
+  server.js              组装入口（还在逐步拆分）
+modules/                 客户端、启动器、NapCat 插件
+scripts/                 部署、ncc、日志查看、静态检查
+skills/                  给 Codex / Claude Code 用的维护 Skill
+docs/                    文档
+data/  runtime/          本地数据和运行时文件，不进 Git
 ```
 
-后续修改前先读 [架构与目录职责](docs/ARCHITECTURE_CN.md)。Codex 会自动读取仓库根目录的 [AGENTS.md](AGENTS.md)，其中记录了测试命令、文档同步和安全边界。
+改代码前先看[架构说明](docs/ARCHITECTURE_CN.md)和根目录的 [AGENTS.md](AGENTS.md)。
 
-## 开发与验证
+## 开发
 
 ```bash
 npm install
-npm run check
-npm test
-npm run test:coverage
-npm run verify
+npm run verify   # 语法检查 + 全部测试，提交前必跑
 ```
 
-任何行为调整都应至少运行 `npm run verify`。配置、应用状态和 OneBot 事件边界已有独立测试，新增功能应继续放在可单测模块中，避免扩大 `src/server.js`。
+新功能尽量写成可以单独测试的小模块，别再往 `src/server.js` 里堆。
 
-## 文档导航
+## 文档
 
-- [一键安装与环境方案](docs/INSTALLATION_CN.md)
-- [让 Codex 部署](docs/DEPLOY_WITH_CODEX_CN.md)
-- [架构与目录职责](docs/ARCHITECTURE_CN.md)
+- [安装说明](docs/INSTALLATION_CN.md)
+- [让 AI 帮你部署](docs/DEPLOY_WITH_CODEX_CN.md)
+- [架构说明](docs/ARCHITECTURE_CN.md)
 - [配置参考](docs/CONFIGURATION_CN.md)
 - [功能说明](docs/FEATURES_CN.md)
-- [运行、日志与故障排查](docs/OPERATIONS_CN.md)
-- [English README](README.md)
+- [运行、日志和排障](docs/OPERATIONS_CN.md)
 
-## 安全说明
+## 安全
 
-- Hub 默认只监听回环地址。远程访问必须显式开启、配置管理 token，并建议放在带 TLS 与访问控制的反向代理后。
-- 不要提交 `data/settings.json`、`config/local.env`、token、Cookie、二维码、日志或运行数据库。
-- OneBot 回调、主人权限和本地文件 marker 都有额外校验；不要为了方便绕过这些边界。
-- macOS 客户端只是同一仪表盘的原生外壳；项目不再包含 macOS 独有的代理、显示器、防休眠或桌面控制能力。
-- 这是本地自动化工具，不是托管式公网 Bot 服务。
+- Hub 默认只监听 `127.0.0.1`。要从局域网访问，得显式打开，并配好管理 token。
+- `data/settings.json`、`config/local.env`、token、Cookie、二维码、日志和数据库都不要提交。
+- OneBot 回调、主人权限、文件路径都有校验，不要为了省事绕过去。

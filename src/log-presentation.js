@@ -159,6 +159,8 @@ const messageTranslationsZh = Object.freeze({
   "Codex CLI exited with non-zero status": "Codex CLI 异常退出",
   "Codex app-server turn finished": "Codex 可引导回复轮次完成",
   "Codex app-server turn failed": "Codex 可引导回复轮次失败",
+  "Claude Code turn finished": "Claude Code 可引导回复轮次完成",
+  "Claude Code turn failed": "Claude Code 可引导回复轮次失败",
   "QQ native Codex agent progress": "QQ 原生 Codex Agent 进度已记录",
   "QQ native Agent progress observer failed": "QQ 原生 Agent 进度观察器失败",
   "QQ task progress delivered": "QQ 任务进度已送达",

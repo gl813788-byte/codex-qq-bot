@@ -96,6 +96,18 @@ export function createEnvironmentConfig(env = process.env) {
     oneBotMaxConcurrency,
     oneBotMaxPending,
 
+    agentEngine: enumValue(
+      String(env.CODEX_REMOTE_CONTACT_AGENT_ENGINE || "").trim().toLowerCase(),
+      ["codex", "claude"],
+      "codex"
+    ),
+    claudeCliPath: env.CLAUDE_CLI_PATH || "claude",
+    claudeModel: String(env.CODEX_REMOTE_CONTACT_CLAUDE_MODEL || "").trim() || "opus",
+    claudeReasoningEffort: enumValue(
+      String(env.CODEX_REMOTE_CONTACT_CLAUDE_EFFORT || "").trim().toLowerCase(),
+      ["low", "medium", "high", "xhigh", "max"],
+      null
+    ),
     codexCliPath: env.CODEX_CLI_PATH || "/Applications/Codex.app/Contents/Resources/codex",
     codexModel: env.CODEX_REMOTE_CONTACT_CODEX_MODEL || "gpt-5.4-mini",
     codexReasoningEffort: env.CODEX_REMOTE_CONTACT_REASONING_EFFORT || "low",

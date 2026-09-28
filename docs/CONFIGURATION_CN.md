@@ -176,6 +176,18 @@ npm run ncc -- setup
 
 Hub 会先识别 Codex 任务类型，再把上表的任务基础时限按当前思考强度放大：`low ×1`、`medium ×1.5`、`high ×2`、`xhigh ×3`、`max ×4`、`ultra ×5`。因此普通文字回复默认从 `low` 的 2 分钟逐档增加；看图、总结、文件与画图任务保留各自的基础时限。以上值单位为毫秒，普通任务最终不超过 30 分钟，图片生成不超过 60 分钟。多轮工具与上下文压缩由 App Server 原生负责；已删除的文字预算/续轮协议不再改变时限。运行中的 QQ turn 接受追问引导或融合追问启动替代 turn 后，会重新获得一整段对应任务时限。融合替代 turn 也必须在这一整段实际时限内持续没有协议活动，Hub 才会隔离它并执行唯一一次新线程重试；这取代了原先固定 1 分钟的截断。`/详细配置`、`/api/state`、`/api/maintenance` 和 Codex 结构化日志会显示当前原生参数与任务时限。
 
+### AI 引擎（Codex / Claude Code）
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `CODEX_REMOTE_CONTACT_AGENT_ENGINE` | `codex` | 驱动 Bot 的引擎：`codex` 或 `claude`。仓库 `ncc engine` 和交互式 `ncc start` 会把它写进 `config/local.env` |
+| `CLAUDE_CLI_PATH` | `claude` | Claude Code 可执行文件，默认从 `PATH` 查找 |
+| `CODEX_REMOTE_CONTACT_CLAUDE_MODEL` | `opus` | Claude Code 使用的模型，可以是别名（`opus`、`sonnet`、`haiku`）或完整模型名 |
+| `CODEX_REMOTE_CONTACT_CLAUDE_EFFORT` | 空 | Claude Code 思考强度：`low`、`medium`、`high`、`xhigh` 或 `max`。留空时沿用 Bot 的 `ai.reasoningEffort`（`minimal` 按 `low`，`ultra` 按 `max`） |
+| `CLAUDE_ENV_FILE` | `~/.claude/ncc-profiles/active.env` | 可选的 Claude 连接 profile。文件存在时，其中的 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`ANTHROPIC_MODEL` 等连接变量会替换继承值，每轮重新读取；不存在时使用本机 `claude` 的官方登录 |
+
+用 Claude Code 时，`ai.model`、推理摘要、Codex 人格和服务档位不生效，额度信息也只对 Codex 有效。任务时限表同样适用，但每轮都会新起一个 `claude -p` 进程，冷启动时间计入时限。Claude 子进程只继承运行必需的变量和 `CODEX_REMOTE_CONTACT_*` 标记（名称里带 KEY、TOKEN、SECRET、PASSWORD、COOKIE 的除外），Hub 的其他密钥不会传进去。
+
 ### OneBot
 
 | 变量 | 默认值 | 说明 |
