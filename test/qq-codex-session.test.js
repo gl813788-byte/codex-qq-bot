@@ -2,12 +2,58 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createEmptyQqCodexSessionStore,
+  fingerprintQqCodexDynamicTools,
   normalizeQqCodexSessionMode,
   normalizeQqCodexSessionSettings,
+  normalizeQqCodexSessionStore,
   removeQqCodexSessionThread,
   resolveQqCodexSessionPlan,
+  resolveQqCodexReusableThreadId,
   upsertQqCodexSessionThread
 } from "../src/qq-codex-session.js";
+import { buildQqNativeToolSpecs } from "../src/infrastructure/codex/qq-native-tools.js";
+
+test("persistent threads keep their tool fingerprint across a store reload", () => {
+  const tools = buildQqNativeToolSpecs();
+  const fingerprint = fingerprintQqCodexDynamicTools(tools);
+  const store = normalizeQqCodexSessionStore(JSON.parse(JSON.stringify(
+    upsertQqCodexSessionThread(createEmptyQqCodexSessionStore(), {
+      scopeId: "100", threadId: "thread-1", dynamicToolsFingerprint: fingerprint
+    })
+  )));
+  const plan = resolveQqCodexSessionPlan({ settings: { defaultMode: "persistent" }, store, scopeId: "100" });
+  assert.equal(resolveQqCodexReusableThreadId(plan, tools), "thread-1");
+  assert.equal(resolveQqCodexReusableThreadId({ ...plan, persistent: false }, tools), null);
+  for (const options of [{ isOwner: true }, { hasMemoryPeople: true }, { canRecordRobotProfiles: true }, { toolsEnabled: false }]) {
+    assert.equal(resolveQqCodexReusableThreadId(plan, buildQqNativeToolSpecs(options)), null);
+  }
+  const ownerTools = buildQqNativeToolSpecs({ isOwner: true });
+  assert.equal(resolveQqCodexReusableThreadId({
+    ...plan, existingThread: { ...plan.existingThread, dynamicToolsFingerprint: fingerprintQqCodexDynamicTools(ownerTools) }
+  }, tools), null);
+});
+
+test("legacy or replaced threads cannot inherit an unverified tool catalog", () => {
+  const tools = buildQqNativeToolSpecs();
+  let store = upsertQqCodexSessionThread(createEmptyQqCodexSessionStore(), { scopeId: "100", threadId: "legacy" });
+  const planFor = () => resolveQqCodexSessionPlan({ settings: { defaultMode: "persistent" }, store, scopeId: "100" });
+  assert.equal(resolveQqCodexReusableThreadId(planFor(), tools), null);
+  store = upsertQqCodexSessionThread(store, {
+    scopeId: "100", threadId: "current", dynamicToolsFingerprint: fingerprintQqCodexDynamicTools(tools)
+  });
+  store = upsertQqCodexSessionThread(store, { scopeId: "100", threadId: "current" });
+  assert.equal(resolveQqCodexReusableThreadId(planFor(), tools), "current");
+  store = upsertQqCodexSessionThread(store, { scopeId: "100", threadId: "replacement" });
+  assert.equal(resolveQqCodexReusableThreadId(planFor(), tools), null);
+});
+
+test("tool fingerprints ignore object key order but detect schema changes", () => {
+  const first = [{ type: "function", name: "lookup", inputSchema: { type: "object", properties: { query: { type: "string" } } } }];
+  const reordered = [{ name: "lookup", inputSchema: { properties: { query: { type: "string" } }, type: "object" }, type: "function" }];
+  assert.equal(fingerprintQqCodexDynamicTools(first), fingerprintQqCodexDynamicTools(reordered));
+  reordered[0].inputSchema.properties.query.type = "number";
+  assert.notEqual(fingerprintQqCodexDynamicTools(first), fingerprintQqCodexDynamicTools(reordered));
+});
 
 test("normalizes temporary, persistent, and auto session settings", () => {
   assert.equal(normalizeQqCodexSessionMode("一次性"), "temporary");

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export const QQ_CODEX_SESSION_MODES = Object.freeze({
   TEMPORARY: "temporary",
   PERSISTENT: "persistent",
@@ -8,6 +10,23 @@ export const QQ_CODEX_SESSION_PROTOCOL_VERSION = 2;
 
 const validModes = new Set(Object.values(QQ_CODEX_SESSION_MODES));
 const maxStoredThreads = 64;
+
+export function fingerprintQqCodexDynamicTools(tools = []) {
+  return createHash("sha256")
+    .update(JSON.stringify(Array.isArray(tools) ? tools : [], (_key, value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+      return Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]));
+    }))
+    .digest("hex");
+}
+
+export function resolveQqCodexReusableThreadId(plan, tools = []) {
+  const thread = plan?.existingThread;
+  // Codex 0.158 restores the original tools; thread/resume cannot replace them.
+  if (!plan?.persistent || thread?.protocolVersion !== QQ_CODEX_SESSION_PROTOCOL_VERSION) return null;
+  if (thread.dynamicToolsFingerprint !== fingerprintQqCodexDynamicTools(tools)) return null;
+  return thread.threadId || null;
+}
 
 export function normalizeQqCodexSessionMode(value, fallback = QQ_CODEX_SESSION_MODES.AUTO) {
   const normalized = String(value || "").trim().toLowerCase();
@@ -117,6 +136,7 @@ export function upsertQqCodexSessionThread(store, {
   model,
   reasoningEffort,
   lastContextAt,
+  dynamicToolsFingerprint,
   protocolVersion = QQ_CODEX_SESSION_PROTOCOL_VERSION,
   now = new Date().toISOString()
 } = {}) {
@@ -133,6 +153,8 @@ export function upsertQqCodexSessionThread(store, {
     lastContextAt: normalizeIso(lastContextAt) || previous?.lastContextAt || null,
     model: String(model || previous?.model || "").slice(0, 160),
     reasoningEffort: String(reasoningEffort || previous?.reasoningEffort || "").slice(0, 40),
+    dynamicToolsFingerprint: normalizeToolsFingerprint(dynamicToolsFingerprint)
+      || (previous?.threadId === id ? previous.dynamicToolsFingerprint : null),
     protocolVersion: normalizeProtocolVersion(protocolVersion)
   };
   return pruneQqCodexSessionThreads(normalized);
@@ -173,6 +195,7 @@ function normalizeThreadRecord(scopeId, value) {
     lastContextAt: normalizeIso(source.lastContextAt),
     model: String(source.model || "").slice(0, 160),
     reasoningEffort: String(source.reasoningEffort || "").slice(0, 40),
+    dynamicToolsFingerprint: normalizeToolsFingerprint(source.dynamicToolsFingerprint),
     protocolVersion: normalizeProtocolVersion(source.protocolVersion)
   };
 }
@@ -180,6 +203,10 @@ function normalizeThreadRecord(scopeId, value) {
 function normalizeProtocolVersion(value) {
   const version = Number(value);
   return Number.isInteger(version) && version > 0 ? version : 1;
+}
+
+function normalizeToolsFingerprint(value) {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value) ? value : null;
 }
 
 function countRecentEntries(entries, cutoffMs) {

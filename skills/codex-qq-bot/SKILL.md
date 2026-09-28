@@ -130,6 +130,11 @@ refactor with a behavior change.
 - `/stop` cancels only the active lifecycle and its pending fusion batch.
   `/新对话` additionally clears the conversation-scoped context and reusable
   thread mapping.
+- Persistent thread reuse requires the stored dynamic-tool fingerprint to match
+  the current catalog. Codex 0.158 does not refresh tools on `thread/resume`.
+  Changed or unknown catalogs start a new thread with the complete current
+  context; preserve QQ memory and old Codex history. Verify both unchanged-tool
+  resume and changed-tool replacement after App Server upgrades.
 - Delivery is receipt-bearing. Only confirmed bubbles enter sent-message memory;
   failures are retained separately for the next turn.
 

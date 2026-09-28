@@ -587,7 +587,6 @@ export function runCodexAppServerTurn({
               reasoningEffort,
               developerInstructions,
               baseInstructions,
-              dynamicTools,
               config,
               webSearchMode,
               sandbox,
