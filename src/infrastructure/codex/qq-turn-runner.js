@@ -1,5 +1,7 @@
 import { runCodexAppServerTurn } from "../../codex-app-server-turn.js";
 import { buildIsolatedCodexChildEnv } from "../../codex-child-env.js";
+import { buildIsolatedClaudeChildEnv } from "../claude/claude-child-env.js";
+import { runClaudeCodeTurn } from "../claude/claude-code-turn.js";
 import { runQqCodexTurnWithFusionRecovery } from "../../qq-codex-turn-recovery.js";
 import { summarizeProcessDiagnostics } from "../../process-diagnostics.js";
 import { buildQqOperationLogDetails } from "../../qq-operation-log.js";
@@ -8,6 +10,10 @@ export function createQqCodexTurnRunner({
   limiter,
   state,
   codexPath,
+  engine = "codex",
+  claudePath = "claude",
+  claudeModel = null,
+  claudeReasoningEffort = null,
   activeChildren,
   stoppedGenerationIds,
   getReplyScope,
@@ -37,19 +43,25 @@ export function createQqCodexTurnRunner({
       let generationId = null;
       const generationIds = new WeakMap();
       try {
-        const runAttempt = (attempt = {}) => runCodexAppServerTurn({
+        const useClaude = engine === "claude";
+        const runTurn = useClaude ? runClaudeCodeTurn : runCodexAppServerTurn;
+        const requestedThreadId = (threadId) => useClaude || !isClaudeThreadId(threadId) ? threadId : null;
+        const runAttempt = (attempt = {}) => runTurn({
           codexPath,
+          claudePath,
           cwd: options.cwd,
-          env: buildIsolatedCodexChildEnv({ overrides: options.env }),
-          model: state.ai.model,
-          reasoningEffort: state.ai.reasoningEffort,
+          env: useClaude
+            ? buildIsolatedClaudeChildEnv({ overrides: options.env })
+            : buildIsolatedCodexChildEnv({ overrides: options.env }),
+          model: useClaude ? claudeModel : state.ai.model,
+          reasoningEffort: useClaude ? claudeReasoningEffort || state.ai.reasoningEffort : state.ai.reasoningEffort,
           reasoningSummary: options.reasoningSummary || state.ai.reasoningSummary || "auto",
           personality: options.personality || state.ai.personality || null,
           serviceTier: options.serviceTier || state.ai.serviceTier || null,
           prompt: Object.hasOwn(attempt, "prompt") ? attempt.prompt : input,
           resumePrompt: Object.hasOwn(attempt, "resumePrompt") ? attempt.resumePrompt : options.resumePrompt,
           imagePaths: Object.hasOwn(attempt, "imagePaths") ? attempt.imagePaths : options.imagePaths || [],
-          threadId: Object.hasOwn(attempt, "threadId") ? attempt.threadId : options.threadId || null,
+          threadId: requestedThreadId(Object.hasOwn(attempt, "threadId") ? attempt.threadId : options.threadId || null),
           ephemeral: Object.hasOwn(attempt, "ephemeral") ? attempt.ephemeral : options.ephemeral !== false,
           developerInstructions: options.developerInstructions,
           baseInstructions: options.baseInstructions,
@@ -61,6 +73,7 @@ export function createQqCodexTurnRunner({
           sandboxPolicy: options.sandboxPolicy || null,
           permissions: options.permissions || null,
           runtimeWorkspaceRoots: options.runtimeWorkspaceRoots || [],
+          shellAccess: Boolean(options.shellAccess),
           timeoutMs: options.timeout,
           replacementIdleTimeoutMs: options.replacementIdleTimeoutMs,
           signal: replyScope?.signal,
@@ -102,13 +115,15 @@ export function createQqCodexTurnRunner({
             }, "codex", options.qqEvent ? logContext(options.qqEvent, { spanId: generationId }) : {});
           }
         });
-        recordSuccess({ state, result, options, startedAt, generationId, logger, logContext });
+        recordSuccess({ state, result, options, startedAt, generationId, logger, logContext, engine });
         logModelOutput(result.finalResponse, {
           event: options.qqEvent,
           taskType: options.taskType,
           label: "qq-steerable-reply"
         });
-        trackBackgroundTask(refreshQuota({ startedAtMs: startedAt, previousQuota }), () => null);
+        if (engine !== "claude" && typeof refreshQuota === "function") {
+          trackBackgroundTask(refreshQuota({ startedAtMs: startedAt, previousQuota }), () => null);
+        }
         return result;
       } catch (error) {
         recordFailure({
@@ -119,7 +134,8 @@ export function createQqCodexTurnRunner({
           generationId,
           stoppedGenerationIds,
           logger,
-          logContext
+          logContext,
+          engine
         });
         if (generationId && stoppedGenerationIds.delete(generationId)) throw createStoppedError();
         throw error;
@@ -128,14 +144,14 @@ export function createQqCodexTurnRunner({
   };
 }
 
-function recordSuccess({ state, result, options, startedAt, generationId, logger, logContext }) {
+function recordSuccess({ state, result, options, startedAt, generationId, logger, logContext, engine }) {
   const finishedAt = Date.now();
   state.maintenance.codex.lastRunAt = new Date(finishedAt).toISOString();
   state.maintenance.codex.lastDurationMs = finishedAt - startedAt;
   state.maintenance.codex.lastOk = true;
   state.maintenance.codex.lastError = null;
   const diagnostics = summarizeProcessDiagnostics({ stderr: result.stderr, stdout: "" });
-  logger.success("Codex app-server turn finished", {
+  logger.success(engine === "claude" ? "Claude Code turn finished" : "Codex app-server turn finished", {
     ...buildQqTurnOperationLogDetails(options, "success"),
     cwd: options.cwd,
     durationMs: state.maintenance.codex.lastDurationMs,
@@ -151,7 +167,7 @@ function recordSuccess({ state, result, options, startedAt, generationId, logger
   }, "codex", options.qqEvent ? logContext(options.qqEvent, { spanId: generationId }) : {});
 }
 
-function recordFailure({ state, error, options, startedAt, generationId, stoppedGenerationIds, logger, logContext }) {
+function recordFailure({ state, error, options, startedAt, generationId, stoppedGenerationIds, logger, logContext, engine }) {
   const finishedAt = Date.now();
   const stopped = Boolean(generationId && stoppedGenerationIds.has(generationId));
   state.maintenance.codex.lastRunAt = new Date(finishedAt).toISOString();
@@ -171,7 +187,7 @@ function recordFailure({ state, error, options, startedAt, generationId, stopped
     return;
   }
   const diagnostics = summarizeProcessDiagnostics({ stderr: error?.stderr || "", stdout: "" });
-  logger.error("Codex app-server turn failed", {
+  logger.error(engine === "claude" ? "Claude Code turn failed" : "Codex app-server turn failed", {
     ...details,
     deadlineRenewalCount: Number(error?.deadlineRenewalCount || 0),
     fusionRecoveryAttempted: Boolean(error?.fusionRecoveryAttempted),
@@ -203,6 +219,12 @@ function diagnosticFields(diagnostics) {
 function normalizedReplacementIdleTimeout(options) {
   const value = Number(options?.replacementIdleTimeoutMs);
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : null;
+}
+
+// Codex cannot resume a Claude session id left in a persistent scope after an
+// engine switch; drop it so Codex starts a fresh thread with full context.
+function isClaudeThreadId(threadId) {
+  return String(threadId || "").startsWith("claude:");
 }
 
 function assertFunction(value, name) {

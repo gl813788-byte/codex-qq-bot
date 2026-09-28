@@ -2,9 +2,7 @@
 
 # Codex QQ Bot
 
-### Connect local Codex capabilities to QQ
-
-**A local QQ / OneBot and Codex CLI assistant hub**
+Connect QQ to the Codex or Claude Code install on your own machine, and get a QQ bot that can chat and actually do things.
 
 [简体中文](README_CN.md) | English
 
@@ -12,15 +10,36 @@
 ![Linux](https://img.shields.io/badge/Linux-supported-blue)
 ![macOS](https://img.shields.io/badge/macOS-supported-blue)
 ![Windows / WSL](https://img.shields.io/badge/Windows-WSL%20recommended-blue)
-![Codex](https://img.shields.io/badge/deploy%20with-Codex-111111)
 
 </div>
 
 ---
 
-## Easiest install: one terminal command
+## What it is
 
-If Node.js is installed, run either command below. There is no need to open GitHub, download an archive, or extract it manually:
+On the QQ side, messages come and go through NapCat (or any other OneBot implementation). On the model side, it calls the Codex CLI or Claude Code you have already signed in to. In between is a small Node.js service running on your machine (the Hub). It:
+
+- decides which messages deserve a reply and who the reply is for;
+- gathers chat history, memory and the group's way of talking and hands them to the model;
+- gives the model a set of QQ tools (read history, look up memory, send files, manage the group, and so on) and runs each one with the permissions of the person who sent the message;
+- splits the reply into chat bubbles, sends them, and records which ones were actually delivered.
+
+```text
+QQ / NapCat / OneBot
+        │
+        ▼
+   Hub (local, :3789) ──── dashboard
+        │
+        ├── Codex CLI  or  Claude Code
+        ├── memory, persona, group habits
+        └── web search, logs, maintenance status
+```
+
+It is a tool you run yourself, not a hosted service. Accounts, chat data and keys stay on your machine.
+
+## Install
+
+If Node.js is already installed, one line is enough:
 
 ```bash
 npx -y "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"
@@ -28,114 +47,88 @@ npx -y "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"
 pnpm dlx "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"
 ```
 
-If Node.js is not installed yet, use the lightweight bootstrap command:
+Without Node.js, use the bootstrap script. It installs what is missing:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
-# with wget only:
+# wget only:
 wget -qO- https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
 ```
 
-The npm/pnpm entry is the complete path: it installs or upgrades source, detects the host, prepares Node.js 20+ and the official Codex CLI, installs project dependencies, and runs `npm run verify`. The raw curl/wget entry needs neither Node, Git, nor zsh and leaves a ready `ncc`; add `--prepare` when it should complete dependencies immediately. Every source, PRoot, Node/Codex, npm, and verification stage is validated and resumable, so repeating the same command continues from the first unfinished stage. Git worktrees, local changes, runtime data, and a different global `ncc` are preserved.
+The installer downloads or upgrades the source, installs Node.js 20+ and the Codex CLI, installs dependencies, and runs `npm run verify`. If it stops halfway, run the same command again and finished steps are skipped. Existing Git worktrees, local changes, `data/`, `config/local.env` and any other `ncc` on the machine are left alone.
 
-Detection covers macOS, native Linux, WSL, containers, native Termux, existing Termux PRoot guests, privilege mode, architecture, and libc. Native Termux runs only `proot-distro` on Android and puts Node, Codex, dependencies, verification, and daily `ncc` inside managed Debian; an existing PRoot is used directly and never nested. Termux/PRoot, WSL, and containers use an external OneBot, while supported native apt-get/dnf glibc Linux can install NapCat automatically. See [One-click installation and environment plans](docs/INSTALLATION.md) for the decision table, flags, caches, root rules, and recovery steps.
+Platforms are handled differently: native Linux (apt-get / dnf, glibc) gets NapCat installed automatically; on Termux, PRoot, WSL and containers you bring your own OneBot. Details are in the [installation guide](docs/INSTALLATION.md).
 
-## Alternatively, let Codex deploy it
+If you already have the source, you can run `一键部署.command` from the repository root instead (double-click on macOS, `./一键部署.command` in a Linux / WSL terminal).
 
-If you want Codex to also operate OneBot startup, post-scan connection, and final acceptance, give it the prompt below. Codex should inspect the host, preserve existing configuration, install dependencies, verify the repository, start the Hub, and isolate only the steps that require you, such as scanning a QQ login QR code or supplying a missing credential.
+To have an AI do the install, paste the prompt from the [deployment guide](docs/DEPLOY_WITH_CODEX.md) into Codex or Claude Code. It checks the environment, installs, starts everything, and stops to ask you when a QR scan or a key is needed.
 
-Copy the whole prompt into Codex:
+## Codex or Claude Code
 
-```text
-Deploy Codex QQ Bot on this machine:
-https://github.com/gl813788-byte/codex-qq-bot.git
+Both work. You pick one when you start the bot.
 
-Goal: connect QQ / OneBot to the current Codex CLI login and start a locally accessible Hub and dashboard.
+| | Codex | Claude Code |
+| --- | --- | --- |
+| Install | done by the installer | `curl -fsSL https://claude.ai/install.sh \| bash` |
+| Sign-in | `codex login` | `claude auth login`, or put a relay URL and key in `~/.claude/ncc-profiles/active.env` |
+| Model | switch from the dashboard or QQ commands | `CODEX_REMOTE_CONTACT_CLAUDE_MODEL`, default `opus` |
+| Reasoning effort | switch from the dashboard or QQ commands | follows the bot setting unless `CODEX_REMOTE_CONTACT_CLAUDE_EFFORT` is set |
+| Image generation | yes | no |
+| Quota display | shown in the dashboard | not shown; use `/usage` inside `claude` |
 
-Execute the deployment instead of only giving me a command list. Continue until the result is verifiable:
-1. Inspect the OS, CPU architecture, Git, Node.js, npm, zsh, curl, Codex CLI, any existing OneBot/NapCat installation, and any existing ncc command. Require Node.js 20 or newer.
-2. Clone into a stable directory when the project is absent. Use /root/Codex-QQ-Bot for a Linux root environment; otherwise choose an appropriate user directory. Reuse an existing legacy /root/Codex-Remote-Contact installation instead of forcing a migration. Inspect the remote, branch, and worktree first. Never overwrite local changes, configuration, data, or runtime state.
-3. Read README.md, docs/INSTALLATION.md, docs/DEPLOY_WITH_CODEX.md, docs/ARCHITECTURE.md, and skills/codex-qq-bot/SKILL.md when that skill matches the environment.
-4. Install dependencies and run npm run verify. Diagnose and fix failures instead of skipping verification.
-5. Create data/settings.json from config/settings.example.json only when it is missing. Merge only necessary fields into an existing file. Ask me for owner QQ ids, allowed group ids, OneBot address, or secrets only when needed, and never print secrets back in full.
-6. Determine whether ncc is the repository's setup helper or a separate NapCat controller by running its help first. Do not replace a working command with another command of the same name. The repository helper is always available as npm run ncc -- <command>.
-7. Check OneBot. Reuse an installed NapCat/LLBot deployment. If none is installed, choose a supported OneBot implementation for the current platform and identify its source. Ask for approval before downloads, system package changes, or elevated commands.
-8. Start the Hub and OneBot. If QQ login needs a QR scan, show only the QR URL or WebUI address and the shortest user action. After I confirm login, continue the connection and allowlist setup yourself.
-9. Verify npm run verify, Hub /api/state, the dashboard root, OneBot get_login_info, QQ channel state, and recent error logs. Report each item separately and do not claim completion while a required component is unavailable.
-10. Keep the Hub loopback-only unless I explicitly request LAN access. Never place tokens in Git-tracked files.
-```
-
-See [Deploy with Codex](docs/DEPLOY_WITH_CODEX.md) for the detailed workflow, upgrade prompt, and acceptance checklist.
-
-## One-click file for an extracted source archive
-
-After downloading and extracting the project, you may run the root-level `一键部署.command` as the single setup entry. Double-click it on macOS, or use a terminal on Linux / WSL:
+To switch:
 
 ```bash
-chmod +x 一键部署.command
-./一键部署.command
+npm run ncc -- engine claude   # or codex
+npm run ncc -- start           # an interactive start also asks; press Enter to keep the last choice
 ```
 
-The launcher enters the repository `ncc`, reports its environment decision, prepares missing dependencies, runs `npm run verify`, and guides owner QQ, allowlist, OneBot, branding, and web-lookup configuration. Existing `data/settings.json`, `config/local.env`, and unrelated global `ncc` commands are preserved. The repository does not redistribute QQ/NapCat binaries, and the initial QQ QR scan still requires the user.
+With Claude Code every reply starts its own `claude -p` process, so replies take a few seconds longer than with Codex, and can take over ten seconds on a slow PRoot host. Permissions are handled like this:
+
+- every turn runs in `--restricted` mode, so file tools only reach the turn's task directory;
+- only file tasks from the owner or a bot administrator get a shell; replies triggered by ordinary group members never do;
+- WebFetch is off so the model cannot call the local OneBot or Hub APIs; web search is offered only when web lookup is enabled;
+- your personal Claude Code settings, hooks and MCP connectors are not loaded, so connectors such as Gmail or Drive are never exposed to QQ users.
 
 ## What you need
 
-| Requirement | Purpose |
+| Item | Notes |
 | --- | --- |
-| Codex | Performs deployment, changes, diagnosis, and model work. Open the project with Codex CLI, the IDE extension, or the desktop app. |
-| Bash plus a supported package manager | Starts bootstrap. Missing system packages use real root or sudo/doas; native Termux uses its normal app user and `pkg`. WSL is recommended on Windows. |
-| Node.js 20+, zsh, and Codex CLI | Installed automatically by one-click deployment. |
-| QQ plus a OneBot implementation | Supported native apt-get/dnf Linux installs official NapCat/LinuxQQ by default; Termux/PRoot, WSL, and containers reuse an external OneBot. |
-| Owner QQ id and allowed group ids | Used for authority and group allowlisting; provide them when deployment reaches that step. |
-| About 3GB free memory | Recommended when QQ, OneBot, the Hub, and Codex run together. |
+| Codex or Claude Code | At least one, signed in. |
+| A QQ account and OneBot | NapCat or LLBot. You do the first QR login yourself. |
+| Owner QQ number and group numbers | For permissions and the group allowlist; asked for during setup. |
+| About 3 GB of free memory | Comfortable for QQ, OneBot, the Hub and model processes together. |
+| Windows | Install inside WSL. |
 
-For Codex CLI, the standard sign-in path is `codex login` followed by the browser flow; API-key login is also supported. See the [official Codex authentication documentation](https://learn.chatgpt.com/docs/auth).
+## Features
 
-## What the project does
+- **Group and private chat**: in groups it speaks when @-mentioned or replied to, and can join in on its own when the interest model thinks it is worth it. Images, files, forwarded chats, cards and pokes are supported, and `@nickname` in a reply becomes a real mention.
+- **Follow-ups while it is still writing**: if someone adds a message mid-reply, it waits five seconds for more, then feeds the new messages into the current turn; only if that fails does it interrupt and rewrite. One reply goes out at the end.
+- **Session modes**: each group or private chat can use temporary sessions, long-lived sessions, or automatic selection. Long-lived sessions reuse the same model conversation and only send what is new.
+- **Memory**: short-term notes, a long-term knowledge base, impressions of groups and people, and a cross-group unified memory. People are keyed by QQ number, so a changed group card does not lose them. Retrieval uses a local SQLite full-text index plus simple Chinese feature vectors (not a neural model).
+- **Learning how people talk**: it tracks pacing, reply length, emoji and punctuation habits, and periodically has the main model compare the bot's style with real members and adjust its rules.
+- **Management from QQ**: switch models, change reasoning effort, edit the allowlist and permissions, mute, manage groups, handle friend and join requests, post to Qzone. The owner can appoint bot administrators, who cannot appoint others or make the model run destructive file operations.
+- **Manual tasks**: send `/AI任务` in QQ or run `ncc ai-run` to run a chat summary, style review, persona refresh or knowledge review right away.
+- **Dashboard**: open `http://127.0.0.1:3789/` for status, channels, memory, the knowledge base and logs. There is also a native macOS wrapper.
 
-```text
-QQ / NapCat / OneBot
-          |
-          v
-       Codex QQ Bot Hub --------> local dashboard
-          |
-          +-----> Codex CLI / current login and models
-          +-----> QQ memory, persona, interest, and stickers
-          +-----> web search, logs, and maintenance state
-          +-----> browser and macOS dashboard clients
-```
+See [features](docs/FEATURES.md) for the full description.
 
-Core capabilities:
+## Common commands
 
-- QQ group and private chat with incoming mentions, real outgoing `@exact-name ` / `@QQ-number ` segments, model-selected quote/mention/plain addressing for multi-person fused replies, pokes, images, files, forwarded messages, cards, and receipt-aware multi-bubble output.
-- Native Codex App Server Agents: Codex owns multi-turn tool use, plans, context compaction, Web Search, and file/shell work; the Hub adds permission-bound QQ history, memory, knowledge, Chinese-search fallback, social actions, privileged runtime settings and cross-session focus as dynamic tools. Final replies use a strict structured schema instead of text command/progress/budget markers.
-- Fused follow-ups and session modes: mentions, replies, interest approvals, and other triggers arriving during generation are compacted with selected in-between context; after five quiet seconds the active turn is steered first, with interrupt/replacement as the fallback. A replacement is isolated only after one full task-and-effort-specific protocol-idle window and retried once in a fresh app-server thread with the original context plus the fused input. Each group/private scope can use temporary, persistent, or automatic Codex threads, with persistent turns receiving only incremental context.
-- Adaptive social behavior for message length, group rhythm, stickers, and voluntary replies. A separate main-model style review precisely compares human and Bot tone and stores a brief, full diagnosis, and replacement guidance. The interest model stays limited to bounded lightweight decisions, classification and triage; complex background review uses interest triage followed by main-model final review.
-- A manual AI task center shared by QQ `/AI任务` and NCC can run chat summaries, scope-memory summaries, group style reviews, global-persona refreshes, knowledge reviews, or every applicable task for one scope. Explicit force mode skips due-time, cooldown, and normal sample thresholds without bypassing permissions, group allowlists, concurrency locks, OneBot identity, or empty-data safeguards.
-- Layered memory and chat recall: normal and fused replies send a contiguous recent window in full, then select only older human/Bot transcript fragments by semantic relevance to the current message, quote and fused follow-ups. The same local SQLite + FTS hybrid plane recalls short-term notes, long-term knowledge, impressions, and unified memory with deterministic phrase/concept features rather than BERT. QQ number is the stable person key across group cards, private names, and Bot-managed aliases. When the main AI judges a non-sensitive profile mature, the Hub promotes it to unified memory; later recognition in another group or private chat expands recall to that person's per-session AI profiles. Automatic context contains briefs only, while a turn-scoped person tool retrieves full detail.
-- QQ administration for model, reasoning effort/summary, Agent personality, advertised service tier, session mode, allowlists, permissions, bans, moderation, resilient friend/group requests, cross-session read/send, and QQ Space moods. The owner can persist separate Bot administrators with the full menu and Agent; administrators cannot delegate the role, impersonate the owner, or make the Agent perform critical destructive file operations. Changes are atomically persisted before success is acknowledged, and schema-v3 logs unify Agent/tool, cross-session, administrator, social and settings outcomes.
-- Selectable interest-model providers: OpenRouter, DeepSeek, or a custom OpenAI-compatible service, with credentials kept environment-only.
-- Seven-view local dashboard for runtime, channels, behavior, short-term memory, an editable long-term Knowledge workspace, structured logs, themes, and optional LAN access.
-- macOS client and browser dashboard use the same QQ/OneBot Hub and require no Messages database or iMessage automation permissions.
-
-See [Features](docs/FEATURES.md) for complete boundaries.
-
-## Common entry points after deployment
-
-Invoke the repository helper through npm to avoid collisions with an existing system `ncc` command:
+Call the repository controller through npm so it cannot clash with another `ncc` on the machine:
 
 ```bash
-npm run ncc -- status
-npm run ncc -- setup
-npm run ncc -- start
-npm run ncc -- session
+npm run ncc -- status          # status
+npm run ncc -- setup           # settings menu
+npm run ncc -- start           # start the Hub
+npm run ncc -- engine          # show the AI engine; add codex / claude to switch
+npm run ncc -- claude-login    # Claude Code sign-in and test
 npm run ncc -- session-mode persistent GROUP_ID
-npm run ncc -- ai-tasks
 npm run ncc -- ai-run style-review GROUP_ID --force
 npm run ncc -- logs --errors --since 30m --summary
 ```
 
-If Codex finds a separate NapCat controller already installed, run `ncc help` before using it. A machine-specific controller may provide extra commands such as `ncc all`, `ncc connect`, or `ncc hub`; those commands are not a universal prerequisite of this public repository.
+If the machine already has a different NapCat controller named `ncc`, run `ncc help` first to see what it supports.
 
 Default addresses:
 
@@ -144,73 +137,67 @@ Default addresses:
 - Maintenance: `http://127.0.0.1:3789/api/maintenance`
 - OneBot: `http://127.0.0.1:3000`
 
-## Minimal configuration
+## Minimum configuration
 
-During the first deployment, Codex creates `data/settings.json` from `config/settings.example.json` only when needed. At minimum, confirm:
+If `data/settings.json` does not exist it is copied from `config/settings.example.json`. Change at least:
 
 ```json
 {
   "qq": {
-    "allowedGroups": ["YOUR_QQ_GROUP_ID"],
+    "allowedGroups": ["YOUR_GROUP_ID"],
     "ownerUserIds": ["YOUR_QQ_ID"]
   },
   "branding": {
     "assistantName": "assistant",
-    "ownerLabel": "owner",
+    "ownerLabel": "Owner",
     "assistantMentions": ["@assistant"]
   }
 }
 ```
 
-Local secrets, OneBot tokens, OpenRouter/DeepSeek/Tavily keys, and network bindings belong in untracked environment files or the process environment. Do not commit them. See [Configuration](docs/CONFIGURATION.md) for fields and precedence.
+Keep the OneBot token and OpenRouter / DeepSeek / Tavily keys in `config/local.env` or the process environment, never in the repository. Every option is listed in the [configuration reference](docs/CONFIGURATION.md).
 
-## Repository layout
+## Layout
 
 ```text
 src/
-  app/                 initial application state and composition boundaries
-  channels/qq/         untrusted QQ / OneBot transport boundary
-  config/              environment defaults, validation, and normalization
-  qq-enhancer/         QQ replies, images, and proactive interest
-  unified-memory/      unified memory and recent Codex context
-  server.js            composition root and runtime logic under gradual extraction
-modules/               shared clients, launchers, and NapCat extensions
-scripts/               deployment, ncc, logs, and static checks
-data/                  local persistent state; most runtime files are untracked
-runtime/               logs, replies, task workspaces, and generated output
-test/                  Node.js regression tests
-skills/                repository-distributed Codex skill
-docs/                  deployment, architecture, configuration, features, and operations
+  app/                   startup state and composition
+  channels/              validation and normalization of QQ / HTTP input
+  config/                environment parsing and defaults
+  infrastructure/codex/  Codex calls, QQ tools, structured output
+  infrastructure/claude/ Claude Code calls and the QQ tool bridge
+  qq-enhancer/           image handling, proactive replies
+  unified-memory/        unified memory
+  server.js              composition root (still being split up)
+modules/                 clients, launchers, NapCat plugin
+scripts/                 deployment, ncc, log viewer, static checks
+skills/                  maintenance skill for Codex / Claude Code
+docs/                    documentation
+data/  runtime/          local data and runtime files, not in Git
 ```
 
-Read [Architecture](docs/ARCHITECTURE.md) before making broad changes. Codex automatically discovers the root [AGENTS.md](AGENTS.md), which records verification, documentation-sync, and safety rules.
+Read the [architecture notes](docs/ARCHITECTURE.md) and [AGENTS.md](AGENTS.md) before changing code.
 
-## Development and verification
+## Development
 
 ```bash
 npm install
-npm run check
-npm test
-npm run test:coverage
-npm run verify
+npm run verify   # syntax check + all tests; run before every commit
 ```
 
-Run `npm run verify` for every behavioral change. Configuration, initial state, and OneBot event normalization have focused tests; keep adding testable modules instead of expanding `src/server.js`.
+Put new features in small modules that can be tested on their own instead of growing `src/server.js`.
 
 ## Documentation
 
-- [One-click installation and environment plans](docs/INSTALLATION.md)
-- [Deploy with Codex](docs/DEPLOY_WITH_CODEX.md)
+- [Installation](docs/INSTALLATION.md)
+- [Deploying with an AI agent](docs/DEPLOY_WITH_CODEX.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [Features](docs/FEATURES.md)
-- [Operations, logs, and troubleshooting](docs/OPERATIONS.md)
-- [简体中文](README_CN.md)
+- [Operations, logs and troubleshooting](docs/OPERATIONS.md)
 
 ## Security
 
-- The Hub binds to loopback by default. Remote access must be explicitly enabled with a management token and should sit behind a TLS reverse proxy with access control.
-- Never commit `data/settings.json`, `config/local.env`, tokens, cookies, QR codes, logs, or runtime databases.
-- OneBot callbacks, owner authority, and local-file markers have separate validation. Do not remove those boundaries for convenience.
-- The macOS client is only a native wrapper for the same dashboard; macOS-only proxy, display, keep-awake and desktop-control features are not part of the project.
-- This is a local automation tool, not a hosted public Bot service.
+- The Hub listens on `127.0.0.1` only by default. LAN access has to be turned on explicitly and needs a management token.
+- Never commit `data/settings.json`, `config/local.env`, tokens, cookies, QR codes, logs or databases.
+- OneBot callbacks, owner permissions and file paths are all validated. Do not bypass those checks for convenience.

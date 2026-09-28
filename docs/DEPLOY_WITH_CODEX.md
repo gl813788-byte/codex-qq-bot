@@ -15,6 +15,8 @@ A reliable deployment prompt includes a goal, host/repository context, constrain
 3. Start Codex in a stable directory where it may write the installation. Do not run a long-lived deployment from Downloads.
 4. Keep the default permissions. Let Codex request approval for downloads, system packages, elevated commands, or writes outside the workspace.
 
+Claude Code can run the same prompt below. If you want the bot itself to be driven by Claude Code, run `npm run ncc -- engine claude` after deployment and restart the Hub.
+
 ## One-line install without opening GitHub
 
 With Node.js installed, run:

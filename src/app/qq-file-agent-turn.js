@@ -56,6 +56,9 @@ export function buildQqFileAgentTurn({
     prompt,
     writableRoots,
     runtimeWorkspaceRoots,
+    // Claude Code has no OS sandbox around Bash, so only verified owner and
+    // administrator tasks get a shell there; Codex keeps its own sandbox.
+    shellAccess: privileged,
     sandboxPolicy: {
       type: "workspaceWrite",
       writableRoots,
