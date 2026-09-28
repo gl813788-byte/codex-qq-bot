@@ -2,17 +2,19 @@
 name: codex-qq-bot
 description: |
   Maintain, modify, deploy, operate, and diagnose the Codex QQ Bot project and
-  its NapCat + OneBot bridge for this Codex session. Use for work on the local
-  Codex-Remote-Contact checkout, including QQ message behavior, proactive
-  interest, prompts, memory/persona, dashboard/API, configuration, tests,
-  deployment, logs, startup, login recovery, OneBot, NapCat, and ncc.
+  its NapCat + OneBot bridge from a Codex or Claude Code session. Use for work
+  on the local Codex-Remote-Contact checkout, including QQ message behavior,
+  proactive interest, prompts, memory/persona, dashboard/API, configuration,
+  tests, deployment, logs, startup, login recovery, OneBot, NapCat, ncc, and
+  switching the bot between the Codex and Claude Code engines.
 ---
 
 # Codex QQ Bot maintenance
 
-This project connects QQ/NapCat/OneBot to the current Codex CLI. Treat it as a
-stateful local service: source code may change, but user configuration, runtime
-data, login state, secrets, and unrelated worktree changes must be preserved.
+This project connects QQ/NapCat/OneBot to a local agent CLI: Codex (default)
+or Claude Code, chosen at startup. Treat it as a stateful local service: source
+code may change, but user configuration, runtime data, login state, secrets,
+and unrelated worktree changes must be preserved.
 
 ## Source priority
 
@@ -28,8 +30,9 @@ source for the task:
 - User-facing behavior: `docs/FEATURES*.md`
 
 Keep English and Simplified Chinese documents structurally synchronized. Keep
-the tracked `skills/codex-qq-bot/SKILL.md` and the installed skill copy
-byte-identical when both exist.
+the tracked `skills/codex-qq-bot/SKILL.md` byte-identical with every installed
+copy that exists: `~/.codex/skills/codex-qq-bot/SKILL.md` for Codex and
+`~/.claude/skills/codex-qq-bot/SKILL.md` for Claude Code.
 
 ## Local runtime
 
@@ -87,6 +90,7 @@ subsystems belong in focused modules.
 | Ordinary interest cycle state | `src/qq-proactive-cycle-state.js` |
 | Follow-up fusion | `src/qq-reply-steering.js` |
 | App Server turn execution | `src/infrastructure/codex/` and `src/codex-app-server-turn.js` |
+| Claude Code turn execution, MCP tool bridge, child env | `src/infrastructure/claude/` |
 | Structured final output | `src/infrastructure/codex/qq-agent-output.js` |
 | Settings persistence | `src/infrastructure/storage/settings-repository.js` |
 | QQ memory and semantic recall | `src/unified-memory/` plus focused `src/qq-*memory*` modules |
@@ -134,7 +138,10 @@ refactor with a behavior change.
   the current catalog. Codex 0.158 does not refresh tools on `thread/resume`.
   Changed or unknown catalogs start a new thread with the complete current
   context; preserve QQ memory and old Codex history. Verify both unchanged-tool
-  resume and changed-tool replacement after App Server upgrades.
+  resume and changed-tool replacement after App Server upgrades. Claude Code
+  session ids live in the same mapping as `claude:<uuid>`; the Codex path drops
+  them after an engine switch, and a missing Claude session is rebuilt once
+  with the full prompt.
 - Delivery is receipt-bearing. Only confirmed bubbles enter sent-message memory;
   failures are retained separately for the next turn.
 
@@ -210,6 +217,40 @@ Casual turns may express personality strongly; factual, high-risk, and task turn
 should be more restrained while remaining recognizably the same assistant. Avoid
 fixed客服 templates and imitation of a specific group member.
 
+## Agent engines
+
+`CODEX_REMOTE_CONTACT_AGENT_ENGINE` (`codex` or `claude`) selects the engine;
+`src/infrastructure/codex/qq-turn-runner.js` is the only switch point. The
+Claude adapter `src/infrastructure/claude/claude-code-turn.js` keeps the exact
+`runCodexAppServerTurn` contract (options, result, `steer`/`restart`/`interrupt`
+controls, and `CODEX_*` error codes) so prompts, tools, output parsing, fusion,
+and recovery above it stay engine-neutral. Keep it that way: do not branch on
+the engine outside the runner, config, maintenance status, and controllers.
+
+Claude invariants that must not be weakened:
+
+- Every turn runs `claude -p` with `--restricted`, `--setting-sources ''`,
+  `--strict-mcp-config`, `--permission-mode dontAsk` and
+  `--permission-prompts none`, so the operator's personal settings, hooks and
+  claude.ai connectors never reach QQ users and file tools stay inside the cwd
+  and the turn's writable roots.
+- Bash is offered only when the caller passes `shellAccess` (verified owner or
+  administrator file tasks). Claude has no OS sandbox around Bash, unlike the
+  Codex workspace-write sandbox.
+- WebFetch is never offered; it could reach loopback OneBot/Hub APIs.
+  WebSearch follows `webSearchMode`.
+- Dynamic QQ tools reach the Hub only through the per-turn MCP bridge and its
+  private Unix socket, and run through the same `onDynamicToolCall` dispatcher
+  with the original sender's permissions.
+- The child env comes from `buildIsolatedClaudeChildEnv`: an allowlist plus
+  non-secret `CODEX_REMOTE_CONTACT_*` markers. Connection keys come from the
+  optional `~/.claude/ncc-profiles/active.env` profile, otherwise the machine's
+  `claude` login is used.
+
+Claude Code has no image generation and no quota feed; the dashboard quota
+remains Codex-only. Each turn pays the `claude -p` cold start (15-20 s on this
+PRoot host), which counts against the task deadline.
+
 ## Configuration and state
 
 Configuration is layered:
@@ -284,12 +325,17 @@ Common machine-controller intent:
 | Show one-shot startup resource profile | `ncc resources` |
 | Logs | `ncc logs` or `ncc logs --compact` |
 | Stop Hub | `ncc stop-hub` |
+| Show or set the AI engine | `ncc engine` / `ncc engine claude` / `ncc engine codex` |
+| Claude Code path, login, model, profile | `ncc claude-status` |
 
 Start/recovery sequence:
 
 1. Run `ncc status`.
 2. If screen reports dead sockets, run `screen -wipe`.
-3. Run `ncc all` only when startup is requested or the status requires it.
+3. Run `ncc all` only when startup is requested or the status requires it. In a
+   terminal it first asks for the engine; from an agent shell without a TTY it
+   uses the saved `AGENT_ENGINE`, so set it with `ncc engine <name>` first when
+   the user asked for a specific engine.
 4. If OneBot is unavailable, inspect the NapCat screen output. If a QR login is
    required, give the user the URL and pause for their scan.
 5. After login, run `ncc connect` and repeat acceptance.
@@ -302,13 +348,13 @@ On this memory-constrained Termux/PRoot host, use `ncc napcat` only for short
 bridge diagnostics and stop it with `ncc stop-napcat` when finished. The global
 controller reads `MemAvailable` once before startup and selects the standard,
 balanced, or low-memory profile. The profile constrains both sides of the stack:
-QQ renderer/V8 limits and Hub heap/Codex concurrency/queues. `ncc all` must start
+QQ renderer/V8 limits and Hub heap/agent concurrency/queues. `ncc all` must start
 both Hub and QQ; it brings the Hub up first so active QQ events do not spin on a
 missing loopback receiver, and cleans a newly started Hub if QQ startup fails.
 There is no resident memory monitor or shell `wait` supervisor. QQ and Xvfb run
 directly in separate screen sessions, while exact PID/PGID state supports bounded
-cleanup. Verify that QQ, Xvfb, and any turn-scoped Codex children are gone after
-a diagnostic stop.
+cleanup. Verify that QQ, Xvfb, and any turn-scoped Codex or Claude children are
+gone after a diagnostic stop.
 
 Proactive friend-add is intentionally unavailable: the Bot tool schema and the
 NapCat plugin must not expose `add_friend`, `/add-friend`, or `/inspect-friend`.
@@ -331,8 +377,9 @@ confuse it with the Hub API token or disclose unrelated secrets.
 Installation and upgrade policy lives in `docs/INSTALLATION*`; do not duplicate
 its platform matrix here. Preserve these invariants:
 
-- Node.js 20+, an official working `codex`, and a verified source/dependency
-  stage are required.
+- Node.js 20+, a working CLI for the chosen engine (the installer provisions
+  the official `codex`; `claude` is installed by the user), and a verified
+  source/dependency stage are required.
 - Never overwrite a Git worktree, unrelated non-empty directory, local state, or
   another global `ncc`.
 - Native Termux uses its managed PRoot path; WSL, containers, macOS, musl, and

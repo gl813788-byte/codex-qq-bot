@@ -255,7 +255,9 @@ show_status() {
   printf '本地环境：%s\n' "$LOCAL_ENV_FILE"
   printf 'Node: %s\n' "$(command -v node >/dev/null 2>&1 && node --version || echo missing)"
   printf 'npm: %s\n' "$(command -v npm >/dev/null 2>&1 && npm --version || echo missing)"
+  printf 'AI 引擎：%s\n' "$(engine_label "$(current_engine)")"
   printf 'Codex: %s\n' "$(command -v codex >/dev/null 2>&1 && command -v codex || echo missing)"
+  printf 'Claude Code: %s\n' "$(command -v claude >/dev/null 2>&1 && command -v claude || echo missing)"
   printf 'OneBot: '
   local onebot_base
   onebot_base="$(grep '^export ONEBOT_API_BASE=' "$LOCAL_ENV_FILE" 2>/dev/null | tail -n 1 | sed 's/^export ONEBOT_API_BASE=//; s/^'\''//; s/'\''$//' || true)"
@@ -294,6 +296,88 @@ codex_menu() {
     codex exec --ephemeral --skip-git-repo-check -C "$PROJECT_DIR" "Only output OK"
   fi
   [ "$should_pause" = "1" ] && pause
+}
+
+claude_menu() {
+  local should_pause="${1:-1}"
+  printf '\nClaude Code 登录与检测\n'
+  if ! command -v claude >/dev/null 2>&1; then
+    log "没有找到 Claude Code CLI，或它不在 PATH 里。"
+    log "安装方法：curl -fsSL https://claude.ai/install.sh | bash"
+    [ "$should_pause" = "1" ] && pause
+    return
+  fi
+  claude --version || true
+  if claude auth status >/dev/null 2>&1; then
+    log "Claude Code 已登录。"
+  elif ask_yes_no "Claude Code 还没登录，现在登录吗？" "Y"; then
+    claude auth login || true
+  fi
+  if ask_yes_no "现在做一次 Claude Code 鉴权测试吗？" "Y"; then
+    (cd "$PROJECT_DIR" && claude -p --tools "" --setting-sources "" --strict-mcp-config --no-session-persistence "Only output OK")
+  fi
+  [ "$should_pause" = "1" ] && pause
+}
+
+current_engine() {
+  local engine
+  engine="$(env_file_value "$LOCAL_ENV_FILE" CODEX_REMOTE_CONTACT_AGENT_ENGINE)"
+  case "$engine" in
+    claude) printf 'claude' ;;
+    *) printf 'codex' ;;
+  esac
+}
+
+engine_label() {
+  case "$1" in
+    claude) printf 'Claude Code' ;;
+    *) printf 'Codex' ;;
+  esac
+}
+
+set_engine() {
+  local engine="${1:-}"
+  case "$engine" in
+    codex|claude) ;;
+    *) die "引擎只能是 codex 或 claude。" ;;
+  esac
+  if ! command -v "$engine" >/dev/null 2>&1; then
+    log "警告：PATH 里找不到 $engine 命令，Hub 启动后回复会失败。"
+  fi
+  set_env_value "CODEX_REMOTE_CONTACT_AGENT_ENGINE" "$engine"
+  log "AI 引擎已设为 $(engine_label "$engine")。已运行的 Hub 需要重启才会切换。"
+}
+
+# 交互启动时询问本次用哪个引擎，直接回车沿用上次的选择；
+# 非交互启动（launchd、脚本调用）不询问，沿用 config/local.env 里保存的值。
+choose_engine() {
+  local saved choice
+  saved="$(current_engine)"
+  [ -t 0 ] || return 0
+  printf '\n选择这次使用的 AI 引擎（当前：%s）\n' "$(engine_label "$saved")"
+  printf '  1) Codex\n  2) Claude Code\n'
+  printf '请选择 [回车沿用 %s]：' "$(engine_label "$saved")"
+  read -r choice || true
+  case "${choice:-}" in
+    1|codex) set_engine codex ;;
+    2|claude) set_engine claude ;;
+    "") log "沿用 $(engine_label "$saved")。" ;;
+    *) log "未知选项，沿用 $(engine_label "$saved")。" ;;
+  esac
+}
+
+engine_menu() {
+  printf '\n当前 AI 引擎：%s\n' "$(engine_label "$(current_engine)")"
+  printf '  1) Codex\n  2) Claude Code\n  0) 返回\n'
+  printf '请选择：'
+  local choice
+  read -r choice || true
+  case "${choice:-}" in
+    1) set_engine codex ;;
+    2) set_engine claude ;;
+    *) ;;
+  esac
+  pause
 }
 
 qq_menu() {
@@ -579,6 +663,7 @@ NODE
 
 start_hub() {
   ensure_settings
+  choose_engine
   search_config
   "$PROJECT_DIR/modules/install-launchd-plist.command"
   if [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
@@ -643,6 +728,10 @@ WELCOME
   if command -v codex >/dev/null 2>&1 && ask_yes_no "现在进行 Codex 登录和鉴权测试吗？" "Y"; then
     codex_menu "0"
   fi
+  if command -v claude >/dev/null 2>&1 && ask_yes_no "要改用 Claude Code 驱动 Bot 吗？" "N"; then
+    set_engine claude
+    claude_menu "0"
+  fi
 
   qq_menu "0"
   branding_menu "0"
@@ -689,6 +778,8 @@ Codex QQ Bot 控制中心（ncc）
 10) 打开 Hub API 状态
 11) 查看日志
 12) AI 手动任务中心
+13) 切换 AI 引擎（Codex / Claude Code）
+14) Claude Code 登录 / 鉴权测试
 0) 退出
 MENU
     printf '\n请选择：'
@@ -706,6 +797,8 @@ MENU
       10) open_hub_api; pause ;;
       11) print_logs; pause ;;
       12) ai_task_menu ;;
+      13) engine_menu ;;
+      14) claude_menu ;;
       0|q|quit|exit) break ;;
       *) log "未知选项。"; pause ;;
     esac
@@ -717,6 +810,14 @@ case "${1:-menu}" in
   first-run|deploy) first_run_wizard ;;
   status|doctor) show_status ;;
   codex-login|codex) codex_menu ;;
+  claude-login|claude) claude_menu ;;
+  engine)
+    if [ -n "${2:-}" ]; then
+      set_engine "$2"
+    else
+      printf '%s\n' "$(current_engine)"
+    fi
+    ;;
   qq) qq_menu ;;
   owner) owner_menu ;;
   groups) groups_menu ;;
@@ -731,7 +832,7 @@ case "${1:-menu}" in
   logs) shift; print_logs "$@" ;;
   help|-h|--help)
     cat <<EOF
-用法：ncc [menu|first-run|status|codex-login|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full]|branding|search-config|start|open|logs]
+用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full]|branding|search-config|start|open|logs]
 首次直接运行 ncc：自动检测环境、安装依赖、验证并填写配置；完成后再运行为常规功能菜单。
 安装中断后重新运行同一个 ncc，会验证并复用已完成的源码、环境、npm 依赖阶段。
 日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
@@ -740,7 +841,7 @@ EOF
     ;;
   *)
     cat <<EOF
-用法：ncc [menu|first-run|status|codex-login|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full]|branding|search-config|start|open|logs]
+用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full]|branding|search-config|start|open|logs]
 日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
 项目目录：$PROJECT_DIR
 EOF

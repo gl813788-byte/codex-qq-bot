@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,22 @@ test("repository ncc resolves its project when invoked outside the checkout or t
     }
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("repository ncc saves the chosen agent engine in config/local.env", async () => {
+  const home = await mkdtemp(join(tmpdir(), "codex-qq-bot-engine-"));
+  const env = { ...process.env, GPT_QQ_BOT_HOME: home };
+  const run = (...args) => execFileSync("zsh", [commandPath, ...args], { cwd: tmpdir(), encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    assert.equal(run("engine").trim(), "codex");
+    assert.match(run("engine", "claude"), /Claude Code/);
+    assert.equal(run("engine").trim(), "claude");
+    assert.match(await readFile(join(home, "config", "local.env"), "utf8"), /^export CODEX_REMOTE_CONTACT_AGENT_ENGINE=claude$/m);
+    assert.throws(() => run("engine", "gemini"));
+    assert.equal(run("engine").trim(), "claude");
+  } finally {
+    await rm(home, { recursive: true, force: true });
   }
 });
 

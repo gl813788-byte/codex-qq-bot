@@ -15,6 +15,8 @@
 3. 在一个允许 Codex 写入的稳定工作目录启动 Codex。首次部署不要从“下载”目录运行长期服务。
 4. 保持默认权限；下载、系统包安装、提权和外部目录写入让 Codex按需申请批准。
 
+用 Claude Code 部署也可以，把下面同一段提示词交给它即可。想让 Bot 本身由 Claude Code 驱动，部署完成后运行 `npm run ncc -- engine claude`，再重启 Hub。
+
 ## 不打开 GitHub 的一行安装
 
 已经安装 Node.js 时运行：

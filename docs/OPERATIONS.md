@@ -67,6 +67,20 @@ On this configured machine the global controller starts QQ from the stable `NAPC
 
 Before startup, the machine controller reads `/proc/meminfo` `MemAvailable` once and selects a standard, balanced, or low-memory profile; it does not run a resident memory monitor. The profile constrains both QQ's V8 heap/renderer count and Hub's Node heap/Codex concurrency and queues. Use `ncc resources` to preview the selection. `ncc all` always starts both components in receiver-first order, and removes a newly started Hub if QQ startup fails. QQ and Xvfb run directly in separate `screen` sessions, with no background shell `wait` supervisor that can spin under Termux/PRoot.
 
+### Switching the AI engine
+
+The bot can be driven by Codex or Claude Code. Running `npm run ncc -- start` in a terminal first asks which one to use this time; pressing Enter keeps the last choice. Non-interactive starts (launchd, scripts) do not ask and use the value saved in `config/local.env`. You can also switch on its own:
+
+```bash
+npm run ncc -- engine            # show the current engine
+npm run ncc -- engine claude     # or codex
+npm run ncc -- claude-login      # Claude Code sign-in and auth test
+```
+
+A Hub that is already running only changes engine after a restart. The machine-specific controller offers the matching `ncc engine [codex|claude]` and `ncc claude-status`, and `ncc all` / `ncc hub` also ask first in a terminal; if the running Hub uses the other engine, it asks whether to restart. The `agent.engine` field in `/api/maintenance` shows which engine the running Hub actually uses.
+
+Claude Code uses the machine's own `claude` sign-in by default. To go through a relay, put `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` (or `ANTHROPIC_API_KEY`) in `~/.claude/ncc-profiles/active.env`; it is re-read every turn, so the Hub does not need a restart.
+
 Session mode can be managed from the QQ menu or `ncc`:
 
 ```bash

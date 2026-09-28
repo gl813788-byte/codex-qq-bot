@@ -174,6 +174,18 @@ A non-loopback listener requires explicit remote allowance and a token. Wildcard
 
 The Hub classifies each Codex task and scales its base deadline by the current reasoning effort: `low ×1`, `medium ×1.5`, `high ×2`, `xhigh ×3`, `max ×4`, and `ultra ×5`. Ordinary text replies therefore start at two minutes for `low` and rise by effort, while vision, summary, file, and image tasks retain distinct bases. Values are milliseconds. Effective normal-task deadlines are capped at 30 minutes and image generation at 60 minutes. App Server owns native multi-turn tools and context compaction; the removed text budget/continue protocol no longer changes these limits. When an active QQ turn accepts steered follow-up input or a fused follow-up starts a replacement turn, it receives a fresh full task-specific window. A fused replacement must also remain protocol-idle for that full effective window before the Hub isolates it and performs the one allowed fresh-thread retry; this replaces the former fixed one-minute cutoff. `/详细配置`, `/api/state`, `/api/maintenance`, and structured Codex logs expose current native settings and task timing.
 
+### AI engine (Codex / Claude Code)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CODEX_REMOTE_CONTACT_AGENT_ENGINE` | `codex` | Engine that drives the bot: `codex` or `claude`. The repository `ncc engine` command and an interactive `ncc start` write it to `config/local.env` |
+| `CLAUDE_CLI_PATH` | `claude` | Claude Code executable, looked up on `PATH` by default |
+| `CODEX_REMOTE_CONTACT_CLAUDE_MODEL` | `opus` | Model for Claude Code: an alias (`opus`, `sonnet`, `haiku`) or a full model name |
+| `CODEX_REMOTE_CONTACT_CLAUDE_EFFORT` | empty | Claude Code reasoning effort: `low`, `medium`, `high`, `xhigh` or `max`. When empty it follows the bot's `ai.reasoningEffort` (`minimal` maps to `low`, `ultra` to `max`) |
+| `CLAUDE_ENV_FILE` | `~/.claude/ncc-profiles/active.env` | Optional Claude connection profile. When the file exists, its connection variables such as `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` replace inherited ones and are re-read every turn; without it the machine's own `claude` sign-in is used |
+
+With Claude Code, `ai.model`, the reasoning summary, the Codex personality and the service tier have no effect, and quota information only applies to Codex. The task deadlines above still apply, but every turn starts a new `claude -p` process and its cold start counts against the deadline. Claude children inherit only the variables they need to run plus `CODEX_REMOTE_CONTACT_*` markers (except names containing KEY, TOKEN, SECRET, PASSWORD or COOKIE); other Hub secrets are not passed on.
+
 ### OneBot
 
 | Variable | Default | Purpose |

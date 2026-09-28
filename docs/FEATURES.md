@@ -2,7 +2,9 @@
 
 [简体中文](FEATURES_CN.md) | English
 
-Codex QQ Bot is a local message hub: OneBot provides QQ transport, the Hub owns permissions, context, tools, memory and delivery, and Codex CLI performs reasoning and tasks. QQ, NapCat and LLBot binaries are not distributed by this repository.
+Codex QQ Bot is a local message hub: OneBot provides QQ transport, the Hub owns permissions, context, tools, memory and delivery, and Codex CLI or Claude Code performs reasoning and tasks (pick one at startup; see [operations](OPERATIONS.md#switching-the-ai-engine)). QQ, NapCat and LLBot binaries are not distributed by this repository.
+
+The rest of this page describes Codex. With Claude Code the reply chain, QQ tools, follow-up fusion, session modes and memory are the same; the differences are: no image generation, no shell for tasks triggered by ordinary group members, web search but no page fetching, no quota display, and the extra cold start of `claude -p` on every turn.
 
 ## QQ transport and triggers
 

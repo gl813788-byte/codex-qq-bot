@@ -20,6 +20,7 @@ test("owner file Agent receives project capability with bounded writes", () => {
   assert.equal(turn.cwd, "/project");
   assert.deepEqual(turn.writableRoots, [taskWorkspace.root, "/project"]);
   assert.deepEqual(turn.runtimeWorkspaceRoots, ["/project", taskWorkspace.root]);
+  assert.equal(turn.shellAccess, true);
   assert.match(turn.developerInstructions, /原生文件 Agent/);
   assert.match(turn.developerInstructions, /原生 commentary 写少量可直接发给 QQ 用户的自然中文进度/);
   assert.match(turn.prompt, /修改 src\/app\.js/);
@@ -37,6 +38,7 @@ test("public image Agent is isolated to its task workspace", () => {
   assert.equal(turn.cwd, taskWorkspace.root);
   assert.deepEqual(turn.writableRoots, [taskWorkspace.root]);
   assert.deepEqual(turn.runtimeWorkspaceRoots, [taskWorkspace.root]);
+  assert.equal(turn.shellAccess, false);
   assert.equal(turn.prompt.includes("当前项目：/project"), false);
   assert.match(turn.developerInstructions, /不得探查本机其他文件/);
 });

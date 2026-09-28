@@ -86,3 +86,25 @@ test("normalizes DeepSeek and custom interest model credentials", () => {
   assert.equal(custom.customInterestModelApiKey, "custom-key");
   assert.equal(custom.customInterestModelBaseUrl, "https://models.example/v1");
 });
+
+test("selects the agent engine and Claude Code defaults from the environment", () => {
+  const defaults = createEnvironmentConfig({});
+  assert.equal(defaults.agentEngine, "codex");
+  assert.equal(defaults.claudeCliPath, "claude");
+  assert.equal(defaults.claudeModel, "opus");
+  assert.equal(defaults.claudeReasoningEffort, null);
+
+  const claude = createEnvironmentConfig({
+    CODEX_REMOTE_CONTACT_AGENT_ENGINE: " Claude ",
+    CLAUDE_CLI_PATH: "/opt/claude/bin/claude",
+    CODEX_REMOTE_CONTACT_CLAUDE_MODEL: "sonnet",
+    CODEX_REMOTE_CONTACT_CLAUDE_EFFORT: "XHIGH"
+  });
+  assert.equal(claude.agentEngine, "claude");
+  assert.equal(claude.claudeCliPath, "/opt/claude/bin/claude");
+  assert.equal(claude.claudeModel, "sonnet");
+  assert.equal(claude.claudeReasoningEffort, "xhigh");
+
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_AGENT_ENGINE: "gemini" }).agentEngine, "codex");
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_CLAUDE_EFFORT: "turbo" }).claudeReasoningEffort, null);
+});
