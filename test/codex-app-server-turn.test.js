@@ -3,6 +3,30 @@ import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 import test from "node:test";
 import { runCodexAppServerTurn } from "../src/codex-app-server-turn.js";
+import { fingerprintQqCodexDynamicTools, resolveQqCodexReusableThreadId, QQ_CODEX_SESSION_PROTOCOL_VERSION } from "../src/qq-codex-session.js";
+
+test("a changed QQ tool catalog starts a fresh thread with complete context", async () => {
+  const oldTools = [{ type: "function", name: "old_tool", description: "old", inputSchema: { type: "object" } }];
+  const newTools = [{ ...oldTools[0], name: "new_tool" }];
+  const plan = { persistent: true, existingThread: {
+    threadId: "thread-old", protocolVersion: QQ_CODEX_SESSION_PROTOCOL_VERSION,
+    dynamicToolsFingerprint: fingerprintQqCodexDynamicTools(oldTools)
+  } };
+  const server = createFakeAppServer();
+  const result = await runCodexAppServerTurn({
+    threadId: resolveQqCodexReusableThreadId(plan, newTools),
+    dynamicTools: newTools,
+    prompt: "complete conversation and current task",
+    resumePrompt: "only the latest delta",
+    ephemeral: false,
+    spawnProcess: server.spawn,
+    onReady: () => server.complete("done")
+  });
+  assert.equal(result.resumed, false);
+  assert.equal(server.messages.some((message) => message.method === "thread/resume"), false);
+  assert.deepEqual(server.messages.find((message) => message.method === "thread/start").params.dynamicTools, newTools);
+  assert.equal(server.messages.find((message) => message.method === "turn/start").params.input[0].text, "complete conversation and current task");
+});
 
 test("runs one app-server turn and steers additional input into the active turn", async () => {
   const server = createFakeAppServer();
@@ -247,9 +271,9 @@ test("resumes a persistent thread and falls back to a new one when it is stale",
   resumedServer.complete("continued");
   assert.equal((await resumedResult).resumed, true);
   assert.ok(resumedServer.messages.some((message) => message.method === "thread/resume"));
-  assert.deepEqual(
+  assert.equal(
     resumedServer.messages.find((message) => message.method === "thread/resume").params.dynamicTools,
-    resumedTools
+    undefined
   );
   assert.equal(resumedServer.messages.some((message) => message.method === "thread/start"), false);
   assert.equal(

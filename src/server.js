@@ -294,12 +294,13 @@ import {
 } from "./infrastructure/codex/qq-context-summary-output.js";
 import { createQqContextSemanticScorer } from "./qq-context-relevance.js";
 import {
-  QQ_CODEX_SESSION_PROTOCOL_VERSION,
+  fingerprintQqCodexDynamicTools,
   normalizeQqCodexSessionMode,
   normalizeQqCodexSessionSettings,
   normalizeQqCodexSessionStore,
   removeQqCodexSessionThread,
   resolveQqCodexSessionPlan,
+  resolveQqCodexReusableThreadId,
   upsertQqCodexSessionThread
 } from "./qq-codex-session.js";
 import { createWallClockScheduler } from "./wall-clock-scheduler.js";
@@ -2613,7 +2614,8 @@ async function commitQqCodexSessionForEvent(event) {
     threadId,
     model: state.ai.model,
     reasoningEffort: state.ai.reasoningEffort,
-    lastContextAt: event.qqCodexContextAt
+    lastContextAt: event.qqCodexContextAt,
+    dynamicToolsFingerprint: event.qqCodexDynamicToolsFingerprint
   });
   await saveQqCodexSessions();
   return true;
@@ -6315,7 +6317,8 @@ function preserveStoppedQqCodexSession(active) {
     threadId,
     model: state.ai.model,
     reasoningEffort: state.ai.reasoningEffort,
-    lastContextAt: event?.qqCodexContextAt
+    lastContextAt: event?.qqCodexContextAt,
+    dynamicToolsFingerprint: event?.qqCodexDynamicToolsFingerprint
   });
   if (event) {
     event.qqCodexSessionThreadId = threadId;
@@ -9026,10 +9029,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     scopeId,
     recentReplyEntries: scopeId ? state.qq.memory.entries[scopeId] || [] : []
   });
-  let qqCodexThreadId = qqCodexSessionPlan.persistent
-    && qqCodexSessionPlan.existingThread?.protocolVersion === QQ_CODEX_SESSION_PROTOCOL_VERSION
-    ? qqCodexSessionPlan.existingThread.threadId
-    : null;
+  let qqCodexThreadId = null;
   let qqCodexSessionContextDelivered = false;
   event.qqCodexSession = {
     configuredMode: qqCodexSessionPlan.configuredMode,
@@ -9147,6 +9147,14 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     hasMemoryPeople: event.qqMemoryPeople.length > 0,
     canRecordRobotProfiles: event.qqRobotProfileCandidates.length > 0
   });
+  qqCodexThreadId = resolveQqCodexReusableThreadId(qqCodexSessionPlan, nativeToolSpecs);
+  event.qqCodexDynamicToolsFingerprint = fingerprintQqCodexDynamicTools(nativeToolSpecs);
+  if (!qqCodexThreadId) {
+    event.qqCodexInjectedMessageIds = [
+      ...getQqTriggerMessageIds(event),
+      ...(event.qqModelContextMessageIds || [])
+    ];
+  }
   const dispatchNativeTool = createQqNativeToolDispatcher({
     executeCommand: async (command, toolEvent) => {
       const result = await executeQqBotInternalCommand(command, toolEvent);

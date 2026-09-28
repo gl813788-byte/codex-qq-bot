@@ -192,6 +192,10 @@ The browser Live Logs view fetches complete structured entries every second, kee
 
 Interactive terminal output uses stable, independent colors for level, category, trace, outcome/error and latency. Use `--color` to force ANSI outside a TTY, `--plain` to disable it and `--json` for raw machine-readable fields. The Chinese viewer and dashboard share Chinese event names for every fixed structured event and recursively localize nested details such as startup adaptive-learning snapshots and language candidates, while JSON retains the stable original English `message` and the API adds `messageZh` plus `detailsZh`. Human output folds multiline values onto one line. Concrete Codex and interest-model output is retained at `debug` level, bounded to 4,000 characters and passed through log secret redaction; full input prompts and deletion-application chat evidence are not duplicated into logs, and Codex child failures retain only extracted diagnostic lines.
 
+### Codex persistent-session compatibility
+
+Codex 0.158 restores a thread's original dynamic tools on resume. The Hub stores a tool-definition fingerprint and starts a fresh thread with the complete current context when the tool catalog, permission-dependent tool set, or parameter schema changes. Legacy mappings without a fingerprint are safely replaced on the next reply; QQ memory, persona, permissions, and original Codex history remain intact. Unchanged tool catalogs continue to reuse the existing thread.
+
 ## Safe Hub restart
 
 1. Inspect `/api/state`, the dashboard and recent lifecycle logs for active work.
