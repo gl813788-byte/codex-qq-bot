@@ -21,7 +21,7 @@ This repository runs a local Hub between QQ/OneBot and a local agent CLI (Codex 
 - Put application state construction and startup composition in `src/app/`.
 - Normalize untrusted transport input in `src/channels/` before domain logic consumes it.
 - Keep domain behavior in focused existing modules such as `src/qq-enhancer/` and `src/unified-memory/`.
-- Keep engine-specific agent code in `src/infrastructure/codex/` or `src/infrastructure/claude/`; only the turn runner chooses between Codex and Claude Code.
+- Keep engine-specific agent code in `src/infrastructure/codex/` or `src/infrastructure/claude/`, and engine-neutral turn/child-env plumbing in `src/infrastructure/agent/`; only the turn runner's engine table chooses between Codex and Claude Code.
 - Keep network, filesystem and child-process side effects behind small exported interfaces.
 - Prefer small behavior-preserving extractions with focused tests over broad file moves.
 

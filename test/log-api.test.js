@@ -75,7 +75,9 @@ test("log API filters complete traces and returns aggregate diagnostics", async 
   assert.equal(trace.entries.length, 3);
   assert.equal(trace.entries[0].level, "debug");
   assert.equal(trace.summary.traceCount, 1);
-  assert.deepEqual(trace.summary.byCategory, { lifecycle: 2, codex: 1 });
+  // Legacy "codex" entries are presented as agent entries from Codex.
+  assert.deepEqual(trace.summary.byCategory, { lifecycle: 2, agent: 1 });
+  assert.deepEqual(trace.summary.byEngine, { codex: 1 });
   assert.deepEqual(trace.summary.duration, { sampleCount: 2, p50Ms: 1800, p95Ms: 2200, maxMs: 2200 });
 
   const slow = await buildLogsResponse(filePath, new URLSearchParams("group=123&slow=2000&q=sent"));
@@ -114,4 +116,38 @@ test("log API filters unified operations across source and target sessions", asy
   assert.equal(response.entries[0].detailsZh["操作者角色"], "Bot 管理员");
   assert.deepEqual(response.summary.byOperation, { "session.send": 1 });
   assert.deepEqual(response.summary.byOutcome, { success: 1 });
+});
+
+test("log API tags agent entries with their engine and filters by engine", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-qq-log-api-engine-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = join(directory, "hub.jsonl");
+  const logger = createLogger({ filePath, minLevel: "debug", consoleOutput: false });
+  logger.success("Codex app-server turn finished", { durationMs: 10 }, "codex");
+  logger.success("Claude Code turn finished", { durationMs: 20, threadId: "claude:11111111-2222-4333-8444-555555555555" }, "codex");
+  logger.success("Claude Code turn finished", { engine: "claude", model: "opus", durationMs: 30 }, "agent");
+  logger.debug("QQ native Agent progress", { engine: "codex", progressText: "working" }, "agent");
+  logger.info("OneBot message received", {}, "onebot");
+  await logger.flush();
+
+  const all = await buildLogsResponse(filePath, new URLSearchParams());
+  assert.deepEqual(all.entries.map((entry) => [entry.category, entry.engine]), [
+    ["agent", "codex"],
+    ["agent", "claude"],
+    ["agent", "claude"],
+    ["agent", "codex"],
+    ["onebot", null]
+  ]);
+  assert.deepEqual(all.summary.byCategory, { agent: 4, onebot: 1 });
+  assert.deepEqual(all.summary.byEngine, { codex: 2, claude: 2 });
+  assert.equal(all.entries[2].detailsZh["AI 引擎"], "Claude Code");
+  assert.equal(all.entries[3].messageZh, "QQ 原生智能体进度已记录");
+
+  const claude = await buildLogsResponse(filePath, new URLSearchParams("engine=claude"));
+  assert.deepEqual(claude.entries.map((entry) => entry.details.durationMs), [20, 30]);
+  assert.equal(claude.filters.engine, "claude");
+
+  const agentCategory = await buildLogsResponse(filePath, new URLSearchParams("category=agent&verbose=0"));
+  assert.equal(agentCategory.matched, 4);
+  assert.equal(agentCategory.entries.at(-1).details.engine, "codex");
 });

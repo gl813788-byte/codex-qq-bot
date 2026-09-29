@@ -154,7 +154,8 @@ Hub 自带 QQ 联网查询，不依赖当前聊天界面的浏览工具。支持
 
 本地仪表盘提供：
 
-- Hub、Codex、OneBot 与 QQ 通道状态。
+- 顶栏、侧栏和引擎卡片始终标出当前 AI 引擎（Codex 或 Claude Code），并显示该引擎的模型、思考强度、CLI 版本、连接方式、最近一次运行和队列；只有引擎是 Codex 时才显示 Codex 用量窗口。
+- Hub、AI 引擎、OneBot、QQ 通道与联网查询状态。
 - 群白名单、模型、短期记忆、自适应学习和主动兴趣状态。
 - 独立的长期知识工作区：按黑话/知识和全局/群/成员/群内成员筛选，查看同词的不同解释、命中频率、最近语境与模型审查结果，并精确增删改当前范围解释。
 - 维护信息、结构化日志筛选、主题、语言和响应式布局。
@@ -173,7 +174,7 @@ GET /api/memory
 POST /api/qq/knowledge
 ```
 
-日志采用兼容旧记录的 JSONL schema v3。Agent 轮次/工具、跨会话发送、好友/加群、管理员变更和设置持久化统一使用 `operation`、`outcome`、`actorRole`、`actorUserId`、`sourceScopeId`、`targetScopeId`、`targetType`、工具标识、耗时和错误代码；不记录动态工具参数或跨会话消息正文。除 level、category、trace、group、sender、关键词、时间和延迟外，API 与 `ncc logs` 还支持 `scope` 和 `operation` 过滤，摘要同时按操作与结果计数。单条 QQ 生命周期共享 trace，便于从入站、judge、融合追问、搜索、Codex 到投递定位问题。融合日志记录 5 秒缓冲、直接截断并开始替代回答、已完成旧草稿在发送前被融合追问替换、触发来源、原始/压缩数量、中间语境数、图片数和有界内容预览；投递日志还记录成功/失败气泡数，并在失败回执为下一轮保留时单独留痕。`ncc logs` 沿用现有彩色级别/分类字幕和中文字段。短期记忆变更、知识库查询/更新、黑话命中频率、低频删除申请与模型审核都使用同一 `memory` 分类和结构化详情。Codex 与兴趣模型的具体输出会以 `debug` 详情进行长度限制和密钥脱敏后记录，但不会复制完整输入提示词；中文终端和网页日志会递归中文化启动时的自动学习快照及其他详情字段。
+日志采用兼容旧记录的 JSONL schema v3。Agent 轮次/工具、跨会话发送、好友/加群、管理员变更和设置持久化统一使用 `operation`、`outcome`、`actorRole`、`actorUserId`、`sourceScopeId`、`targetScopeId`、`targetType`、工具标识、耗时和错误代码；不记录动态工具参数或跨会话消息正文。除 level、category、trace、group、sender、关键词、时间和延迟外，API 与 `ncc logs` 还支持 `scope` 和 `operation` 过滤，摘要同时按操作与结果计数。Agent 轮次、工具、进度和模型输出统一使用引擎无关的 `agent`（智能体）分类，并在 `details.engine` 里标明 `codex` 或 `claude`；API 与 `ncc logs` 可按 `engine` 过滤，摘要用 `summary.byEngine` 计数，旧的 `codex` 分类条目会按智能体条目展示（最早一批记在 `codex` 下的 Claude Code 轮次按消息或 `claude:` 线程识别）。单条 QQ 生命周期共享 trace，便于从入站、judge、融合追问、搜索、Agent 轮次到投递定位问题。融合日志记录 5 秒缓冲、直接截断并开始替代回答、已完成旧草稿在发送前被融合追问替换、触发来源、原始/压缩数量、中间语境数、图片数和有界内容预览；投递日志还记录成功/失败气泡数，并在失败回执为下一轮保留时单独留痕。`ncc logs` 沿用现有彩色级别/分类字幕和中文字段。短期记忆变更、知识库查询/更新、黑话命中频率、低频删除申请与模型审核都使用同一 `memory` 分类和结构化详情。Agent 与兴趣模型的具体输出会以 `debug` 详情进行长度限制和密钥脱敏后记录，并注明所用引擎和实际模型，但不会复制完整输入提示词；中文终端和网页日志会递归中文化启动时的自动学习快照及其他详情字段。
 
 ## macOS 客户端
 

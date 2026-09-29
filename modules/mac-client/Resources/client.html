@@ -1,362 +1,308 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN" data-theme="system">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="description" content="Codex QQ Bot 本地通讯中枢控制台" />
+    <meta name="description" content="Codex QQ Bot 本地控制台" />
     <meta name="color-scheme" content="light dark" />
-    <title>Nexus · Codex QQ Bot</title>
+    <title>Codex QQ Bot</title>
     <link rel="stylesheet" href="client.css" />
   </head>
   <body>
     <a class="skip-link" href="#mainContent" data-i18n="skipToContent">跳到主要内容</a>
-    <div class="ambient-layer" aria-hidden="true">
-      <span class="ambient-orb orb-a"></span>
-      <span class="ambient-orb orb-b"></span>
-      <span class="ambient-grid"></span>
-    </div>
 
-    <div class="app-frame">
+    <div class="shell">
       <aside class="sidebar" aria-label="主导航" data-i18n-aria-label="mainNavigation">
-        <a class="brand" href="#overview" aria-label="Nexus 首页" data-i18n-aria-label="brandHome">
+        <a class="brand" href="#overview" aria-label="控制台首页" data-i18n-aria-label="brandHome">
           <span class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 44 44" role="img">
-              <path d="M8 36V8l28 28V8M14 36V23" />
-            </svg>
+            <svg viewBox="0 0 24 24"><path d="M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v7a2.5 2.5 0 0 1-2.5 2.5H11l-4 3.5V16h.5" /><path d="M9 9.5h.01M15 9.5h.01M9.5 12.5c1.4 1 3.6 1 5 0" /></svg>
           </span>
-          <span>
-            <strong>Nexus</strong>
-            <small>Remote Contact</small>
-          </span>
+          <span class="brand-copy"><strong>QQ Bot</strong><small data-i18n="brandSubtitle">本地控制台</small></span>
         </a>
 
-        <nav class="primary-nav" id="desktopNav">
+        <nav class="nav" id="desktopNav">
           <button class="nav-item active" type="button" data-view="overview" aria-current="page">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z" /></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="8" rx="1.8" /><rect x="13.5" y="3.5" width="7" height="5" rx="1.8" /><rect x="3.5" y="14.5" width="7" height="6" rx="1.8" /><rect x="13.5" y="11.5" width="7" height="9" rx="1.8" /></svg>
             <span data-i18n="navOverview">总览</span>
           </button>
           <button class="nav-item" type="button" data-view="channels">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v11H8l-3 3V5Zm4 5h6M9 7.5h8" /></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5.5h15v10h-9l-4.5 3.5v-3.5h-1.5z" /><path d="M8.5 9.5h7M8.5 12h4" /></svg>
             <span data-i18n="navChannels">通道</span>
           </button>
           <button class="nav-item" type="button" data-view="intelligence">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a4 4 0 0 0-3.8 2.8A4 4 0 0 0 5 12a4 4 0 0 0 3.2 6.2A4 4 0 0 0 12 21m0-18a4 4 0 0 1 3.8 2.8A4 4 0 0 1 19 12a4 4 0 0 1-3.2 6.2A4 4 0 0 1 12 21m0-18v18M8.5 9.5H12m3.5 5H12" /></svg>
-            <span data-i18n="navIntelligence">智能行为</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5v15M8 7.5a3.5 3.5 0 0 1 4-3 3.5 3.5 0 0 1 4 3 3.5 3.5 0 0 1 2.5 5.5A3.5 3.5 0 0 1 16 19.5a3.5 3.5 0 0 1-4 0 3.5 3.5 0 0 1-4 0A3.5 3.5 0 0 1 5.5 13 3.5 3.5 0 0 1 8 7.5Z" /></svg>
+            <span data-i18n="navIntelligence">行为</span>
           </button>
           <button class="nav-item" type="button" data-view="memory">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7c0-2 3.1-3 7-3s7 1 7 3-3.1 3-7 3-7-1-7-3Zm0 0v5c0 2 3.1 3 7 3s7-1 7-3V7m-14 5v5c0 2 3.1 3 7 3s7-1 7-3v-5" /></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6.5" rx="7" ry="2.8" /><path d="M5 6.5v5.5c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V6.5M5 12v5.5c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V12" /></svg>
             <span data-i18n="navMemory">记忆</span>
           </button>
           <button class="nav-item" type="button" data-view="knowledge">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H20v17H7.5A3.5 3.5 0 0 0 4 22V5.5Zm0 0A3.5 3.5 0 0 1 7.5 9H20M9 5.5h7" /></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5z" /><path d="M5 20.5A2.5 2.5 0 0 1 7.5 18H19v3H7.5M9 7.5h6" /></svg>
             <span data-i18n="navKnowledge">知识</span>
           </button>
           <button class="nav-item" type="button" data-view="activity">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17h3l2.2-8 3.1 11 2.5-7H20M4 5h16" /></svg>
-            <span data-i18n="navActivity">活动与日志</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12.5h3.5l2.5-6 4 12 2.5-6h4.5" /></svg>
+            <span data-i18n="navActivity">日志</span>
           </button>
           <button class="nav-item" type="button" data-view="settings">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.3a3.3 3.3 0 1 0 0-6.6 3.3 3.3 0 0 0 0 6.6Zm7.3-3.3c0-.6-.1-1.2-.2-1.7l2-1.5-2-3.5-2.5 1a8 8 0 0 0-3-1.7L13.2 2h-4l-.4 2.6a8 8 0 0 0-3 1.7l-2.5-1-2 3.5 2 1.5A8 8 0 0 0 3.1 12c0 .6.1 1.2.2 1.7l-2 1.5 2 3.5 2.5-1a8 8 0 0 0 3 1.7l.4 2.6h4l.4-2.6a8 8 0 0 0 3-1.7l2.5 1 2-3.5-2-1.5c.1-.5.2-1.1.2-1.7Z" /></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 13.5a7.7 7.7 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.6 7.6 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.4A7.6 7.6 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.7 7.7 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.6 7.6 0 0 0 2.6 1.5l.4 2.4h4l.4-2.4a7.6 7.6 0 0 0 2.6-1.5l2.4.9 2-3.4z" /></svg>
             <span data-i18n="navSettings">设置</span>
           </button>
         </nav>
 
         <div class="sidebar-foot">
-          <div class="connection-card">
-            <span id="sidebarStatusDot" class="status-dot pending" aria-hidden="true"></span>
-            <div>
-              <strong id="sidebarStatus" data-i18n="connecting">正在连接</strong>
-              <small id="sidebarEndpoint">127.0.0.1:3789</small>
-            </div>
+          <div id="sidebarEngine" class="engine-card" data-engine="">
+            <span class="engine-glyph" aria-hidden="true"></span>
+            <span class="engine-card-copy"><small data-i18n="engineLabel">AI 引擎</small><strong id="sidebarEngineName">—</strong></span>
           </div>
-          <p class="sidebar-caption">LOCAL-FIRST · PRIVATE</p>
+          <div class="hub-line">
+            <span id="sidebarStatusDot" class="dot pending" aria-hidden="true"></span>
+            <span id="sidebarStatus" data-i18n="connecting">正在连接</span>
+            <code id="sidebarEndpoint">127.0.0.1:3789</code>
+          </div>
         </div>
       </aside>
 
       <div class="workspace">
         <header class="topbar">
-          <div class="page-identity">
-            <p id="pageEyebrow" class="eyebrow" data-i18n="workspace">工作台</p>
+          <div class="page-heading">
             <h1 id="pageTitle" tabindex="-1" data-i18n="overviewTitle">运行总览</h1>
+            <p id="pageSubtitle" class="page-subtitle"></p>
           </div>
-          <div class="top-actions">
-            <button id="commandTrigger" class="command-trigger" type="button" aria-haspopup="dialog" aria-controls="commandDialog" data-i18n-aria-label="openQuickActions">
+          <div class="topbar-actions">
+            <span id="topEngine" class="engine-pill" data-engine=""><span class="engine-glyph" aria-hidden="true"></span><span id="topEngineName">—</span></span>
+            <span id="syncState" class="sync-state" aria-live="polite"><span class="dot pending" aria-hidden="true"></span><span id="syncText" data-i18n="waitingSync">等待同步</span></span>
+            <button id="commandTrigger" class="icon-button command-button" type="button" aria-haspopup="dialog" aria-controls="commandDialog" title="快速操作" data-i18n-title="quickActions" data-i18n-aria-label="openQuickActions">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg>
-              <span data-i18n="quickActions">快速操作</span>
               <kbd aria-hidden="true">⌘K</kbd>
             </button>
-            <div id="syncState" class="sync-state" aria-live="polite">
-              <span class="sync-dot"></span>
-              <span id="syncText" data-i18n="waitingSync">等待同步</span>
-            </div>
             <button id="refreshButton" class="icon-button" type="button" title="刷新当前页面" data-i18n-title="refreshCurrent" data-i18n-aria-label="refreshCurrent">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7.5 7.5 0 1 0 .3 7m-.3-7V3m0 5h-5" /></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 8.5A8 8 0 1 0 20 14M20 4v4.5h-4.5" /></svg>
             </button>
             <button id="quickTheme" class="icon-button" type="button" title="切换主题" data-i18n-title="toggleTheme" data-i18n-aria-label="toggleTheme">
-              <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.5" /><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" /></svg>
             </button>
           </div>
         </header>
 
-        <div id="offlineBanner" class="offline-banner" hidden role="alert">
-          <span class="status-dot bad" aria-hidden="true"></span>
-          <div>
-            <strong data-i18n="hubUnavailable">Hub 暂时不可用</strong>
-            <p id="offlineReason" data-i18n="offlineHint">请确认本地服务已启动。</p>
-          </div>
-          <button id="offlineRetry" class="button compact" type="button" data-i18n="retry">重试</button>
+        <div id="offlineBanner" class="banner banner-bad" hidden role="alert">
+          <span class="dot bad" aria-hidden="true"></span>
+          <div><strong data-i18n="hubUnavailable">Hub 暂时不可用</strong><p id="offlineReason" data-i18n="offlineHint">请确认本地服务已启动。</p></div>
+          <button id="offlineRetry" class="button small" type="button" data-i18n="retry">重试</button>
         </div>
 
         <main class="content" id="mainContent">
-          <section class="view active overview-workspace" id="view-overview" data-view-panel="overview">
-            <article class="hero-card overview-lead" id="heroCard">
-              <div class="hero-copy">
-                <span id="heroStatus" class="hero-status"><span class="status-dot pending"></span><span data-i18n="connecting">正在连接</span></span>
-                <p class="section-kicker">NEXUS / OVERVIEW</p>
-                <h2 id="heroTitle" data-i18n="heroTitle">系统运行正常</h2>
-                <p id="heroBody" data-i18n="heroBody">QQ、OneBot 与 Hub 已连接，Codex 随时可用。</p>
-                <section id="overviewBrief" class="overview-brief" aria-live="polite" aria-label="运行建议" data-i18n-aria-label="runtimeBrief"></section>
-                <div class="hero-actions">
-                  <button class="text-button arrow-link" type="button" data-go-view="channels"><span data-i18n="manageChannels">管理通道</span><span aria-hidden="true">→</span></button>
-                  <button id="openHubApi" class="text-button arrow-link" type="button"><span data-i18n="openApi">查看 API</span><span aria-hidden="true">↗</span></button>
-                </div>
+          <!-- Overview -->
+          <section class="view active" id="view-overview" data-view-panel="overview">
+            <div id="statusBanner" class="status-banner pending" aria-live="polite">
+              <span class="status-banner-icon" aria-hidden="true"></span>
+              <div class="status-banner-copy"><strong id="statusTitle" data-i18n="connecting">正在连接</strong><p id="statusBody"></p></div>
+              <div class="status-banner-actions">
+                <button class="button small ghost" type="button" data-go-view="channels" data-i18n="manageChannels">管理通道</button>
+                <button id="openHubApi" class="button small ghost" type="button" data-i18n="openApi">查看 API</button>
               </div>
-              <div id="serviceTopology" class="service-topology pending" role="img" aria-label="正在读取服务连接状态">
-                <span class="topology-line horizontal" aria-hidden="true"></span>
-                <span class="topology-line vertical" aria-hidden="true"></span>
-                <span id="topologyHub" class="topology-node topology-hub pending"><i></i><strong>HUB</strong><small>CHECKING</small></span>
-                <span id="topologyQq" class="topology-node topology-qq pending"><i></i><strong>QQ</strong><small>CHECKING</small></span>
-                <span id="topologyOneBot" class="topology-node topology-onebot pending"><i></i><strong>OneBot</strong><small>CHECKING</small></span>
-                <span id="topologyCodex" class="topology-node topology-codex pending"><i></i><strong>Codex</strong><small>CHECKING</small></span>
-                <span id="topologyWeb" class="topology-node topology-web pending"><i></i><strong>Web</strong><small>CHECKING</small></span>
-              </div>
-            </article>
+            </div>
 
-            <section class="metric-ticker" aria-label="运行指标" data-i18n-aria-label="runtimeSummary">
-              <div id="overviewStats" class="today-metrics"></div>
-            </section>
+            <div id="overviewStats" class="stat-row" aria-label="运行摘要" data-i18n-aria-label="runtimeSummary"></div>
 
-            <div class="overview-operations-grid">
-              <section class="surface ruled-section health-surface">
-                <div class="section-heading">
-                  <div><span class="section-kicker" data-i18n="systemPulse">SYSTEM PULSE</span><h2 data-i18n="serviceHealth">系统脉搏</h2></div>
-                  <button id="refreshHealth" class="text-button arrow-link" type="button"><span data-i18n="checkNow">立即检查</span><span aria-hidden="true">↻</span></button>
-                </div>
-                <div class="pulse-layout">
-                  <div id="healthGrid" class="health-grid"></div>
-                  <div id="pulseChart" class="pulse-chart" aria-live="polite">
-                    <div class="pulse-chart-meta"><span id="pulseSampleLabel" data-i18n="last24Hours">实时采样</span><strong id="pulseLiveStatus" data-i18n="stableLatency">等待首个样本</strong></div>
-                    <svg viewBox="0 0 560 150" preserveAspectRatio="none" aria-hidden="true">
-                      <path class="pulse-gridline" d="M0 30H560M0 75H560M0 120H560" />
-                      <path id="pulseLine" class="pulse-line" d="" />
-                      <circle id="pulsePoint" class="pulse-point" cx="0" cy="0" r="4" hidden />
-                    </svg>
-                    <div class="pulse-axis"><span id="pulseAxisStart">—</span><span id="pulseAxisMiddle">—</span><span id="pulseAxisEnd" data-i18n="now">现在</span></div>
-                  </div>
-                </div>
+            <div class="grid overview-main">
+              <section class="card">
+                <header class="card-head">
+                  <div><h2 data-i18n="serviceHealth">服务状态</h2><p data-i18n="serviceHealthHint">Hub 与各个依赖的实时健康度</p></div>
+                  <button id="refreshHealth" class="button small ghost" type="button" data-i18n="checkNow">立即检查</button>
+                </header>
+                <div id="serviceList" class="service-list"></div>
               </section>
 
-              <section class="surface ruled-section quota-surface">
-                <div class="section-heading"><div><span class="section-kicker">CODEX</span><h2 data-i18n="usageWindow">Codex 用量</h2></div><span id="quotaUpdated" class="quiet-label">—</span></div>
-                <div id="quotaOverview" class="quota-overview"></div>
+              <section id="engineCard" class="card engine-panel" data-engine="">
+                <header class="card-head">
+                  <div class="engine-title"><span class="engine-glyph large" aria-hidden="true"></span><div><h2 id="engineTitle">—</h2><p id="engineRuntime" class="mono">—</p></div></div>
+                  <span id="engineState" class="badge">—</span>
+                </header>
+                <dl id="engineFacts" class="fact-grid"></dl>
+                <div id="engineLastRun" class="last-run"></div>
+                <div id="quotaSection" class="quota-section">
+                  <div class="subhead"><h3 data-i18n="usageWindow">Codex 用量</h3><span id="quotaUpdated" class="muted small-text">—</span></div>
+                  <div id="quotaOverview" class="quota-list"></div>
+                </div>
               </section>
             </div>
 
-            <div class="overview-lower-grid">
-              <section class="surface ruled-section recent-surface">
-                <div class="section-heading"><div><span class="section-kicker" data-i18n="recentFlow">RECENT FLOW</span><h2 data-i18n="recentActivity">最近活动</h2></div><button class="text-button arrow-link" type="button" data-go-view="activity"><span data-i18n="openLogs">查看全部日志</span><span aria-hidden="true">→</span></button></div>
-                <div id="recentTimeline" class="timeline"></div>
+            <div class="grid overview-lower">
+              <section class="card">
+                <header class="card-head">
+                  <div><h2 data-i18n="latencyTitle">接口响应</h2><p id="pulseSampleLabel" data-i18n="waitingSamples">等待首个样本</p></div>
+                  <strong id="pulseLiveStatus" class="mono pulse-value">—</strong>
+                </header>
+                <div id="pulseChart" class="pulse-chart">
+                  <svg viewBox="0 0 560 140" preserveAspectRatio="none" aria-hidden="true">
+                    <path class="pulse-grid" d="M0 35H560M0 70H560M0 105H560" />
+                    <path id="pulseArea" class="pulse-area" d="" />
+                    <path id="pulseLine" class="pulse-line" d="" />
+                    <circle id="pulsePoint" class="pulse-point" cx="0" cy="0" r="3.5" hidden />
+                  </svg>
+                  <div class="pulse-axis"><span id="pulseAxisStart">—</span><span id="pulseAxisMiddle">—</span><span id="pulseAxisEnd" data-i18n="now">现在</span></div>
+                </div>
               </section>
-              <section class="surface ruled-section channel-overview">
-                <div class="section-heading"><div><span class="section-kicker" data-i18n="quickEntryKicker">SHORTCUTS</span><h2 data-i18n="quickEntry">快捷入口</h2></div></div>
-                <div id="quickChannels" class="quick-channel-list"></div>
+              <section class="card">
+                <header class="card-head">
+                  <div><h2 data-i18n="recentActivity">最近活动</h2><p data-i18n="recentActivityHint">最近的 QQ 消息与回复</p></div>
+                  <button class="button small ghost" type="button" data-go-view="activity" data-i18n="openLogs">查看日志</button>
+                </header>
+                <div id="recentTimeline" class="timeline"></div>
               </section>
             </div>
           </section>
 
+          <!-- Channels -->
           <section class="view" id="view-channels" data-view-panel="channels" hidden>
-            <div class="view-intro">
-              <div>
-                <span class="section-kicker" data-i18n="connectionRules">CONNECTION RULES</span>
-                <h2 data-i18n="channelsHeading">管理每一条消息通道</h2>
-                <p data-i18n="channelsBody">控制 QQ/OneBot 启停与访问范围，所有改动会立即写入同一个本地 Hub。</p>
-              </div>
-            </div>
-
-            <div class="channel-layout">
-              <article class="surface channel-card qq-card">
-                <div class="channel-card-head">
-                  <div class="channel-identity">
-                    <span class="channel-icon qq"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M10.5 22.5c-2.6-1.8-3.2-5.4-1.3-7.7-.2-5.1 2.4-8.8 6.8-8.8s7 3.7 6.8 8.8c1.9 2.3 1.3 5.9-1.3 7.7M11 18c.7 5.6 9.3 5.6 10 0M12.5 26l1.8-3m5.2 3-1.8-3" /></svg></span>
+            <div class="grid channels-grid">
+              <section class="card qq-card">
+                <header class="card-head">
+                  <div class="channel-title">
+                    <span class="channel-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M10.5 22.5c-2.6-1.8-3.2-5.4-1.3-7.7-.2-5.1 2.4-8.8 6.8-8.8s7 3.7 6.8 8.8c1.9 2.3 1.3 5.9-1.3 7.7M11 18c.7 5.6 9.3 5.6 10 0M12.5 26l1.8-3m5.2 3-1.8-3" /></svg></span>
                     <div><h2>QQ</h2><p id="qqStatusText">—</p></div>
                   </div>
-                  <label class="toggle-control">
+                  <label class="switch">
                     <input id="qqToggle" type="checkbox" aria-label="启用 QQ 通道" data-i18n-aria-label="toggleQq" />
                     <span aria-hidden="true"></span>
                   </label>
-                </div>
-                <div class="channel-meta" id="qqChannelMeta"></div>
-                <div class="subsection-head">
-                  <div><h3 data-i18n="qqAllowlist">QQ群白名单</h3><p data-i18n="qqAllowlistHint">只有列表内群聊会触发助手。</p></div>
-                  <span id="groupCount" class="count-pill">0</span>
-                </div>
+                </header>
+                <div id="qqChannelMeta" class="connection-list"></div>
+              </section>
+
+              <section class="card">
+                <header class="card-head">
+                  <div><h2 data-i18n="qqAllowlist">QQ 群白名单</h2><p data-i18n="qqAllowlistHint">只有列表内的群聊会触发 Bot。</p></div>
+                  <span id="groupCount" class="badge">0</span>
+                </header>
                 <div id="groupList" class="token-list"></div>
-                <form id="addGroupForm" class="add-form" novalidate>
-                  <label class="field">
-                    <span data-i18n="groupId">群 ID</span>
-                    <input id="groupInput" inputmode="numeric" autocomplete="off" placeholder="例如 123456789" data-i18n-placeholder="groupIdExample" />
+                <form id="addGroupForm" class="inline-form" novalidate>
+                  <label class="field grow">
+                    <span class="sr-only" data-i18n="groupId">群号</span>
+                    <input id="groupInput" inputmode="numeric" autocomplete="off" placeholder="输入群号，例如 123456789" data-i18n-placeholder="groupIdExample" />
                   </label>
                   <button class="button primary" type="submit" data-i18n="add">添加</button>
                 </form>
-              </article>
-            </div>
-
-            <div class="event-grid">
-              <section class="surface channel-events-panel">
-                <div class="section-heading compact"><h2 data-i18n="qqRecent">QQ 最近事件</h2><span id="qqEventCount" class="quiet-label">0</span></div>
-                <div class="event-table-head" aria-hidden="true"><span>TIME</span><span>SCOPE</span><span>SENDER</span><span>STATE</span><span>MESSAGE</span></div>
-                <div id="qqEvents" class="event-list"></div>
               </section>
             </div>
+
+            <section class="card">
+              <header class="card-head">
+                <div><h2 data-i18n="qqRecent">QQ 最近事件</h2><p data-i18n="qqRecentHint">最近 30 条进入 Hub 的 QQ 消息</p></div>
+                <span id="qqEventCount" class="badge">0</span>
+              </header>
+              <div class="table-wrap">
+                <div class="event-table-head" aria-hidden="true"><span data-i18n="colTime">时间</span><span data-i18n="colScope">来源</span><span data-i18n="colSender">发送者</span><span data-i18n="colState">状态</span><span data-i18n="colMessage">消息</span></div>
+                <div id="qqEvents" class="event-list"></div>
+              </div>
+            </section>
           </section>
 
+          <!-- Intelligence -->
           <section class="view" id="view-intelligence" data-view-panel="intelligence" hidden>
-            <div class="view-intro with-actions">
-              <div>
-                <span class="section-kicker" data-i18n="behaviorLab">BEHAVIOR LAB</span>
-                <h2 data-i18n="intelligenceHeading">把 Bot 的习惯和主动性分开看</h2>
-                <p data-i18n="intelligenceBody">人设、表达习惯、群聊节奏与主动兴趣各自成区，状态更清楚，也不会挤占通道配置。</p>
-              </div>
-              <button class="button ghost" type="button" data-open-feature-logs="learning" data-i18n="openLearningLogs">查看学习日志</button>
-            </div>
-
-            <section class="surface bot-control-panel">
-              <div class="section-heading">
-                <div>
-                  <span class="section-kicker" data-i18n="botControlKicker">BOT CONTROL</span>
-                  <h2 data-i18n="botControlHeading">功能开关与调试参数</h2>
-                  <p data-i18n="botControlBody">开关会立即持久化；判定频率、模型和超时用于调试主动兴趣，不影响显式 @ Bot 的正常回复。</p>
-                </div>
+            <section class="card bot-control-panel">
+              <header class="card-head">
+                <div><h2 data-i18n="botControlHeading">功能开关与调试参数</h2><p data-i18n="botControlBody">开关立即生效；判定参数只影响主动兴趣，不影响直接 @ Bot 的回复。</p></div>
                 <span id="botControlStatus" class="save-state" data-i18n="settingsSynced">设置已同步</span>
-              </div>
-              <div id="botDiagnostics" class="bot-diagnostics" aria-live="polite"></div>
+              </header>
+              <div id="botDiagnostics" class="chip-row" aria-live="polite"></div>
               <form id="botSettingsForm" class="bot-settings-form">
-                <div class="feature-toggle-grid">
-                  <label class="feature-toggle-card">
+                <div class="toggle-grid">
+                  <label class="toggle-card">
                     <span><strong data-i18n="qqEnhancerFeature">QQ 增强能力</strong><small data-i18n="qqEnhancerFeatureHint">图片上下文、自然表达与扩展行为的总开关。</small></span>
-                    <input id="botEnhancerToggle" type="checkbox" />
+                    <span class="switch"><input id="botEnhancerToggle" type="checkbox" /><span aria-hidden="true"></span></span>
                   </label>
-                  <label class="feature-toggle-card">
+                  <label class="toggle-card">
                     <span><strong data-i18n="webLookupFeature">联网查询</strong><small data-i18n="webLookupFeatureHint">允许 Bot 在需要时调用已配置的搜索服务。</small></span>
-                    <input id="botWebLookupToggle" type="checkbox" />
+                    <span class="switch"><input id="botWebLookupToggle" type="checkbox" /><span aria-hidden="true"></span></span>
                   </label>
-                  <label class="feature-toggle-card">
+                  <label class="toggle-card">
                     <span><strong data-i18n="proactiveFeature">主动兴趣</strong><small data-i18n="proactiveFeatureHint">允许普通群消息、冷群和私聊进入主动判断。</small></span>
-                    <input id="botProactiveToggle" type="checkbox" />
+                    <span class="switch"><input id="botProactiveToggle" type="checkbox" /><span aria-hidden="true"></span></span>
                   </label>
-                  <label class="feature-toggle-card">
-                    <span><strong data-i18n="interestJudgeFeature">兴趣模型判定</strong><small data-i18n="interestJudgeFeatureHint">使用所选厂商的模型判断是否值得自然接话。</small></span>
-                    <input id="botJudgeToggle" type="checkbox" />
+                  <label class="toggle-card">
+                    <span><strong data-i18n="interestJudgeFeature">兴趣模型判定</strong><small data-i18n="interestJudgeFeatureHint">用所选服务的模型判断是否值得自然接话。</small></span>
+                    <span class="switch"><input id="botJudgeToggle" type="checkbox" /><span aria-hidden="true"></span></span>
                   </label>
                 </div>
-                <div class="bot-tuning-grid">
+                <div class="tuning-grid">
+                  <label class="field"><span data-i18n="judgeProvider">模型服务</span><select id="botJudgeProvider"><option value="openrouter">OpenRouter</option><option value="deepseek">DeepSeek</option><option value="custom" data-i18n="judgeProviderCustom">自定义兼容服务</option></select></label>
+                  <label class="field"><span data-i18n="judgeModel">判定模型</span><input id="botJudgeModel" autocomplete="off" spellcheck="false" /></label>
+                  <label class="field"><span data-i18n="judgeTimeout">静默超时（ms）</span><input id="botJudgeTimeout" type="number" min="1500" max="20000" step="100" /></label>
                   <label class="field"><span data-i18n="judgeEveryMessages">消息间隔</span><input id="botJudgeMessages" type="number" min="1" max="1000" step="1" /></label>
                   <label class="field"><span data-i18n="judgeEveryMinutes">分钟间隔</span><input id="botJudgeMinutes" type="number" min="0" max="1440" step="1" /></label>
-                  <label class="field"><span data-i18n="judgeProvider">模型厂商</span><select id="botJudgeProvider"><option value="openrouter">OpenRouter</option><option value="deepseek">DeepSeek</option><option value="custom" data-i18n="judgeProviderCustom">自定义兼容服务</option></select></label>
-                  <label class="field model-field"><span data-i18n="judgeModel">判定模型</span><input id="botJudgeModel" autocomplete="off" spellcheck="false" /></label>
-                  <label class="field"><span data-i18n="judgeTimeout">静默超时（ms）</span><input id="botJudgeTimeout" type="number" min="1500" max="20000" step="100" /></label>
                   <label class="field"><span data-i18n="judgeRecentMessages">最近上下文</span><input id="botJudgeRecent" type="number" min="1" max="12" step="1" /></label>
-                  <button id="saveBotSettings" class="button primary bot-save-button" type="submit" data-i18n="saveBotSettings">保存 Bot 设置</button>
                 </div>
+                <div class="form-actions"><button id="saveBotSettings" class="button primary" type="submit" data-i18n="saveBotSettings">保存 Bot 设置</button></div>
               </form>
             </section>
 
-            <div class="behavior-layout">
+            <div class="grid behavior-grid">
               <div class="behavior-column behavior-column-main">
-                <section class="surface behavior-panel persona-panel">
-                  <div class="section-heading">
-                    <div><span class="section-kicker" data-i18n="identityLayer">IDENTITY</span><h2 data-i18n="selfPersona">Bot 全局人设</h2><p data-i18n="selfPersonaHint">从各群和私聊的匿名摘要生成；QQ 昵称固定作为名字和兴趣关键词。</p></div>
-                    <button class="text-button compact-button" type="button" data-open-feature-logs="learning" data-log-query="self persona" data-i18n="viewDetailedLogs">查看详细日志</button>
-                  </div>
-                  <div id="qqSelfPersona" class="behavior-frequency-list"></div>
+                <section class="card">
+                  <header class="card-head">
+                    <div><h2 data-i18n="selfPersona">Bot 全局人设</h2><p data-i18n="selfPersonaHint">从各群和私聊的匿名摘要生成；QQ 昵称固定作为名字。</p></div>
+                    <button class="button small ghost" type="button" data-open-feature-logs="learning" data-log-query="self persona" data-i18n="viewDetailedLogs">查看日志</button>
+                  </header>
+                  <div id="qqSelfPersona" class="stack"></div>
                 </section>
-
-                <section class="surface behavior-panel adaptive-panel">
-                  <div class="section-heading">
-                    <div><span class="section-kicker" data-i18n="learningLayer">LEARNING</span><h2 data-i18n="adaptiveLearning">自动适应</h2><p data-i18n="adaptiveLearningHint">按群学习活跃时段、成员节奏，并按 24 小时时钟复盘真人与 Bot 的风格差异。</p></div>
-                    <button class="text-button compact-button" type="button" data-open-feature-logs="learning" data-i18n="viewDetailedLogs">查看详细日志</button>
-                  </div>
-                  <div id="qqAdaptiveLearning" class="behavior-frequency-list"></div>
+                <section class="card">
+                  <header class="card-head">
+                    <div><h2 data-i18n="adaptiveLearning">自动适应</h2><p data-i18n="adaptiveLearningHint">按群学习活跃时段与成员节奏，并每 24 小时复盘 Bot 的表达。</p></div>
+                    <button class="button small ghost" type="button" data-open-feature-logs="learning" data-i18n="viewDetailedLogs">查看日志</button>
+                  </header>
+                  <div id="qqAdaptiveLearning" class="stack"></div>
                 </section>
               </div>
-
               <div class="behavior-column behavior-column-side">
-                <section class="surface behavior-panel sticker-panel">
-                  <div class="section-heading">
-                    <div><span class="section-kicker" data-i18n="expressionLayer">EXPRESSION</span><h2 data-i18n="stickerFrequency">表情包频率</h2><p data-i18n="stickerFrequencyHint">按群查看最近真人与上线后 Bot 的实际使用率。</p></div>
-                  </div>
-                  <div id="qqStickerFrequency" class="behavior-frequency-list"></div>
+                <section class="card">
+                  <header class="card-head"><div><h2 data-i18n="stickerFrequency">表情包频率</h2><p data-i18n="stickerFrequencyHint">真人与 Bot 在各群的实际使用率。</p></div></header>
+                  <div id="qqStickerFrequency" class="stack"></div>
                 </section>
-
-                <section class="surface behavior-panel interest-panel">
-                  <div class="section-heading">
-                    <div><span class="section-kicker" data-i18n="initiativeLayer">INITIATIVE</span><h2 data-i18n="coldInterest">冷群兴趣发言</h2><p data-i18n="coldInterestHint">按最后一条消息计时，结合群节奏选择发一句或保持沉默。</p></div>
-                    <button class="text-button compact-button" type="button" data-open-feature-logs="interest" data-log-query="cold-group" data-i18n="viewDetailedLogs">查看详细日志</button>
-                  </div>
-                  <div id="qqColdInterest" class="behavior-frequency-list"></div>
+                <section class="card">
+                  <header class="card-head">
+                    <div><h2 data-i18n="coldInterest">冷群兴趣发言</h2><p data-i18n="coldInterestHint">按最后一条消息计时，结合群节奏决定发一句或保持沉默。</p></div>
+                    <button class="button small ghost" type="button" data-open-feature-logs="interest" data-log-query="cold-group" data-i18n="viewDetailedLogs">查看日志</button>
+                  </header>
+                  <div id="qqColdInterest" class="stack"></div>
                 </section>
-
-                <section class="surface behavior-panel private-panel">
-                  <div class="section-heading">
-                    <div><span class="section-kicker" data-i18n="relationshipLayer">RELATIONSHIP</span><h2 data-i18n="privateInterest">私聊主动兴趣</h2><p data-i18n="privateInterestHint">按互动频率和时间采用短期高、中期低、长期回升的概率，并对连续未回复自动退避。</p></div>
-                    <button class="text-button compact-button" type="button" data-open-feature-logs="interest" data-log-query="private proactive" data-i18n="viewDetailedLogs">查看详细日志</button>
-                  </div>
-                  <div id="qqPrivateInterest" class="behavior-frequency-list"></div>
+                <section class="card">
+                  <header class="card-head">
+                    <div><h2 data-i18n="privateInterest">私聊主动兴趣</h2><p data-i18n="privateInterestHint">按互动频率与间隔估算概率，连续未回复会自动退避。</p></div>
+                    <button class="button small ghost" type="button" data-open-feature-logs="interest" data-log-query="private proactive" data-i18n="viewDetailedLogs">查看日志</button>
+                  </header>
+                  <div id="qqPrivateInterest" class="stack"></div>
                 </section>
               </div>
             </div>
           </section>
 
+          <!-- Memory -->
           <section class="view" id="view-memory" data-view-panel="memory" hidden>
-            <div class="view-intro with-actions">
-              <div>
-                <span class="section-kicker" data-i18n="contextVault">CONTEXT VAULT</span>
-                <h2 data-i18n="memoryHeading">可见、可控的本地记忆</h2>
-                <p data-i18n="memoryBody">浏览统一摘要与 QQ 群聊/私聊上下文，并精确清理不再需要的内容。</p>
-              </div>
-              <button id="refreshMemory" class="button ghost" type="button" data-i18n="refreshMemory">刷新记忆</button>
-            </div>
-
-            <section class="surface memory-shell">
-              <div class="memory-toolbar">
-                <div id="memoryTabs" class="segmented-tabs" role="tablist" aria-label="记忆类型" data-i18n-aria-label="memoryType">
+            <section class="card memory-shell">
+              <div class="toolbar">
+                <div id="memoryTabs" class="segmented" role="tablist" aria-label="记忆类型" data-i18n-aria-label="memoryType">
                   <button id="memoryTabUnified" class="active" type="button" role="tab" aria-selected="true" aria-controls="memoryView" tabindex="0" data-memory-tab="unified" data-i18n="unified">统一记忆</button>
                   <button id="memoryTabQq" type="button" role="tab" aria-selected="false" aria-controls="memoryView" tabindex="-1" data-memory-tab="qq">QQ</button>
                 </div>
-                <label class="search-field">
+                <label class="search-field grow">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg>
                   <input id="memorySearch" type="search" placeholder="搜索记忆" aria-label="搜索记忆" data-i18n-placeholder="searchMemory" data-i18n-aria-label="searchMemory" />
                 </label>
+                <button id="refreshMemory" class="button ghost" type="button" data-i18n="refresh">刷新</button>
               </div>
               <div id="memoryView" class="memory-view" role="tabpanel" aria-labelledby="memoryTabUnified"></div>
             </section>
           </section>
 
-          <section class="view knowledge-view" id="view-knowledge" data-view-panel="knowledge" hidden>
-            <div class="view-intro knowledge-intro with-actions">
-              <div>
-                <span class="section-kicker" data-i18n="knowledgeKicker">LONG-TERM MEMORY</span>
-                <h2 data-i18n="knowledgeHeading">长期知识，不断更新</h2>
-                <p data-i18n="knowledgeBody">沉淀黑话、群内知识与个人理解；旧内容会被更新，低频黑话则交由模型审查。</p>
-              </div>
-              <button id="newKnowledge" class="button primary" type="button" data-new-knowledge data-i18n="newKnowledge">新建知识</button>
-            </div>
-
-            <div id="knowledgeMetrics" class="knowledge-metrics" aria-live="polite"></div>
-
-            <section class="surface knowledge-shell">
-              <div class="knowledge-toolbar">
-                <label class="search-field knowledge-search">
+          <!-- Knowledge -->
+          <section class="view" id="view-knowledge" data-view-panel="knowledge" hidden>
+            <div id="knowledgeMetrics" class="stat-row" aria-live="polite"></div>
+            <section class="card knowledge-shell">
+              <div class="toolbar">
+                <label class="search-field grow">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg>
                   <input id="knowledgeSearch" type="search" placeholder="搜索标题、含义、群或成员" aria-label="搜索知识" data-i18n-placeholder="knowledgeSearch" data-i18n-aria-label="knowledgeSearch" />
                 </label>
@@ -380,146 +326,103 @@
                   <option value="frequency" data-i18n="knowledgeSortFrequency">出现频率</option>
                   <option value="title" data-i18n="knowledgeSortTitle">标题</option>
                 </select>
+                <button id="newKnowledge" class="button primary" type="button" data-new-knowledge data-i18n="newKnowledge">新建知识</button>
               </div>
               <div id="knowledgeWorkspace" class="knowledge-workspace">
-                <aside id="knowledgeIndex" class="knowledge-index-pane"></aside>
-                <section id="knowledgeList" class="knowledge-list-pane" aria-live="polite"></section>
-                <aside id="knowledgeInspector" class="knowledge-inspector-pane"></aside>
+                <aside id="knowledgeIndex" class="knowledge-index"></aside>
+                <section id="knowledgeList" class="knowledge-list" aria-live="polite"></section>
+                <aside id="knowledgeInspector" class="knowledge-inspector"></aside>
               </div>
             </section>
           </section>
 
+          <!-- Activity / logs -->
           <section class="view" id="view-activity" data-view-panel="activity" hidden>
-            <div class="view-intro with-actions">
-              <div>
-                <span class="section-kicker" data-i18n="observability">OBSERVABILITY</span>
-                <h2 data-i18n="activityHeading">把每一次运行看清楚</h2>
-                <p data-i18n="activityBody">完整字段实时到达，级别、模块、链路、耗时和错误原因分别着色，定位问题不再依赖翻文件。</p>
-              </div>
-              <div class="live-log-controls">
-                <span id="liveLogState" class="live-log-state active" aria-live="polite"><i aria-hidden="true"></i><span data-i18n="liveConnected">实时日志已连接</span></span>
-                <label class="inline-toggle">
-                  <input id="liveLogsToggle" type="checkbox" checked />
-                  <span aria-hidden="true"></span>
-                  <em data-i18n="liveRefresh">实时刷新</em>
-                </label>
-                <label class="inline-toggle">
-                  <input id="logFollowToggle" type="checkbox" checked />
-                  <span aria-hidden="true"></span>
-                  <em data-i18n="followLatest">跟随最新</em>
-                </label>
-              </div>
-            </div>
-
-            <section class="surface log-filters">
+            <section class="card log-filters">
               <form id="logFilterForm" class="filter-grid">
                 <label class="field"><span data-i18n="level">级别</span><select id="logLevel"><option value="" data-i18n="allLevels">全部级别</option><option value="error">Error</option><option value="warn">Warn</option><option value="success">Success</option><option value="info">Info</option><option value="debug">Debug</option></select></label>
                 <label class="field"><span data-i18n="category">模块</span><select id="logCategory"><option value="" data-i18n="allCategories">全部模块</option></select></label>
+                <label class="field"><span data-i18n="engineFilter">AI 引擎</span><select id="logEngine"><option value="" data-i18n="allEngines">全部引擎</option><option value="codex">Codex</option><option value="claude">Claude Code</option></select></label>
                 <label class="field wide"><span data-i18n="search">搜索</span><input id="logQuery" type="search" placeholder="消息、Trace、群或发送者" data-i18n-placeholder="logSearchHint" /></label>
                 <label class="field"><span data-i18n="slowThreshold">慢请求</span><select id="logSlow"><option value="" data-i18n="noLimit">不限</option><option value="500">≥ 500 ms</option><option value="1000">≥ 1 s</option><option value="3000">≥ 3 s</option><option value="10000">≥ 10 s</option></select></label>
                 <label class="field"><span data-i18n="visibleLogCount">显示条数</span><select id="logLimit"><option value="100">100</option><option value="250" selected>250</option><option value="500">500</option><option value="1000">1000</option></select></label>
-                <button class="button primary filter-submit" type="submit" data-i18n="applyFilter">应用筛选</button>
+                <div class="filter-actions">
+                  <button id="clearLogFilters" class="button ghost" type="button" data-i18n="resetFilter">重置</button>
+                  <button class="button primary" type="submit" data-i18n="applyFilter">筛选</button>
+                </div>
               </form>
             </section>
 
-            <div id="logSummary" class="stat-grid log-summary"></div>
+            <div id="logSummary" class="stat-row compact"></div>
 
-            <section class="surface log-surface">
-              <div class="section-heading">
-                <div><h2 data-i18n="structuredLogs">完整实时日志</h2><p><span id="logMatchText" data-i18n="waitingLogs">等待日志</span><span id="logLastUpdated" class="log-last-updated"></span></p></div>
-                <div class="section-actions">
-                  <button id="clearLogFilters" class="text-button" type="button" data-i18n="resetFilter">重置</button>
-                  <button id="refreshLogs" class="button compact ghost" type="button" data-i18n="refresh">刷新</button>
+            <section class="card log-surface">
+              <header class="card-head log-head">
+                <div><h2 data-i18n="structuredLogs">实时日志</h2><p><span id="logMatchText" data-i18n="waitingLogs">等待日志</span> <span id="logLastUpdated" class="mono muted"></span></p></div>
+                <div class="log-controls">
+                  <span id="liveLogState" class="live-state active" aria-live="polite"><i aria-hidden="true"></i><span data-i18n="liveConnected">实时连接</span></span>
+                  <label class="switch-label"><span class="switch small"><input id="liveLogsToggle" type="checkbox" checked /><span aria-hidden="true"></span></span><em data-i18n="liveRefresh">实时刷新</em></label>
+                  <label class="switch-label"><span class="switch small"><input id="logFollowToggle" type="checkbox" checked /><span aria-hidden="true"></span></span><em data-i18n="followLatest">跟随最新</em></label>
+                  <label class="switch-label"><span class="switch small"><input id="logExpandToggle" type="checkbox" /><span aria-hidden="true"></span></span><em data-i18n="expandDetails">展开详情</em></label>
+                  <button id="refreshLogs" class="button small ghost" type="button" data-i18n="refresh">刷新</button>
                 </div>
-              </div>
+              </header>
               <div id="logStream" class="log-stream" role="log" aria-live="off" aria-label="实时日志" data-i18n-aria-label="liveLogStream"></div>
             </section>
           </section>
 
+          <!-- Settings -->
           <section class="view" id="view-settings" data-view-panel="settings" hidden>
-            <div class="view-intro">
-              <div>
-                <span class="section-kicker" data-i18n="preferences">PREFERENCES</span>
-                <h2 data-i18n="settingsHeading">让控制台适合你的节奏</h2>
-                <p data-i18n="settingsBody">外观和刷新偏好只保存在当前设备，不会影响机器人运行配置。</p>
-              </div>
-            </div>
-
-            <div class="settings-grid">
-              <section class="surface settings-card">
-                <div class="settings-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-1-.8-1.7-1.8-1.5-4.2.9-7.6-2.5-6.7-6.7.2-1-.5-1.8-1.5-1.8Z" /></svg></div>
-                <div class="settings-copy"><h2 data-i18n="appearance">外观</h2><p data-i18n="appearanceHint">跟随系统，或固定使用明亮 / 深色主题。</p></div>
-                <div id="themeOptions" class="choice-group" role="radiogroup" aria-label="主题" data-i18n-aria-label="theme">
+            <div class="grid settings-grid">
+              <section class="card setting-row">
+                <div class="setting-copy"><h2 data-i18n="appearance">外观</h2><p data-i18n="appearanceHint">跟随系统，或固定使用浅色 / 深色。</p></div>
+                <div id="themeOptions" class="segmented" role="radiogroup" aria-label="主题" data-i18n-aria-label="theme">
                   <button type="button" data-theme-choice="system" role="radio" data-i18n="system">系统</button>
-                  <button type="button" data-theme-choice="light" role="radio" data-i18n="light">明亮</button>
+                  <button type="button" data-theme-choice="light" role="radio" data-i18n="light">浅色</button>
                   <button type="button" data-theme-choice="dark" role="radio" data-i18n="dark">深色</button>
                 </div>
               </section>
-
-              <section class="surface settings-card">
-                <div class="settings-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.4 2.5 3.6 5.5 3.6 9S14.4 18.5 12 21c-2.4-2.5-3.6-5.5-3.6-9S9.6 5.5 12 3Z" /></svg></div>
-                <div class="settings-copy"><h2 data-i18n="language">界面语言</h2><p data-i18n="languageHint">完整切换控制台文案和时间显示。</p></div>
-                <select id="languageSelect" class="settings-select" aria-label="界面语言" data-i18n-aria-label="language">
+              <section class="card setting-row">
+                <div class="setting-copy"><h2 data-i18n="language">界面语言</h2><p data-i18n="languageHint">切换控制台文案与时间格式。</p></div>
+                <select id="languageSelect" aria-label="界面语言" data-i18n-aria-label="language">
                   <option value="zh">简体中文</option>
                   <option value="en">English</option>
                 </select>
               </section>
-
-              <section class="surface settings-card">
-                <div class="settings-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6M4 4v4.6h4.6" /></svg></div>
-                <div class="settings-copy"><h2 data-i18n="autoRefresh">自动刷新</h2><p data-i18n="autoRefreshHint">页面隐藏时会自动暂停，减少无意义开销。</p></div>
+              <section class="card setting-row">
+                <div class="setting-copy"><h2 data-i18n="autoRefresh">自动刷新</h2><p data-i18n="autoRefreshHint">页面隐藏时自动暂停。</p></div>
                 <div class="setting-controls">
-                  <label class="inline-toggle icon-only">
-                    <input id="autoRefreshToggle" type="checkbox" checked aria-label="自动刷新" data-i18n-aria-label="autoRefresh" />
-                    <span aria-hidden="true"></span>
-                  </label>
-                  <select id="refreshInterval" class="settings-select" aria-label="刷新间隔" data-i18n-aria-label="refreshInterval">
+                  <span class="switch"><input id="autoRefreshToggle" type="checkbox" checked aria-label="自动刷新" data-i18n-aria-label="autoRefresh" /><span aria-hidden="true"></span></span>
+                  <select id="refreshInterval" aria-label="刷新间隔" data-i18n-aria-label="refreshInterval">
                     <option value="5">5 s</option><option value="10">10 s</option><option value="30">30 s</option><option value="60">60 s</option>
                   </select>
                 </div>
               </section>
-
-              <section class="surface settings-card endpoint-card">
-                <div class="settings-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 15.5 5 19m10.5-10.5L19 5M14 5h5v5M5 14v5h5M9 12a3 3 0 0 1 3-3h1m2 3a3 3 0 0 1-3 3h-1" /></svg></div>
-                <div class="settings-copy"><h2 data-i18n="hubEndpoint">Hub 地址</h2><p data-i18n="hubEndpointHint">控制台默认仅连接本机回环地址。</p><code id="hubEndpointValue">http://127.0.0.1:3789</code></div>
+              <section class="card setting-row">
+                <div class="setting-copy"><h2 data-i18n="hubEndpoint">Hub 地址</h2><p data-i18n="hubEndpointHint">当前页面连接的 Hub 地址。</p><code id="hubEndpointValue" class="code-line">http://127.0.0.1:3789</code></div>
                 <div class="setting-controls">
-                  <button id="copyEndpoint" class="button compact ghost" type="button" data-i18n="copy">复制</button>
-                  <button id="openRawState" class="button compact ghost" type="button" data-i18n="rawState">原始状态</button>
+                  <button id="copyEndpoint" class="button small ghost" type="button" data-i18n="copy">复制</button>
+                  <button id="openRawState" class="button small ghost" type="button" data-i18n="rawState">原始状态</button>
                 </div>
               </section>
-
-              <section class="surface settings-card lan-access-card">
-                <div class="settings-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17h16M7 17V9a5 5 0 0 1 10 0v8M9.5 11.5h.1m4.9 0h.1M12 17v4" /></svg></div>
-                <div class="settings-copy"><h2 data-i18n="lanAccess">局域网访问</h2><p id="lanAccessHint" data-i18n="lanAccessHint">自动忽略代理 / VPN 虚拟网卡，只显示其他设备可达的物理局域网地址。</p><code id="lanAccessUrls">仅本机可访问</code></div>
-                <div class="setting-controls lan-access-controls">
-                  <label class="inline-toggle icon-only">
-                    <input id="lanAccessToggle" type="checkbox" aria-label="局域网访问" data-i18n-aria-label="lanAccess" />
-                    <span aria-hidden="true"></span>
-                  </label>
-                  <button id="copyLanToken" class="button compact ghost" type="button" data-i18n="copyLanToken">复制访问令牌</button>
+              <section class="card setting-row">
+                <div class="setting-copy"><h2 data-i18n="lanAccess">局域网访问</h2><p id="lanAccessHint" data-i18n="lanAccessHint">只显示其他设备可达的物理局域网地址。</p><code id="lanAccessUrls" class="code-line">仅本机可访问</code></div>
+                <div class="setting-controls">
+                  <span class="switch"><input id="lanAccessToggle" type="checkbox" aria-label="局域网访问" data-i18n-aria-label="lanAccess" /><span aria-hidden="true"></span></span>
+                  <button id="copyLanToken" class="button small ghost" type="button" data-i18n="copyLanToken">复制访问令牌</button>
                 </div>
               </section>
-
-              <section class="surface settings-card public-tunnel-card">
-                <div class="settings-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18a4 4 0 0 1-.7-7.9A6 6 0 0 1 18 11a3.5 3.5 0 0 1-.5 7H7Zm5-9v8m-3-3 3 3 3-3" /></svg></div>
-                <div class="settings-copy"><h2 data-i18n="publicTunnel">内网穿透</h2><p id="publicTunnelHint" data-i18n="publicTunnelHint">通过 Cloudflare Quick Tunnel 生成临时 HTTPS 地址；远端仍需访问令牌。</p><code id="publicTunnelUrl">未开启公网访问</code></div>
-                <div class="setting-controls public-tunnel-controls">
-                  <label class="inline-toggle icon-only">
-                    <input id="publicTunnelToggle" type="checkbox" aria-label="内网穿透" data-i18n-aria-label="publicTunnel" />
-                    <span aria-hidden="true"></span>
-                  </label>
-                  <button id="copyPublicTunnelUrl" class="button compact ghost" type="button" data-i18n="copyPublicTunnelUrl">复制公网地址</button>
-                  <button id="copyPublicTunnelToken" class="button compact ghost" type="button" data-i18n="copyLanToken">复制访问令牌</button>
+              <section class="card setting-row public-tunnel-card">
+                <div class="setting-copy"><h2 data-i18n="publicTunnel">临时公网访问</h2><p id="publicTunnelHint" data-i18n="publicTunnelHint">通过 Cloudflare Quick Tunnel 生成临时 HTTPS 地址；远端仍需访问令牌。</p><code id="publicTunnelUrl" class="code-line">未开启公网访问</code></div>
+                <div class="setting-controls">
+                  <span class="switch"><input id="publicTunnelToggle" type="checkbox" aria-label="临时公网访问" data-i18n-aria-label="publicTunnel" /><span aria-hidden="true"></span></span>
+                  <button id="copyPublicTunnelUrl" class="button small ghost" type="button" data-i18n="copyPublicTunnelUrl">复制地址</button>
+                  <button id="copyPublicTunnelToken" class="button small ghost" type="button" data-i18n="copyLanToken">复制访问令牌</button>
                 </div>
               </section>
             </div>
-
-            <section class="surface about-card">
-              <div>
-                <span class="brand-mark small" aria-hidden="true"><svg viewBox="0 0 44 44"><path d="M8 36V8l28 28V8M14 36V23" /></svg></span>
-                <div><h2>Codex QQ Bot</h2><p data-i18n="aboutBody">QQ / OneBot 与 Codex CLI 的本地优先通讯中枢。</p></div>
-              </div>
-              <div id="runtimeFacts" class="runtime-facts"></div>
+            <section class="card about-card">
+              <header class="card-head"><div><h2>Codex QQ Bot</h2><p data-i18n="aboutBody">把 QQ 接到本机 Codex 或 Claude Code 的本地中枢。</p></div></header>
+              <dl id="runtimeFacts" class="fact-grid"></dl>
             </section>
           </section>
         </main>
@@ -527,73 +430,64 @@
     </div>
 
     <nav class="mobile-nav" id="mobileNav" aria-label="移动端导航" data-i18n-aria-label="mobileNavigation">
-      <button class="active" type="button" data-view="overview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z" /></svg><span data-i18n="navOverview">总览</span></button>
-      <button type="button" data-view="channels"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v11H8l-3 3V5Zm4 5h6M9 7.5h8" /></svg><span data-i18n="navChannels">通道</span></button>
-      <button type="button" data-view="intelligence"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a4 4 0 0 0-3.8 2.8A4 4 0 0 0 5 12a4 4 0 0 0 3.2 6.2A4 4 0 0 0 12 21m0-18a4 4 0 0 1 3.8 2.8A4 4 0 0 1 19 12a4 4 0 0 1-3.2 6.2A4 4 0 0 1 12 21m0-18v18" /></svg><span data-i18n="navIntelligenceShort">行为</span></button>
-      <button type="button" data-view="memory"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7c0-2 3.1-3 7-3s7 1 7 3-3.1 3-7 3-7-1-7-3Zm0 0v5c0 2 3.1 3 7 3s7-1 7-3V7m-14 5v5c0 2 3.1 3 7 3s7-1 7-3v-5" /></svg><span data-i18n="navMemory">记忆</span></button>
-      <button type="button" data-view="knowledge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H20v17H7.5A3.5 3.5 0 0 0 4 22V5.5Zm0 0A3.5 3.5 0 0 1 7.5 9H20M9 5.5h7" /></svg><span data-i18n="navKnowledgeShort">知识</span></button>
-      <button type="button" data-view="activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17h3l2.2-8 3.1 11 2.5-7H20M4 5h16" /></svg><span data-i18n="navActivityShort">日志</span></button>
-      <button type="button" data-view="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.3a3.3 3.3 0 1 0 0-6.6 3.3 3.3 0 0 0 0 6.6Zm7.3-3.3c0-.6-.1-1.2-.2-1.7l2-1.5-2-3.5-2.5 1a8 8 0 0 0-3-1.7L13.2 2h-4l-.4 2.6a8 8 0 0 0-3 1.7l-2.5-1-2 3.5 2 1.5A8 8 0 0 0 3.1 12c0 .6.1 1.2.2 1.7l-2 1.5 2 3.5 2.5-1a8 8 0 0 0 3 1.7l.4 2.6h4l.4-2.6a8 8 0 0 0 3-1.7l2.5 1 2-3.5-2-1.5c.1-.5.2-1.1.2-1.7Z" /></svg><span data-i18n="navSettings">设置</span></button>
+      <button class="active" type="button" data-view="overview"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="8" rx="1.8" /><rect x="13.5" y="3.5" width="7" height="5" rx="1.8" /><rect x="3.5" y="14.5" width="7" height="6" rx="1.8" /><rect x="13.5" y="11.5" width="7" height="9" rx="1.8" /></svg><span data-i18n="navOverview">总览</span></button>
+      <button type="button" data-view="channels"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5.5h15v10h-9l-4.5 3.5v-3.5h-1.5z" /></svg><span data-i18n="navChannels">通道</span></button>
+      <button type="button" data-view="intelligence"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5v15M8 7.5a3.5 3.5 0 0 1 4-3 3.5 3.5 0 0 1 4 3 3.5 3.5 0 0 1 2.5 5.5A3.5 3.5 0 0 1 16 19.5a3.5 3.5 0 0 1-4 0 3.5 3.5 0 0 1-4 0A3.5 3.5 0 0 1 5.5 13 3.5 3.5 0 0 1 8 7.5Z" /></svg><span data-i18n="navIntelligence">行为</span></button>
+      <button type="button" data-view="memory"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6.5" rx="7" ry="2.8" /><path d="M5 6.5v11c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-11" /></svg><span data-i18n="navMemory">记忆</span></button>
+      <button type="button" data-view="knowledge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5z" /></svg><span data-i18n="navKnowledge">知识</span></button>
+      <button type="button" data-view="activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12.5h3.5l2.5-6 4 12 2.5-6h4.5" /></svg><span data-i18n="navActivity">日志</span></button>
+      <button type="button" data-view="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /></svg><span data-i18n="navSettings">设置</span></button>
     </nav>
 
-    <dialog id="confirmDialog" class="modal-dialog" aria-labelledby="confirmTitle">
-      <form method="dialog">
-        <div class="dialog-icon warning" aria-hidden="true">!</div>
+    <dialog id="confirmDialog" class="modal" aria-labelledby="confirmTitle">
+      <form method="dialog" class="modal-body">
         <h2 id="confirmTitle" data-i18n="confirmAction">确认操作</h2>
         <p id="confirmMessage"></p>
-        <div class="dialog-actions">
+        <div class="modal-actions">
           <button class="button ghost" value="cancel" data-i18n="cancel">取消</button>
           <button id="confirmAccept" class="button danger" value="confirm" data-i18n="confirm">确认</button>
         </div>
       </form>
     </dialog>
 
-    <dialog id="logDetailDialog" class="detail-dialog" aria-labelledby="logDetailTitle">
-      <form method="dialog" class="detail-shell">
-        <header><div><span class="section-kicker">TRACE DETAIL</span><h2 id="logDetailTitle" data-i18n="logDetail">日志详情</h2></div><button class="icon-button" value="close" aria-label="关闭" data-i18n-aria-label="close">×</button></header>
-        <pre id="logDetailContent"></pre>
-        <footer><button id="copyLogDetail" class="button ghost" value="copy" type="button" data-i18n="copyJson">复制 JSON</button><button class="button primary" value="close" data-i18n="done">完成</button></footer>
+    <dialog id="logDetailDialog" class="modal wide" aria-labelledby="logDetailTitle">
+      <form method="dialog" class="modal-body">
+        <header class="modal-head"><h2 id="logDetailTitle" data-i18n="logDetail">日志详情</h2><button class="icon-button" value="close" aria-label="关闭" data-i18n-aria-label="close">×</button></header>
+        <pre id="logDetailContent" class="json-view"></pre>
+        <div class="modal-actions"><button id="copyLogDetail" class="button ghost" type="button" data-i18n="copyJson">复制 JSON</button><button class="button primary" value="close" data-i18n="done">完成</button></div>
       </form>
     </dialog>
 
-    <dialog id="knowledgeEditorDialog" class="knowledge-editor-dialog" aria-labelledby="knowledgeEditorTitle">
-      <form id="knowledgeEditorForm" class="knowledge-editor-shell">
+    <dialog id="knowledgeEditorDialog" class="modal wide" aria-labelledby="knowledgeEditorTitle">
+      <form id="knowledgeEditorForm" class="modal-body">
         <input id="knowledgeEntryId" type="hidden" />
         <input id="knowledgeVariantId" type="hidden" />
-        <header>
-          <div><span class="section-kicker" data-i18n="knowledgeEditorKicker">KNOWLEDGE EDITOR</span><h2 id="knowledgeEditorTitle" data-i18n="knowledgeEditorTitleNew">新建知识</h2></div>
-          <button class="icon-button" type="button" data-close-knowledge-editor aria-label="关闭" data-i18n-aria-label="close">×</button>
-        </header>
-        <div class="knowledge-editor-grid">
+        <header class="modal-head"><h2 id="knowledgeEditorTitle" data-i18n="knowledgeEditorTitleNew">新建知识</h2><button class="icon-button" type="button" data-close-knowledge-editor aria-label="关闭" data-i18n-aria-label="close">×</button></header>
+        <div class="form-grid">
           <label class="field"><span data-i18n="knowledgeKind">知识类型</span><select id="knowledgeKind" required><option value="slang" data-i18n="knowledgeKindSlang">黑话</option><option value="note" data-i18n="knowledgeKindNote">知识</option></select></label>
           <label class="field"><span data-i18n="knowledgeScopeType">适用范围</span><select id="knowledgeScopeType" required><option value="global" data-i18n="knowledgeGlobal">全局</option><option value="group" data-i18n="knowledgeGroup">群</option><option value="member" data-i18n="knowledgeMember">成员</option><option value="group-member" data-i18n="knowledgeGroupMember">群内成员</option></select></label>
-          <label class="field field-span"><span data-i18n="knowledgeTitleField">标题 / 词语</span><input id="knowledgeTitleField" maxlength="120" required /></label>
-          <label class="field field-span"><span data-i18n="knowledgeContent">含义 / 内容</span><textarea id="knowledgeContent" rows="6" maxlength="800" required></textarea></label>
-          <label class="field field-span"><span data-i18n="knowledgeAliases">别名</span><input id="knowledgeAliases" maxlength="300" placeholder="多个别名用逗号分隔" data-i18n-placeholder="knowledgeAliasesHint" /></label>
+          <label class="field span-2"><span data-i18n="knowledgeTitleField">标题 / 词语</span><input id="knowledgeTitleField" maxlength="120" required /></label>
+          <label class="field span-2"><span data-i18n="knowledgeContent">含义 / 内容</span><textarea id="knowledgeContent" rows="5" maxlength="800" required></textarea></label>
+          <label class="field span-2"><span data-i18n="knowledgeAliases">别名</span><input id="knowledgeAliases" maxlength="300" placeholder="多个别名用逗号分隔" data-i18n-placeholder="knowledgeAliasesHint" /></label>
           <label class="field knowledge-group-field" hidden><span data-i18n="knowledgeGroupId">群 QQ 号</span><input id="knowledgeGroupId" inputmode="numeric" pattern="[0-9]{4,20}" /></label>
           <label class="field knowledge-group-field" hidden><span data-i18n="knowledgeGroupName">群名称</span><input id="knowledgeGroupName" maxlength="100" /></label>
           <label class="field knowledge-member-field" hidden><span data-i18n="knowledgeUserId">成员 QQ 号</span><input id="knowledgeUserId" inputmode="numeric" pattern="[0-9]{4,20}" /></label>
           <label class="field knowledge-member-field" hidden><span data-i18n="knowledgeUserName">成员名称</span><input id="knowledgeUserName" maxlength="100" /></label>
         </div>
-        <footer><button class="button ghost" type="button" data-close-knowledge-editor data-i18n="cancel">取消</button><button id="saveKnowledge" class="button primary" type="submit" data-i18n="saveKnowledge">保存知识</button></footer>
+        <div class="modal-actions"><button class="button ghost" type="button" data-close-knowledge-editor data-i18n="cancel">取消</button><button id="saveKnowledge" class="button primary" type="submit" data-i18n="saveKnowledge">保存知识</button></div>
       </form>
     </dialog>
 
-    <dialog id="commandDialog" class="command-dialog" aria-labelledby="commandTitle">
+    <dialog id="commandDialog" class="modal command-modal" aria-labelledby="commandTitle">
       <div class="command-shell">
-        <header class="command-search-wrap">
+        <header class="command-search">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg>
           <input id="commandSearch" type="search" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="commandResults" autocomplete="off" spellcheck="false" placeholder="搜索页面或操作" data-i18n-placeholder="searchActions" />
-          <button id="commandClose" class="command-close" type="button" data-i18n-aria-label="close">ESC</button>
+          <button id="commandClose" class="kbd-button" type="button" data-i18n-aria-label="close">ESC</button>
         </header>
-        <div class="command-heading">
-          <div>
-            <span class="section-kicker" data-i18n="commandCenter">COMMAND CENTER</span>
-            <h2 id="commandTitle" data-i18n="quickActions">快速操作</h2>
-          </div>
-          <span id="commandHint" class="quiet-label" data-i18n="commandHint">↑↓ 选择 · Enter 执行</span>
-        </div>
+        <h2 id="commandTitle" class="sr-only" data-i18n="quickActions">快速操作</h2>
         <div id="commandResults" class="command-results" role="listbox" aria-label="快速操作" data-i18n-aria-label="quickActions"></div>
+        <footer id="commandHint" class="command-hint" data-i18n="commandHint">↑↓ 选择 · Enter 执行</footer>
       </div>
     </dialog>
 

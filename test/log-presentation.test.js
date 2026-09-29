@@ -326,8 +326,8 @@ test("follow-up fusion logs use the existing Chinese detail style", () => {
   }), {
     结果: "已截断并续答",
     操作: "融合后截断并续答",
-    "被截断的 Codex 轮次": "turn-1",
-    "Codex 轮次": "turn-2"
+    "被截断的轮次": "turn-1",
+    "回复轮次": "turn-2"
   });
   assert.deepEqual(localizeLogDetails({
     outcome: "completed",
@@ -380,7 +380,7 @@ test("stop-preservation and outgoing mention logs use Chinese detail fields", ()
     操作: "暂停当前回复",
     已取消待融合追问数: 2,
     是否保留上下文: true,
-    "是否保留 Codex 会话": true,
+    "是否保留会话线程": true,
     "真实 @ 数": 1,
     "真实 @ 目标": ["10001"],
     "未解析 @ 文本": []

@@ -166,6 +166,7 @@ src/
   config/                环境变量解析和默认值
   infrastructure/codex/  Codex 调用、QQ 工具、结构化输出
   infrastructure/claude/ Claude Code 调用和 QQ 工具桥
+  infrastructure/agent/  两个引擎共用的底层
   qq-enhancer/           图片处理、主动接话
   unified-memory/        统一记忆
   server.js              组装入口（还在逐步拆分）

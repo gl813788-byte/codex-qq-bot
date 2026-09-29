@@ -2,6 +2,12 @@ import { appendFile, mkdir, open, readdir, rename, stat, unlink } from "node:fs/
 import crypto from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { formatLogMessage, getLogCategoryLabel, getLogLevelLabel } from "./log-presentation.js";
+import {
+  canonicalLogCategory,
+  expandLogCategoryFilter,
+  getAgentEngine,
+  resolveLogEngine
+} from "./infrastructure/agent/agent-engines.js";
 
 const defaultLevels = new Set(["debug", "info", "success", "warn", "error"]);
 const levelWeights = { debug: 10, info: 20, success: 25, warn: 30, error: 40 };
@@ -129,6 +135,7 @@ export async function readLogEntries(filePath, {
   limit = 100,
   level = "",
   category = "",
+  engine = "",
   traceId = "",
   query = "",
   groupId = "",
@@ -142,7 +149,8 @@ export async function readLogEntries(filePath, {
   const maxEntries = Math.max(1, Math.min(1000, Number(limit) || 100));
   const filters = {
     levels: normalizeFilterSet(level),
-    categories: normalizeFilterSet(category),
+    categories: expandLogCategoryFilter(normalizeFilterSet(category)),
+    engines: normalizeFilterSet(engine),
     traceId: String(traceId || "").trim().toLowerCase(),
     query: String(query || "").trim().toLowerCase(),
     groupId: String(groupId || "").trim(),
@@ -202,15 +210,18 @@ export function summarizeLogEntries(entries = []) {
   const list = Array.isArray(entries) ? entries : [];
   const byLevel = {};
   const byCategory = {};
+  const byEngine = {};
   const byOperation = {};
   const byOutcome = {};
   const durations = [];
   const traces = new Set();
   for (const entry of list) {
     const level = String(entry?.level || "info");
-    const category = String(entry?.category || "system");
+    const category = canonicalLogCategory(entry?.category) || "system";
+    const engine = resolveLogEngine(entry);
     byLevel[level] = Number(byLevel[level] || 0) + 1;
     byCategory[category] = Number(byCategory[category] || 0) + 1;
+    if (engine) byEngine[engine] = Number(byEngine[engine] || 0) + 1;
     const operation = String(entry?.details?.operation || "").trim();
     const outcome = String(entry?.details?.outcome || "").trim();
     if (operation) byOperation[operation] = Number(byOperation[operation] || 0) + 1;
@@ -224,6 +235,7 @@ export function summarizeLogEntries(entries = []) {
     total: list.length,
     byLevel,
     byCategory,
+    byEngine,
     byOperation,
     byOutcome,
     traceCount: traces.size,
@@ -257,6 +269,7 @@ function normalizeTimestamp(value, { relativeFromNow = false } = {}) {
 function matchesLogFilters(entry, filters) {
   if (filters.levels.size > 0 && !filters.levels.has(String(entry.level || "").toLowerCase())) return false;
   if (filters.categories.size > 0 && !filters.categories.has(String(entry.category || "").toLowerCase())) return false;
+  if (filters.engines.size > 0 && !filters.engines.has(resolveLogEngine(entry))) return false;
   if (filters.traceId && !String(entry.traceId || "").toLowerCase().startsWith(filters.traceId)) return false;
   if (filters.operations.size > 0 && !matchesOperation(entry.details?.operation, filters.operations)) return false;
   const scopeIds = getLogScopeIds(entry.details);
@@ -441,7 +454,9 @@ function parseLogLine(line) {
 
 function writeConsole(entry) {
   const level = getLogLevelLabel(entry.level, "zh");
-  const category = getLogCategoryLabel(entry.category, "zh");
+  const engine = resolveLogEngine(entry);
+  const categoryLabel = getLogCategoryLabel(canonicalLogCategory(entry.category), "zh");
+  const category = engine ? `${categoryLabel}·${getAgentEngine(engine).name}` : categoryLabel;
   const message = formatLogMessage(entry.message, "zh");
   const text = `[${entry.ts}] ${level} ${category}  ${message}`;
   if (entry.level === "error") console.error(text);

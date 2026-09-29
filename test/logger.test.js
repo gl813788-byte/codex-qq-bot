@@ -140,6 +140,7 @@ test("logger correlates child entries and supports diagnostic filters and summar
     total: 2,
     byLevel: { debug: 1, success: 1 },
     byCategory: { lifecycle: 2 },
+    byEngine: {},
     byOperation: {},
     byOutcome: { sent: 1 },
     traceCount: 1,
