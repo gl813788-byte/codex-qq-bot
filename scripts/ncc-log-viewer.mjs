@@ -10,12 +10,19 @@ import {
   getLogDetailLabel
 } from "../src/log-presentation.js";
 import { summarizeProcessDiagnostics } from "../src/process-diagnostics.js";
+import {
+  canonicalLogCategory,
+  expandLogCategoryFilter,
+  getAgentEngine,
+  resolveLogEngine
+} from "../src/infrastructure/agent/agent-engines.js";
 
 const levelNames = { debug: "调试", info: "信息", success: "成功", warn: "警告", error: "错误" };
 const categoryNames = {
   system: "系统",
   qq: "QQ",
   onebot: "OneBot",
+  agent: "智能体",
   codex: "Codex",
   web: "接口",
   search: "搜索",
@@ -55,6 +62,7 @@ const categoryColors = {
   system: "white",
   qq: "brightBlue",
   onebot: "cyan",
+  agent: "brightMagenta",
   codex: "brightMagenta",
   web: "blue",
   search: "brightCyan",
@@ -64,6 +72,7 @@ const categoryColors = {
   command: "brightYellow",
   lifecycle: "brightWhite"
 };
+const engineColors = { codex: "brightGreen", claude: "brightYellow" };
 const traceColors = ["brightBlue", "brightCyan", "brightMagenta", "brightYellow", "green", "magenta"];
 
 const options = parseArgs(process.argv.slice(2));
@@ -82,6 +91,7 @@ function parseArgs(args) {
     follow: false,
     level: "",
     category: "",
+    engine: "",
     plain: !process.stdout.isTTY,
     all: false,
     verbose: true,
@@ -109,6 +119,8 @@ function parseArgs(args) {
       output.level = String(args[++index] || "").toLowerCase();
     } else if (arg === "--category") {
       output.category = String(args[++index] || "").toLowerCase();
+    } else if (arg === "--engine") {
+      output.engine = String(args[++index] || "").toLowerCase();
     } else if (arg === "--plain") {
       output.plain = true;
     } else if (arg === "--color" || arg === "--colour") {
@@ -283,7 +295,8 @@ function parseLine(line) {
 
 function matchesViewerFilters(entry, options) {
   if (options.level && !splitFilter(options.level).has(String(entry.level || "").toLowerCase())) return false;
-  if (options.category && !splitFilter(options.category).has(String(entry.category || "").toLowerCase())) return false;
+  if (options.category && !expandLogCategoryFilter(splitFilter(options.category)).has(String(entry.category || "").toLowerCase())) return false;
+  if (options.engine && !splitFilter(options.engine).has(resolveLogEngine(entry))) return false;
   if (options.traceId && !String(entry.traceId || "").toLowerCase().startsWith(options.traceId)) return false;
   if (options.operation && !matchesOperation(entry.details?.operation, splitFilter(options.operation))) return false;
   const scopeIds = getLogScopeIds(entry.details);
@@ -349,7 +362,8 @@ function matchesSenderId(details, scopeIds, senderId) {
 
 function renderEntry(entry, options) {
   const level = String(entry.level || "info").toLowerCase();
-  const category = String(entry.category || "system").toLowerCase();
+  const category = canonicalLogCategory(entry.category) || "system";
+  const engine = resolveLogEngine(entry);
   const ts = formatLocalTimestamp(entry.ts);
   const levelColor = colorForLevel(level);
   const categoryColor = colorForCategory(entry, category);
@@ -357,8 +371,9 @@ function renderEntry(entry, options) {
   const header = [
     color(ts.padEnd(19, " "), "dim", options),
     color((levelNames[level] || level).padEnd(2, " "), levelColor, options),
-    color((categoryNames[category] || category).padEnd(7, " "), categoryColor, options)
-  ].join(" ");
+    color((categoryNames[category] || category).padEnd(7, " "), categoryColor, options),
+    engine ? color(getAgentEngine(engine).name, engineColors[engine] || "white", options) : null
+  ].filter(Boolean).join(" ");
   const message = color(humanMessage(entry.message || ""), messageColor, options);
   const trace = entry.traceId ? color(`[${shortTraceId(entry.traceId)}]`, colorForTrace(entry.traceId), options) : "";
   const details = formatDetails(entry, options);
@@ -737,13 +752,17 @@ function parseTimeFilter(value, { relativeFromNow = false } = {}) {
 function renderSummary(entries, options) {
   const byLevel = {};
   const byCategory = {};
+  const byEngine = {};
   const byOperation = {};
   const byOutcome = {};
   const durations = [];
   const traces = new Set();
   for (const entry of entries) {
+    const category = canonicalLogCategory(entry.category) || "system";
+    const engine = resolveLogEngine(entry);
     byLevel[entry.level] = Number(byLevel[entry.level] || 0) + 1;
-    byCategory[entry.category] = Number(byCategory[entry.category] || 0) + 1;
+    byCategory[category] = Number(byCategory[category] || 0) + 1;
+    if (engine) byEngine[engine] = Number(byEngine[engine] || 0) + 1;
     const operation = String(entry.details?.operation || "").trim();
     const outcome = String(entry.details?.outcome || "").trim();
     if (operation) byOperation[operation] = Number(byOperation[operation] || 0) + 1;
@@ -757,10 +776,12 @@ function renderSummary(entries, options) {
   const levels = Object.entries(byLevel).map(([key, count]) => `${levelNames[key] || key} ${count}`).join(" / ") || "无";
   const categories = Object.entries(byCategory).map(([key, count]) => `${categoryNames[key] || key} ${count}`).join(" / ") || "无";
   const operations = Object.entries(byOperation).map(([key, count]) => `${key} ${count}`).join(" / ");
+  const engines = Object.entries(byEngine).map(([key, count]) => `${getAgentEngine(key).name} ${count}`).join(" / ");
+  const engineText = engines ? `；引擎 ${engines}` : "";
   const durationText = durations.length ? `；耗时样本 ${durations.length}，P95 ${formatMs(p95)}，最慢 ${formatMs(durations.at(-1))}` : "";
   const operationText = operations ? `；操作 ${operations}` : "";
-  const summary = `日志摘要：${entries.length} 条，${traces.size} 条链路；级别 ${levels}；分类 ${categories}${operationText}${durationText}`;
-  if (options.json) return JSON.stringify({ summary, total: entries.length, traces: traces.size, byLevel, byCategory, byOperation, byOutcome, p95Ms: p95 || null });
+  const summary = `日志摘要：${entries.length} 条，${traces.size} 条链路；级别 ${levels}；分类 ${categories}${engineText}${operationText}${durationText}`;
+  if (options.json) return JSON.stringify({ summary, total: entries.length, traces: traces.size, byLevel, byCategory, byEngine, byOperation, byOutcome, p95Ms: p95 || null });
   if (options.plain) return summary;
   const coloredLevels = Object.entries(byLevel)
     .map(([key, count]) => color(`${levelNames[key] || key} ${count}`, colorForLevel(key), options))
@@ -772,7 +793,10 @@ function renderSummary(entries, options) {
     ? `；${color(`耗时样本 ${durations.length}`, "cyan", options)}，P95 ${color(formatMs(p95), colorForDuration(formatMs(p95)), options)}，最慢 ${color(formatMs(durations.at(-1)), colorForDuration(formatMs(durations.at(-1))), options)}`
     : "";
   const coloredOperations = operations ? `；操作 ${color(operations, "cyan", options)}` : "";
-  return `${color("日志摘要", "brightWhite", options)}：${color(`${entries.length} 条`, "brightCyan", options)}，${color(`${traces.size} 条链路`, "brightMagenta", options)}；级别 ${coloredLevels}；分类 ${coloredCategories}${coloredOperations}${coloredDuration}`;
+  const coloredEngines = engines
+    ? `；引擎 ${Object.entries(byEngine).map(([key, count]) => color(`${getAgentEngine(key).name} ${count}`, engineColors[key] || "white", options)).join(color(" / ", "dim", options))}`
+    : "";
+  return `${color("日志摘要", "brightWhite", options)}：${color(`${entries.length} 条`, "brightCyan", options)}，${color(`${traces.size} 条链路`, "brightMagenta", options)}；级别 ${coloredLevels}；分类 ${coloredCategories}${coloredEngines}${coloredOperations}${coloredDuration}`;
 }
 
 function pushPart(parts, label, value) {
@@ -786,5 +810,5 @@ function color(text, colorName, options) {
 }
 
 function usage() {
-  process.stderr.write("用法: ncc-log-viewer.mjs LOG_FILE [--tail N] [-f] [--level LEVELS|--errors] [--category CATEGORIES] [--trace ID] [--scope ID] [--operation NAME] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--plain|--color] [--verbose|--compact]\n");
+  process.stderr.write("用法: ncc-log-viewer.mjs LOG_FILE [--tail N] [-f] [--level LEVELS|--errors] [--category CATEGORIES] [--engine codex|claude] [--trace ID] [--scope ID] [--operation NAME] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--plain|--color] [--verbose|--compact]\n");
 }

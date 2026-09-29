@@ -1,10 +1,18 @@
 import { spawn } from "node:child_process";
+import {
+  attachErrorFields,
+  createAgentTurnErrors,
+  createNdjsonReader,
+  createTurnDeadlines,
+  normalizeDynamicToolResult,
+  normalizeImagePaths,
+  normalizePositiveInteger,
+  notifyObserver,
+  superviseAgentChild
+} from "./infrastructure/agent/agent-turn-process.js";
 
-const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_MAX_PROTOCOL_BYTES = 8 * 1024 * 1024;
-const DEFAULT_MAX_STDERR_BYTES = 32 * 1024;
-const DEFAULT_KILL_GRACE_MS = 1_000;
-const DEFAULT_REPLACEMENT_IDLE_TIMEOUT_MS = 60_000;
+const errors = createAgentTurnErrors("Codex app-server");
 
 export function runCodexAppServerTurn({
   codexPath = "codex",
@@ -32,11 +40,11 @@ export function runCodexAppServerTurn({
   experimentalApi = null,
   threadId: requestedThreadId = null,
   ephemeral = true,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  timeoutMs,
   maxProtocolBytes = DEFAULT_MAX_PROTOCOL_BYTES,
-  maxStderrBytes = DEFAULT_MAX_STDERR_BYTES,
-  killGraceMs = DEFAULT_KILL_GRACE_MS,
-  replacementIdleTimeoutMs = DEFAULT_REPLACEMENT_IDLE_TIMEOUT_MS,
+  maxStderrBytes,
+  killGraceMs,
+  replacementIdleTimeoutMs,
   signal,
   spawnProcess = spawn,
   onSpawn,
@@ -51,7 +59,7 @@ export function runCodexAppServerTurn({
 } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      reject(createAbortError(signal.reason));
+      reject(errors.abort(signal.reason));
       return;
     }
 
@@ -68,10 +76,7 @@ export function runCodexAppServerTurn({
     }
 
     let settled = false;
-    let exited = false;
-    let protocolBuffer = "";
-    let protocolBytes = 0;
-    let stderr = "";
+    let supervisor = null;
     let requestId = 0;
     let threadId = null;
     let resumed = false;
@@ -79,44 +84,29 @@ export function runCodexAppServerTurn({
     let turnActive = false;
     let restartInProgress = false;
     let pendingRestart = null;
-    let forceKillTimer = null;
-    let timeoutTimer = null;
-    let replacementIdleTimer = null;
-    let deadlineRenewalCount = 0;
-    const normalizedTimeoutMs = normalizePositiveInteger(timeoutMs, DEFAULT_TIMEOUT_MS);
     const pendingRequests = new Map();
     const dynamicToolCalls = new Map();
     const agentMessages = [];
     const completedItems = [];
     const supersededTurnIds = new Set();
 
-    const notifyExit = () => {
-      if (exited) return;
-      exited = true;
-      try {
-        onExit?.(child);
-      } catch {
-        // Lifecycle observers must not change the turn outcome.
+    const interruptActiveTurn = () => {
+      if (turnActive && threadId && turnId) {
+        void request("turn/interrupt", { threadId, turnId }).catch(() => undefined);
       }
     };
 
-    const terminateChild = () => {
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        return;
+    const deadlines = createTurnDeadlines({
+      errors,
+      timeoutMs,
+      replacementIdleTimeoutMs,
+      isSettled: () => settled,
+      isTurnActive: () => turnActive,
+      onExpire: (error) => {
+        interruptActiveTurn();
+        finish(error);
       }
-      if (!forceKillTimer) {
-        forceKillTimer = setTimeout(() => {
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            // The app-server process exited during the graceful window.
-          }
-        }, normalizePositiveInteger(killGraceMs, DEFAULT_KILL_GRACE_MS));
-        forceKillTimer.unref?.();
-      }
-    };
+    });
 
     const rejectPendingRequests = (error) => {
       for (const pending of pendingRequests.values()) pending.reject(error);
@@ -128,42 +118,29 @@ export function runCodexAppServerTurn({
       settled = true;
       turnActive = false;
       if (pendingRestart) {
-        pendingRestart.reject(error || createTurnInactiveError());
+        pendingRestart.reject(error || errors.inactive());
         pendingRestart = null;
       }
-      if (timeoutTimer) clearTimeout(timeoutTimer);
-      if (replacementIdleTimer) clearTimeout(replacementIdleTimer);
+      deadlines.clear();
       signal?.removeEventListener("abort", abortTurn);
-      const terminalError = error || null;
-      if (terminalError && terminalError.deadlineRenewalCount == null) {
-        try {
-          terminalError.deadlineRenewalCount = deadlineRenewalCount;
-        } catch {
-          // Some externally supplied abort errors may be non-extensible.
-        }
-      }
-      if (terminalError && terminalError.stderr == null) {
-        try {
-          terminalError.stderr = stderr;
-        } catch {
-          // Some externally supplied errors may be non-extensible.
-        }
-      }
-      rejectPendingRequests(terminalError || createTurnInactiveError());
-      terminateChild();
-      if (terminalError) reject(terminalError);
+      const stderr = supervisor?.stderr() || "";
+      const deadlineRenewalCount = deadlines.renewalCount;
+      if (error) attachErrorFields(error, { deadlineRenewalCount, stderr });
+      rejectPendingRequests(error || errors.inactive());
+      supervisor?.terminate();
+      if (error) reject(error);
       else resolve({ ...result, stderr, deadlineRenewalCount });
     };
 
     const send = (message) => {
       if (settled || !child.stdin?.writable || child.stdin.destroyed) {
-        throw createProtocolError("Codex app-server stdin is not writable");
+        throw errors.protocol("Codex app-server stdin is not writable");
       }
       child.stdin.write(`${JSON.stringify(message)}\n`);
     };
 
     const request = (method, params) => {
-      if (settled) return Promise.reject(createTurnInactiveError());
+      if (settled) return Promise.reject(errors.inactive());
       const id = ++requestId;
       return new Promise((requestResolve, requestReject) => {
         pendingRequests.set(id, { method, resolve: requestResolve, reject: requestReject });
@@ -202,14 +179,6 @@ export function runCodexAppServerTurn({
       const final = [...candidates].reverse().find((item) => item.phase === "final_answer")
         || [...candidates].reverse().find((item) => item.phase !== "commentary");
       return String(final?.text || "");
-    };
-
-    const notifyObserver = (observer, value) => {
-      try {
-        observer?.(value);
-      } catch {
-        // Observers must not change the turn outcome.
-      }
     };
 
     const handleNotification = (message) => {
@@ -273,27 +242,11 @@ export function runCodexAppServerTurn({
       });
     };
 
-    const normalizeDynamicToolResult = (result) => {
-      if (result && typeof result === "object" && Array.isArray(result.contentItems)) {
-        return {
-          contentItems: result.contentItems,
-          success: result.success !== false
-        };
-      }
-      const text = typeof result === "string"
-        ? result
-        : JSON.stringify(result ?? { ok: true });
-      return {
-        contentItems: [{ type: "inputText", text }],
-        success: result?.ok !== false && result?.success !== false
-      };
-    };
-
     const handleServerRequest = async (message) => {
       try {
         if (message.method === "item/tool/call") {
           if (typeof onDynamicToolCall !== "function") {
-            throw createProtocolError(`No handler registered for dynamic tool ${message.params?.tool || "unknown"}`);
+            throw errors.protocol(`No handler registered for dynamic tool ${message.params?.tool || "unknown"}`);
           }
           const callId = String(message.params?.callId || message.id);
           let call = dynamicToolCalls.get(callId);
@@ -331,7 +284,7 @@ export function runCodexAppServerTurn({
         if (!pending) return;
         pendingRequests.delete(message.id);
         if (message.error) {
-          const error = createProtocolError(
+          const error = errors.protocol(
             message.error.message || `${pending.method} failed`,
             message.error.code
           );
@@ -344,100 +297,35 @@ export function runCodexAppServerTurn({
       if (message?.method) handleNotification(message);
     };
 
-    const consumeProtocolChunk = (chunk) => {
-      const text = String(chunk || "");
-      if (replacementIdleTimer && turnActive && deadlineRenewalCount > 0) {
-        armReplacementIdleDeadline();
-      }
-      protocolBytes += Buffer.byteLength(text);
-      if (protocolBytes > normalizePositiveInteger(maxProtocolBytes, DEFAULT_MAX_PROTOCOL_BYTES)) {
-        const error = createProtocolError("Codex app-server protocol output exceeded its limit");
-        error.code = "CODEX_APP_SERVER_OUTPUT_LIMIT";
-        finish(error);
-        return;
-      }
-      protocolBuffer += text;
-      let newlineIndex = protocolBuffer.indexOf("\n");
-      while (newlineIndex >= 0) {
-        const line = protocolBuffer.slice(0, newlineIndex).trim();
-        protocolBuffer = protocolBuffer.slice(newlineIndex + 1);
-        if (line) {
-          try {
-            handleProtocolMessage(JSON.parse(line));
-          } catch (error) {
-            const protocolError = createProtocolError(`Invalid Codex app-server JSON: ${error.message}`);
-            protocolError.code = "CODEX_APP_SERVER_INVALID_JSON";
-            finish(protocolError);
-            return;
-          }
-        }
-        newlineIndex = protocolBuffer.indexOf("\n");
-      }
-    };
-
-    const armDeadline = ({ renewal = false } = {}) => {
-      if (settled) return false;
-      if (timeoutTimer) clearTimeout(timeoutTimer);
-      if (renewal) deadlineRenewalCount += 1;
-      timeoutTimer = setTimeout(() => {
-        const error = new Error(`Codex app-server turn timed out after ${normalizedTimeoutMs}ms`);
-        error.code = "CODEX_TURN_TIMEOUT";
-        error.deadlineRenewalCount = deadlineRenewalCount;
-        if (turnActive && threadId && turnId) {
-          void request("turn/interrupt", { threadId, turnId }).catch(() => undefined);
-        }
-        finish(error);
-      }, normalizedTimeoutMs);
-      timeoutTimer.unref?.();
-      return true;
-    };
-
-    const armReplacementIdleDeadline = () => {
-      if (replacementIdleTimer) clearTimeout(replacementIdleTimer);
-      if (settled || !turnActive || deadlineRenewalCount < 1) return false;
-      const idleTimeoutMs = Math.min(
-        normalizedTimeoutMs,
-        normalizePositiveInteger(
-          replacementIdleTimeoutMs,
-          DEFAULT_REPLACEMENT_IDLE_TIMEOUT_MS
-        )
-      );
-      replacementIdleTimer = setTimeout(() => {
-        const error = new Error(
-          `Codex replacement turn produced no protocol activity for ${idleTimeoutMs}ms`
-        );
-        error.code = "CODEX_REPLACEMENT_STALLED";
-        error.deadlineRenewalCount = deadlineRenewalCount;
-        if (turnActive && threadId && turnId) {
-          void request("turn/interrupt", { threadId, turnId }).catch(() => undefined);
-        }
-        finish(error);
-      }, idleTimeoutMs);
-      replacementIdleTimer.unref?.();
-      return true;
-    };
+    const readProtocol = createNdjsonReader({
+      errors,
+      maxBytes: normalizePositiveInteger(maxProtocolBytes, DEFAULT_MAX_PROTOCOL_BYTES),
+      isClosed: () => settled,
+      onMessage: handleProtocolMessage,
+      onError: (error) => finish(error)
+    });
 
     const steer = async (input) => {
-      if (!turnActive || !threadId || !turnId) throw createTurnInactiveError();
+      if (!turnActive || !threadId || !turnId) throw errors.inactive();
       const result = await request("turn/steer", {
         threadId,
         expectedTurnId: turnId,
         input: normalizeUserInput(input)
       });
-      armDeadline({ renewal: true });
+      deadlines.arm({ renewal: true });
       return {
         threadId,
         turnId: result?.turnId || turnId,
-        deadlineRenewalCount
+        deadlineRenewalCount: deadlines.renewalCount
       };
     };
 
     const restart = async (input) => {
-      if (!turnActive || !threadId || !turnId) throw createTurnInactiveError();
-      if (restartInProgress || pendingRestart) throw createTurnRestartingError();
+      if (!turnActive || !threadId || !turnId) throw errors.inactive();
+      if (restartInProgress || pendingRestart) throw errors.restarting();
       const interruptedTurnId = turnId;
       restartInProgress = true;
-      armDeadline({ renewal: true });
+      deadlines.arm({ renewal: true });
       const completion = new Promise((restartResolve, restartReject) => {
         pendingRestart = {
           turnId: interruptedTurnId,
@@ -457,7 +345,7 @@ export function runCodexAppServerTurn({
           turnActive = false;
         }
         interruptionCompleted = true;
-        if (settled || !threadId) throw createTurnInactiveError();
+        if (settled || !threadId) throw errors.inactive();
         agentMessages.length = 0;
         const nextTurn = await request("turn/start", buildTurnStartParams({
           threadId,
@@ -475,21 +363,17 @@ export function runCodexAppServerTurn({
           approvalPolicy
         }));
         turnId = nextTurn?.turn?.id || null;
-        if (!turnId) throw createProtocolError("Codex app-server did not return a replacement turn id");
+        if (!turnId) throw errors.protocol("Codex app-server did not return a replacement turn id");
         turnActive = true;
         const restarted = {
           threadId,
           turnId,
           interruptedTurnId,
-          deadlineRenewalCount,
+          deadlineRenewalCount: deadlines.renewalCount,
           input: normalizeUserInput(input)
         };
-        armReplacementIdleDeadline();
-        try {
-          onRestarted?.(restarted);
-        } catch {
-          // Lifecycle observers must not change the replacement outcome.
-        }
+        deadlines.armReplacementIdle();
+        notifyObserver(onRestarted, restarted);
         return {
           threadId: restarted.threadId,
           turnId: restarted.turnId,
@@ -516,49 +400,26 @@ export function runCodexAppServerTurn({
     };
 
     const abortTurn = () => {
-      const error = createAbortError(signal?.reason);
-      if (turnActive && threadId && turnId) {
-        void request("turn/interrupt", { threadId, turnId }).catch(() => undefined);
-      }
-      finish(error);
+      interruptActiveTurn();
+      finish(errors.abort(signal?.reason));
     };
 
-    armDeadline();
-
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", consumeProtocolChunk);
-    child.stderr?.on("data", (chunk) => {
-      stderr = (stderr + String(chunk || "")).slice(-normalizePositiveInteger(maxStderrBytes, DEFAULT_MAX_STDERR_BYTES));
-    });
-    child.stdin?.on("error", (error) => {
-      if (error?.code === "EPIPE" || error?.code === "ERR_STREAM_DESTROYED" || settled) return;
-      finish(error);
-    });
-    child.once("error", (error) => {
-      notifyExit();
-      finish(error);
-    });
-    child.once("close", (code, exitSignal) => {
-      if (forceKillTimer) clearTimeout(forceKillTimer);
-      notifyExit();
-      if (settled) return;
-      const detail = stderr.trim().slice(-4_000);
-      const error = new Error(
-        `Codex app-server exited before turn completion (${code ?? exitSignal ?? "unknown"})${detail ? `: ${detail}` : ""}`
-      );
-      error.code = "CODEX_APP_SERVER_EXIT";
-      error.exitCode = code;
-      error.signal = exitSignal;
-      finish(error);
+    deadlines.arm();
+    supervisor = superviseAgentChild(child, {
+      maxStderrBytes,
+      killGraceMs,
+      isSettled: () => settled,
+      onStdout: (chunk) => {
+        deadlines.noteActivity();
+        readProtocol(chunk);
+      },
+      onExit,
+      onFailure: (error) => finish(error),
+      onClose: (exit) => finish(errors.exited(exit))
     });
 
     signal?.addEventListener("abort", abortTurn, { once: true });
-    try {
-      onSpawn?.(child);
-    } catch {
-      // Lifecycle observers must not change the turn outcome.
-    }
+    notifyObserver(onSpawn, child);
 
     void (async () => {
       try {
@@ -623,7 +484,7 @@ export function runCodexAppServerTurn({
           resumed = false;
         }
         threadId = thread?.thread?.id || null;
-        if (!threadId) throw createProtocolError("Codex app-server did not return a thread id");
+        if (!threadId) throw errors.protocol("Codex app-server did not return a thread id");
         const turnInputText = resumed && resumePrompt != null ? String(resumePrompt) : String(prompt || "");
         const turn = await request("turn/start", buildTurnStartParams({
           threadId,
@@ -644,13 +505,9 @@ export function runCodexAppServerTurn({
           approvalPolicy
         }));
         turnId = turn?.turn?.id || null;
-        if (!turnId) throw createProtocolError("Codex app-server did not return a turn id");
+        if (!turnId) throw errors.protocol("Codex app-server did not return a turn id");
         turnActive = true;
-        try {
-          onReady?.({ child, threadId, turnId, steer, restart, interrupt, resumed });
-        } catch {
-          // Lifecycle observers must not change the turn outcome.
-        }
+        notifyObserver(onReady, { child, threadId, turnId, steer, restart, interrupt, resumed });
       } catch (error) {
         finish(error);
       }
@@ -750,7 +607,7 @@ function defaultServerRequestResponse(method) {
   }
   if (method === "item/tool/requestUserInput") return { answers: {} };
   if (method === "mcpServer/elicitation/request") return { action: "decline", content: null };
-  throw createProtocolError(`Unsupported Codex app-server request: ${method || "unknown"}`);
+  throw errors.protocol(`Unsupported Codex app-server request: ${method || "unknown"}`);
 }
 
 function normalizeUserInput(value) {
@@ -768,23 +625,6 @@ function normalizeUserInput(value) {
     .filter((entry) => entry.type !== "text" || entry.text.length > 0);
 }
 
-function normalizeImagePaths(paths) {
-  return [...new Set((Array.isArray(paths) ? paths : []).map((path) => String(path || "").trim()).filter(Boolean))]
-    .map((path) => ({ type: "localImage", path }));
-}
-
-function normalizePositiveInteger(value, fallback) {
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
-}
-
-function createProtocolError(message, protocolCode = null) {
-  const error = new Error(message);
-  error.code = "CODEX_APP_SERVER_PROTOCOL";
-  error.protocolCode = protocolCode;
-  return error;
-}
-
 function isNoActiveTurnProtocolError(error) {
   return error?.code === "CODEX_APP_SERVER_PROTOCOL"
     && /no active turn|turn (?:is )?not active|already completed/i.test(String(error?.message || ""));
@@ -794,24 +634,4 @@ function isStaleThreadProtocolError(error) {
   return error?.code === "CODEX_APP_SERVER_PROTOCOL"
     && /thread.*(?:not found|does not exist|unknown|missing|archived)|missing thread|rollout.*(?:not found|missing)|no rollout/i
       .test(String(error?.message || ""));
-}
-
-function createTurnInactiveError() {
-  const error = new Error("Codex app-server turn is no longer active");
-  error.code = "CODEX_TURN_NOT_ACTIVE";
-  return error;
-}
-
-function createTurnRestartingError() {
-  const error = new Error("Codex app-server turn is already being restarted");
-  error.code = "CODEX_TURN_RESTARTING";
-  return error;
-}
-
-function createAbortError(reason) {
-  if (reason instanceof Error) return reason;
-  const error = new Error(reason == null ? "Codex app-server turn aborted" : String(reason));
-  error.name = "AbortError";
-  error.code = "ABORT_ERR";
-  return error;
 }

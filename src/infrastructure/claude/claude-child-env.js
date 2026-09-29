@@ -1,7 +1,7 @@
-import { constants, readFileSync } from "node:fs";
+import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
-import { parseEnvFile } from "../../codex-child-env.js";
+import { baseAgentRuntimeEnvKeys, pickAgentChildEnv, readEnvFile } from "../agent/agent-child-env.js";
 
 const profileAuthKeys = [
   "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
@@ -10,11 +10,7 @@ const profileAuthKeys = [
   "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "API_TIMEOUT_MS"
 ];
 const claudeRuntimeEnvKeys = new Set([
-  "HOME", "USER", "LOGNAME", "PATH", "SHELL", "TMPDIR", "TMP", "TEMP", "TZ", "TERM",
-  "LANG", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
-  "NODE_OPTIONS", "UV_THREADPOOL_SIZE", "MALLOC_ARENA_MAX",
-  "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
-  "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+  ...baseAgentRuntimeEnvKeys,
   "CLAUDE_CONFIG_DIR",
   ...profileAuthKeys
 ]);
@@ -52,14 +48,14 @@ export function buildIsolatedClaudeChildEnv({
   // Call sites pass the whole Hub environment as overrides for Codex; only the
   // Bot's own markers may pass through so Hub secrets and a parent Claude
   // session's markers never reach the child.
-  const env = {};
-  for (const [key, value] of Object.entries(source)) {
-    if (value == null) continue;
-    if (claudeRuntimeEnvKeys.has(key) || key.startsWith("LC_") || isBotMarker(key)) {
-      env[key] = String(value);
-    }
-  }
-  return { ...env, ...claudeFixedEnv };
+  return { ...pickAgentChildEnv(source, claudeRuntimeEnvKeys, isBotMarker), ...claudeFixedEnv };
+}
+
+// How turns authenticate: an ncc connection profile when one exists,
+// otherwise the machine's own `claude` login. Never reads the keys.
+export async function detectClaudeConnection(baseEnv = process.env) {
+  const profileExists = await access(defaultClaudeProfileEnvPath(baseEnv), constants.R_OK).then(() => true, () => false);
+  return profileExists ? "profile" : "login";
 }
 
 // The Claude CLI is usually a bare command name, so resolve it on PATH the
@@ -78,13 +74,4 @@ export async function isExecutableOnPath(command, env = process.env) {
 
 function isBotMarker(key) {
   return key.startsWith("CODEX_REMOTE_CONTACT_") && !/KEY|TOKEN|SECRET|PASSWORD|COOKIE/.test(key);
-}
-
-function readEnvFile(path) {
-  try {
-    return parseEnvFile(readFileSync(path, "utf8"));
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    return null;
-  }
 }

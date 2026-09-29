@@ -288,7 +288,13 @@ import {
 } from "./infrastructure/codex/qq-native-tools.js";
 import { createQqNativeProgressReporter } from "./infrastructure/codex/qq-native-progress.js";
 import { createQqCodexTurnRunner } from "./infrastructure/codex/qq-turn-runner.js";
-import { isExecutableOnPath } from "./infrastructure/claude/claude-child-env.js";
+import { detectClaudeConnection, isExecutableOnPath } from "./infrastructure/claude/claude-child-env.js";
+import {
+  AGENT_LOG_CATEGORY,
+  describeAgentEngine,
+  formatAgentEngineSummary
+} from "./infrastructure/agent/agent-engines.js";
+import { createAgentCliVersionProbe } from "./infrastructure/agent/agent-cli-version.js";
 import {
   parseQqContextSummaryOutput,
   qqContextSummaryOutputSchema
@@ -2617,8 +2623,8 @@ async function commitQqCodexSessionForEvent(event) {
   state.qq.codexSession.store = upsertQqCodexSessionThread(state.qq.codexSession.store, {
     scopeId,
     threadId,
-    model: state.ai.model,
-    reasoningEffort: state.ai.reasoningEffort,
+    model: describeActiveAgent().model,
+    reasoningEffort: describeActiveAgent().reasoningEffort,
     lastContextAt: event.qqCodexContextAt,
     dynamicToolsFingerprint: event.qqCodexDynamicToolsFingerprint
   });
@@ -2773,15 +2779,24 @@ function buildPublicState() {
         ...publicTunnelManager.status()
       }
     },
-    ai: {
-      provider: state.ai.provider,
-      model: state.ai.model,
-      reasoningEffort: state.ai.reasoningEffort,
-      reasoningSummary: state.ai.reasoningSummary,
-      personality: state.ai.personality,
-      serviceTier: state.ai.serviceTier || null,
-      runtime: "codex-app-server-native"
-    },
+    ai: (() => {
+      const activeAgent = describeActiveAgent();
+      return {
+        provider: state.ai.provider,
+        // model/reasoningEffort stay the persisted Codex settings; active* is
+        // what the selected engine actually runs with.
+        model: state.ai.model,
+        reasoningEffort: state.ai.reasoningEffort,
+        reasoningSummary: state.ai.reasoningSummary,
+        personality: state.ai.personality,
+        serviceTier: state.ai.serviceTier || null,
+        engine: activeAgent.engine,
+        engineName: activeAgent.name,
+        activeModel: activeAgent.model,
+        activeReasoningEffort: activeAgent.reasoningEffort,
+        runtime: activeAgent.runtime
+      };
+    })(),
     channels: { ...state.channels },
     qq: {
       groupMode: state.qq.groupMode,
@@ -3066,16 +3081,30 @@ function normalizeMemoryEntries(entries, limit) {
   })).filter((entry) => entry.text);
 }
 
+function describeActiveAgent() {
+  return describeAgentEngine(agentEngine, { ai: state.ai, claudeModel, claudeReasoningEffort });
+}
+
+const agentCliVersionProbe = createAgentCliVersionProbe();
+
 async function buildMaintenanceStatus({ force = false } = {}) {
-  const codexPathOk = await access(codexCliPath).then(() => true).catch(() => false);
-  const claudePathOk = agentEngine === "claude" ? await isExecutableOnPath(claudeCliPath) : null;
-  const [quota] = await Promise.all([
-    getCachedCodexQuotaSnapshot({ force }),
+  const activeAgent = describeActiveAgent();
+  const usesClaude = activeAgent.engine === "claude";
+  const agentCliPath = usesClaude ? claudeCliPath : codexCliPath;
+  if (force) void agentCliVersionProbe.refresh(agentCliPath);
+  const [codexPathOk, claudePathOk, claudeConnection, quota] = await Promise.all([
+    access(codexCliPath).then(() => true).catch(() => false),
+    usesClaude ? isExecutableOnPath(claudeCliPath) : null,
+    usesClaude ? detectClaudeConnection() : null,
+    // Only an engine with a usage feed pays for reading it.
+    activeAgent.reportsQuota ? getCachedCodexQuotaSnapshot({ force }) : state.maintenance.codex.quota,
     checkOneBotHealth({ force })
   ]);
   const webLookupProviderPlan = buildWebSearchProviderPlan();
   const timeoutPolicies = getCodexTaskTimeoutPolicyMap(codexTaskTimeouts, state.ai.reasoningEffort);
   const { path: _privateCodexPath, ...codexMaintenance } = state.maintenance.codex;
+  const agentRun = { ...state.maintenance.agent };
+  const queue = codexRunLimiter.snapshot();
   return {
     startedAt: state.maintenance.startedAt,
     oneBot: { ...state.maintenance.oneBot },
@@ -3086,17 +3115,19 @@ async function buildMaintenanceStatus({ force = false } = {}) {
       effectiveProvider: state.maintenance.webLookup.effectiveProvider || webLookupProviderPlan[0] || null
     },
     agent: {
-      engine: agentEngine,
-      ...(agentEngine === "claude" ? {
-        claudePathExists: claudePathOk,
-        claudeModel,
-        claudeReasoningEffort: claudeReasoningEffort || state.ai.reasoningEffort
-      } : {})
+      ...activeAgent,
+      cliPathExists: usesClaude ? claudePathOk : codexPathOk,
+      cliVersion: agentCliVersionProbe.peek(agentCliPath),
+      connection: claudeConnection,
+      ...agentRun,
+      queue
     },
+    // Kept for existing controllers; the run fields mirror the agent above.
     codex: {
       ...codexMaintenance,
+      ...agentRun,
       pathExists: codexPathOk,
-      queue: codexRunLimiter.snapshot(),
+      queue,
       reasoningEffort: state.ai.reasoningEffort,
       timeoutMultiplier: timeoutPolicies[CODEX_TASK_TYPES.QQ_REPLY].multiplier,
       taskTimeoutBaseMs: Object.fromEntries(Object.entries(timeoutPolicies).map(([taskType, policy]) => [
@@ -3163,7 +3194,7 @@ async function getCachedCodexQuotaSnapshot({ force = false } = {}) {
   if (!force && fresh) return cached;
   if (!force && cached) {
     trackBackgroundTask(refreshCodexQuotaCache(), (error) => {
-      logger.warn("Codex quota background refresh failed", { error }, "codex");
+      logger.warn("Codex quota background refresh failed", { engine: "codex", error }, AGENT_LOG_CATEGORY);
       return cached;
     });
     return cached;
@@ -4444,7 +4475,7 @@ async function runQqKnowledgeDeletionReview(candidate) {
     reviewPipeline: "interest_triage_then_main_review",
     judgeProvider: state.qq.proactive.judge.provider,
     judgeModel: state.qq.proactive.judge.model,
-    mainModel: state.ai.model
+    mainModel: describeActiveAgent().model
   }, "memory");
   const activeInterestModel = getActiveQqInterestModelConfig();
   const triageResult = await runQqInterestModelStructuredTask({
@@ -4513,7 +4544,7 @@ async function runQqKnowledgeDeletionReview(candidate) {
     interestRecommendation: triageResult.value.recommendDelete ? "delete" : "keep",
     interestComplexity: triageResult.value.complexity,
     interestEvidenceConcerns: triageResult.value.evidenceConcerns,
-    mainModel: state.ai.model
+    mainModel: describeActiveAgent().model
   }, "memory");
   let mainReview;
   try {
@@ -4532,7 +4563,7 @@ async function runQqKnowledgeDeletionReview(candidate) {
       judgeProvider: triageResult.provider,
       judgeModel: triageResult.model,
       interestModelOutput: triageResult.raw,
-      mainModel: state.ai.model,
+      mainModel: describeActiveAgent().model,
       error: cause
     }, "memory");
     const error = new Error(`main model knowledge deletion review failed: ${cause.message}`);
@@ -4577,7 +4608,7 @@ async function runQqKnowledgeDeletionReview(candidate) {
     interestComplexity: triageResult.value.complexity,
     interestEvidenceConcerns: triageResult.value.evidenceConcerns,
     interestModelOutput: triageResult.raw,
-    mainModel: state.ai.model,
+    mainModel: describeActiveAgent().model,
     mainModelDurationMs: mainReview.durationMs,
     mainModelDecision: decision.delete ? "delete" : "keep",
     mainModelOutput: mainReview.raw
@@ -5434,8 +5465,9 @@ function buildQqManualAiTaskStatus() {
     running: [...qqManualAiTaskPromises.keys()],
     periodicPersonaRefreshRunning: Boolean(qqSelfPersonaRefreshPromise),
     periodicKnowledgeReviewRunning: Boolean(qqKnowledgeDeletionReviewPromise),
-    model: state.ai.model,
-    reasoningEffort: state.ai.reasoningEffort
+    engine: agentEngine,
+    model: describeActiveAgent().model,
+    reasoningEffort: describeActiveAgent().reasoningEffort
   };
 }
 
@@ -5896,19 +5928,33 @@ async function buildQqCommandAction(event) {
   return null;
 }
 
+// Engines without the Codex catalog take their model from the startup
+// configuration, so /模型 explains that instead of listing Codex models.
+function buildQqModelCatalogUnavailableReply() {
+  const activeAgent = describeActiveAgent();
+  if (activeAgent.modelCatalog) return null;
+  return {
+    reply: `当前由 ${formatAgentEngineSummary(activeAgent)} 驱动。\n${activeAgent.name} 的模型在启动配置里设置（CODEX_REMOTE_CONTACT_CLAUDE_MODEL / CODEX_REMOTE_CONTACT_CLAUDE_EFFORT），改完重启 Hub 生效；/模型 只用于切换 Codex 模型。`
+  };
+}
+
 async function buildQqModelPicker() {
+  const unavailable = buildQqModelCatalogUnavailableReply();
+  if (unavailable) return unavailable;
   try {
     const models = await codexModelCatalog.list({ refresh: true });
     if (models.length === 0) return { reply: "Codex 当前没有返回可选模型。" };
     const lines = models.map((item, index) => `${index + 1}. ${item.displayName}（${item.model}）${item.model === state.ai.model ? " ← 当前" : ""}`);
     return { reply: `当前可用模型：\n${lines.join("\n")}\n发送 /模型 序号 进行切换。` };
   } catch (error) {
-    logger.warn("Unable to load Codex model catalog", { error: error.message }, "codex");
+    logger.warn("Unable to load Codex model catalog", { engine: "codex", error: error.message }, AGENT_LOG_CATEGORY);
     return { reply: `读取 Codex 可用模型失败：${error.message}` };
   }
 }
 
 async function selectQqModel(selector, event) {
+  const unavailable = buildQqModelCatalogUnavailableReply();
+  if (unavailable) return unavailable;
   try {
     const models = await codexModelCatalog.list();
     const requested = resolveQqModelAlias(selector);
@@ -5926,7 +5972,7 @@ async function selectQqModel(selector, event) {
       beforeSend: saveSettings
     };
   } catch (error) {
-    logger.warn("Unable to select Codex model", { error: error.message }, "codex");
+    logger.warn("Unable to select Codex model", { engine: "codex", error: error.message }, AGENT_LOG_CATEGORY);
     return { reply: `读取 Codex 可用模型失败：${error.message}` };
   }
 }
@@ -6329,8 +6375,8 @@ function preserveStoppedQqCodexSession(active) {
   state.qq.codexSession.store = upsertQqCodexSessionThread(state.qq.codexSession.store, {
     scopeId,
     threadId,
-    model: state.ai.model,
-    reasoningEffort: state.ai.reasoningEffort,
+    model: describeActiveAgent().model,
+    reasoningEffort: describeActiveAgent().reasoningEffort,
     lastContextAt: event?.qqCodexContextAt,
     dynamicToolsFingerprint: event?.qqCodexDynamicToolsFingerprint
   });
@@ -6366,8 +6412,8 @@ function buildQqMenu(event) {
     owner,
     administrator,
     assistantName: state.qq.selfPersona.account?.nickname || assistantName,
-    model: state.ai.model,
-    reasoningEffort: state.ai.reasoningEffort,
+    model: [describeActiveAgent().name, describeActiveAgent().model].filter(Boolean).join(" "),
+    reasoningEffort: describeActiveAgent().reasoningEffort,
     allowedGroups: state.qq.allowedGroups,
     commands: visibleCommands.map((command) => ({
       ...command,
@@ -6562,7 +6608,8 @@ function buildQqOwnerStatus() {
   pruneExpiredQqBans();
   return [
     `QQ：${state.channels.qq ? "开启" : "关闭"}`,
-    `QQ 模型：${state.ai.model} / ${state.ai.reasoningEffort} / 摘要 ${state.ai.reasoningSummary} / 人格 ${state.ai.personality}`,
+    `AI 引擎：${formatAgentEngineSummary(describeActiveAgent())}`,
+    `Codex 设置：${state.ai.model} / ${state.ai.reasoningEffort} / 摘要 ${state.ai.reasoningSummary} / 人格 ${state.ai.personality}`,
     `白名单群：${state.qq.allowedGroups.length ? state.qq.allowedGroups.join(", ") : "无"}`,
     `主人 QQ：${state.qq.ownerUserIds.length ? state.qq.ownerUserIds.join(", ") : "未设置"}`,
     `Bot 管理员：${state.qq.adminUserIds.length ? state.qq.adminUserIds.join(", ") : "无"}`,
@@ -6583,7 +6630,8 @@ function buildQqOwnerConfigDetail() {
     "QQ 详细配置",
     `通道：${state.channels.qq ? "开启" : "关闭"}`,
     `群模式：${state.qq.groupMode}`,
-    `模型：${state.ai.model}`,
+    `AI 引擎：${formatAgentEngineSummary(describeActiveAgent())}`,
+    `Codex 模型：${state.ai.model}`,
     `智能等级：${state.ai.reasoningEffort}`,
     `推理摘要：${state.ai.reasoningSummary}`,
     `Agent 人格：${state.ai.personality}`,
@@ -11910,8 +11958,8 @@ function stopActiveQqGeneration(id = null) {
   } catch {
     return false;
   }
-  state.maintenance.codex.lastOk = false;
-  state.maintenance.codex.lastError = "QQ generation stopped by /stop";
+  state.maintenance.agent.lastOk = false;
+  state.maintenance.agent.lastError = "QQ generation stopped by /stop";
   return true;
 }
 
@@ -11920,13 +11968,14 @@ function logQqNativeAgentProgress(event, progress) {
   const text = type === "plan"
     ? String(progress?.explanation || "").slice(0, 500)
     : String(progress?.text || "").slice(0, 500);
-  logger.debug("QQ native Codex agent progress", {
+  logger.debug("QQ native Agent progress", {
+    engine: agentEngine,
     progressType: type,
     progressText: text || null,
     plan: type === "plan" ? (progress?.plan || []).slice(0, 12) : undefined,
     groupId: event?.groupId || null,
     senderId: event?.senderId || null
-  }, "codex", event ? qqLogContext(event) : {});
+  }, AGENT_LOG_CATEGORY, event ? qqLogContext(event) : {});
 }
 
 function createQqNativeAgentProgressObserver(event, { replyScope = null } = {}) {
@@ -11934,11 +11983,12 @@ function createQqNativeAgentProgressObserver(event, { replyScope = null } = {}) 
     send: (text) => sendQqTaskProgressMessage(event, text, { replyScope }),
     onError: (error) => {
       logger.debug("QQ native Agent progress observer failed", {
+        engine: agentEngine,
         outcome: "ignored",
         groupId: event?.groupId || null,
         senderId: event?.senderId || null,
         error
-      }, "codex", event ? qqLogContext(event) : {});
+      }, AGENT_LOG_CATEGORY, event ? qqLogContext(event) : {});
     }
   });
   return {
@@ -12041,8 +12091,8 @@ function logQqNativeToolEvent(toolEvent = {}) {
   });
   logger[toolEvent.ok ? "debug" : "warn"](
     "QQ native Agent tool completed",
-    details,
-    "codex",
+    { ...details, engine: agentEngine },
+    AGENT_LOG_CATEGORY,
     sourceEvent ? qqLogContext(sourceEvent) : {}
   );
 }
@@ -12064,7 +12114,7 @@ const runSteerableQqCodexTurn = createQqCodexTurnRunner({
   clearGeneration: clearTrackedQqGeneration,
   logContext: qqLogContext,
   logger,
-  logModelOutput: logCodexModelOutput,
+  logModelOutput: logAgentModelOutput,
   trackBackgroundTask,
   refreshQuota: refreshCodexQuotaSnapshotAfterRun
 });
@@ -12074,19 +12124,27 @@ async function ensureCodexReplyWorkspace() {
   await mkdir(codexTmpDir, { recursive: true });
 }
 
-function logCodexModelOutput(output, { event = null, taskType = "", label = "" } = {}) {
+function logAgentModelOutput(output, {
+  event = null,
+  taskType = "",
+  label = "",
+  engine = agentEngine,
+  model = null,
+  reasoningEffort = null
+} = {}) {
   const text = String(output || "");
-  logger.debug("Codex model output captured", {
+  logger.debug("Agent model output captured", {
+    engine,
     taskType: taskType || null,
     label: label || null,
-    model: state.ai.model,
-    reasoningEffort: state.ai.reasoningEffort,
+    model,
+    reasoningEffort,
     groupId: event?.groupId || null,
     senderId: event?.senderId || null,
     outputChars: text.length,
     outputTruncated: text.length > 4000,
     modelOutput: text.slice(0, 4000)
-  }, "codex", event ? qqLogContext(event) : {});
+  }, AGENT_LOG_CATEGORY, event ? qqLogContext(event) : {});
 }
 
 function logQqGeneratedAttachmentImport(parsed, event, result) {
@@ -13838,7 +13896,8 @@ if (hubAllowedOrigins.includes("*") && !managementApiToken) {
   throw new Error("Refusing wildcard CORS without an API token");
 }
 resetQqProactiveRuntimeCycles({ clearPersistedCycles: false });
-await ensureAvailableQqModel();
+// Only an engine that uses the Codex catalog needs its model validated.
+if (describeActiveAgent().modelCatalog) await ensureAvailableQqModel();
 await mkdir(qqStickerDir, { recursive: true });
 const qqMemoryLoad = await loadQqMemory();
 restoreQqPeriodicRuntimeCycles();
@@ -14049,11 +14108,12 @@ async function ensureAvailableQqModel() {
       : fallback.defaultServiceTier || "";
     await saveSettings();
     logger.warn("Configured QQ model is unavailable; selected Codex default", {
+      engine: "codex",
       previousModel,
       model: fallback.model,
       reasoningEffort: fallback.defaultReasoningEffort
-    }, "codex");
+    }, AGENT_LOG_CATEGORY);
   } catch (error) {
-    logger.warn("Unable to validate configured QQ model", { error: error.message }, "codex");
+    logger.warn("Unable to validate configured QQ model", { engine: "codex", error: error.message }, AGENT_LOG_CATEGORY);
   }
 }

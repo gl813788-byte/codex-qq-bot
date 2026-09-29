@@ -5,22 +5,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   buildCodexChildEnv,
-  buildIsolatedCodexChildEnv,
-  parseEnvFile
+  buildIsolatedCodexChildEnv
 } from "../src/codex-child-env.js";
-
-test("parses the supported active profile env syntax without executing shell code", () => {
-  assert.deepEqual(parseEnvFile(`
-    # profile
-    export CODEX_API_KEY='secret-value'
-    OPENAI_BASE_URL="https://example.test/v1"
-    PLAIN=value # comment
-  `), {
-    CODEX_API_KEY: "secret-value",
-    OPENAI_BASE_URL: "https://example.test/v1",
-    PLAIN: "value"
-  });
-});
 
 test("isolated app-server env keeps Codex runtime/auth and drops unrelated Hub secrets", () => {
   const env = buildIsolatedCodexChildEnv({

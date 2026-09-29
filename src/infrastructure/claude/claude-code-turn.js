@@ -5,19 +5,27 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  attachErrorFields,
+  createAgentTurnErrors,
+  createNdjsonReader,
+  createTurnDeadlines,
+  normalizeDynamicToolResult,
+  normalizeImagePaths,
+  normalizePositiveInteger,
+  notifyObserver,
+  superviseAgentChild
+} from "../agent/agent-turn-process.js";
 
 // Claude Code adapter with the same contract as runCodexAppServerTurn: one
 // `claude -p` stream-json process per QQ turn, dynamic QQ tools served over a
 // per-turn MCP bridge, structured output through --json-schema, and
-// steer/restart/interrupt controls for fused follow-ups. Error codes reuse the
-// Codex names so recovery and steering policies stay engine-neutral.
+// steer/restart/interrupt controls for fused follow-ups. Deadlines, framing,
+// child supervision and the CODEX_* error codes come from the shared agent
+// turn module so recovery and steering policies stay engine-neutral.
 
-const DEFAULT_TIMEOUT_MS = 180_000;
 // Replayed user messages echo base64 images, so allow more than Codex does.
 const DEFAULT_MAX_PROTOCOL_BYTES = 64 * 1024 * 1024;
-const DEFAULT_MAX_STDERR_BYTES = 32 * 1024;
-const DEFAULT_KILL_GRACE_MS = 1_000;
-const DEFAULT_REPLACEMENT_IDLE_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_IMAGE_BYTES = 3_750_000;
 const CONTROL_REQUEST_TIMEOUT_MS = 15_000;
 const STRUCTURED_OUTPUT_TOOL = "StructuredOutput";
@@ -26,6 +34,7 @@ const THREAD_ID_PREFIX = "claude:";
 const bridgeScriptPath = fileURLToPath(new URL("./qq-mcp-bridge.mjs", import.meta.url));
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const claudeEfforts = new Set(["low", "medium", "high", "xhigh", "max"]);
+const errors = createAgentTurnErrors("Claude Code");
 
 // Text Claude writes right before a tool call becomes QQ-visible progress, the
 // same way Codex commentary does, so the adapter tells the model about it.
@@ -38,6 +47,12 @@ const CLAUDE_ADAPTER_INSTRUCTIONS = [
 
 export function toClaudeThreadId(sessionId) {
   return sessionId ? `${THREAD_ID_PREFIX}${sessionId}` : null;
+}
+
+// Persistent scopes store Claude sessions beside Codex threads; Codex must
+// never try to resume one of these ids after an engine switch.
+export function isClaudeThreadId(threadId) {
+  return String(threadId || "").startsWith(THREAD_ID_PREFIX);
 }
 
 export function claudeSessionIdFromThreadId(threadId) {
@@ -177,12 +192,12 @@ function runClaudeCodeTurnOnce({
   shellAccess = false,
   resumeSessionId = null,
   ephemeral = true,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  timeoutMs,
   maxProtocolBytes = DEFAULT_MAX_PROTOCOL_BYTES,
-  maxStderrBytes = DEFAULT_MAX_STDERR_BYTES,
+  maxStderrBytes,
   maxImageBytes = DEFAULT_MAX_IMAGE_BYTES,
-  killGraceMs = DEFAULT_KILL_GRACE_MS,
-  replacementIdleTimeoutMs = DEFAULT_REPLACEMENT_IDLE_TIMEOUT_MS,
+  killGraceMs,
+  replacementIdleTimeoutMs,
   signal,
   spawnProcess = spawn,
   startToolBridge = startClaudeToolBridge,
@@ -197,35 +212,44 @@ function runClaudeCodeTurnOnce({
 } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      reject(createAbortError(signal.reason));
+      reject(errors.abort(signal.reason));
       return;
     }
 
     const resumed = Boolean(resumeSessionId);
     const sessionId = resumeSessionId || randomUUID();
     const threadId = toClaudeThreadId(sessionId);
-    const normalizedTimeoutMs = normalizePositiveInteger(timeoutMs, DEFAULT_TIMEOUT_MS);
     const pendingInputIds = new Set();
     const pendingControls = new Map();
     const completedItems = [];
     let workDir = null;
     let bridge = null;
     let child = null;
+    let supervisor = null;
     let settled = false;
-    let exited = false;
     let sawProtocolOutput = false;
-    let protocolBuffer = "";
-    let protocolBytes = 0;
-    let stderr = "";
     let turnSequence = 1;
     let turnId = `claude-turn-${turnSequence}`;
     let turnActive = false;
     let restartInProgress = false;
-    let forceKillTimer = null;
-    let timeoutTimer = null;
-    let replacementIdleTimer = null;
-    let deadlineRenewalCount = 0;
     let commentaryBuffer = { messageId: null, texts: [] };
+
+    const interruptActiveTurn = () => {
+      if (!turnActive) return;
+      void controlRequest({ subtype: "interrupt" }).catch(() => undefined);
+    };
+
+    const deadlines = createTurnDeadlines({
+      errors,
+      timeoutMs,
+      replacementIdleTimeoutMs,
+      isSettled: () => settled,
+      isTurnActive: () => turnActive,
+      onExpire: (error) => {
+        interruptActiveTurn();
+        finish(error);
+      }
+    });
 
     const cleanup = () => {
       try {
@@ -236,49 +260,18 @@ function runClaudeCodeTurnOnce({
       if (workDir) rmSync(workDir, { recursive: true, force: true });
     };
 
-    const notifyExit = () => {
-      if (exited || !child) return;
-      exited = true;
-      try {
-        onExit?.(child);
-      } catch {
-        // Lifecycle observers must not change the turn outcome.
-      }
-    };
-
-    const terminateChild = () => {
-      if (!child) return;
-      try {
-        child.stdin?.end();
-        child.kill("SIGTERM");
-      } catch {
-        return;
-      }
-      if (!forceKillTimer) {
-        forceKillTimer = setTimeout(() => {
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            // The process exited during the graceful window.
-          }
-        }, normalizePositiveInteger(killGraceMs, DEFAULT_KILL_GRACE_MS));
-        forceKillTimer.unref?.();
-      }
-    };
-
     const finish = (error, result = null) => {
       if (settled) return;
       settled = true;
       turnActive = false;
-      if (timeoutTimer) clearTimeout(timeoutTimer);
-      if (replacementIdleTimer) clearTimeout(replacementIdleTimer);
+      deadlines.clear();
       signal?.removeEventListener("abort", abortTurn);
-      for (const pending of pendingControls.values()) pending.reject(error || createTurnInactiveError());
+      for (const pending of pendingControls.values()) pending.reject(error || errors.inactive());
       pendingControls.clear();
-      if (error) {
-        attachErrorFields(error, { deadlineRenewalCount, stderr });
-      }
-      terminateChild();
+      const stderr = supervisor?.stderr() || "";
+      const deadlineRenewalCount = deadlines.renewalCount;
+      if (error) attachErrorFields(error, { deadlineRenewalCount, stderr });
+      supervisor?.terminate();
       cleanup();
       if (error) reject(error);
       else resolve({ ...result, stderr, deadlineRenewalCount });
@@ -286,7 +279,7 @@ function runClaudeCodeTurnOnce({
 
     const send = (message) => {
       if (settled || !child?.stdin?.writable || child.stdin.destroyed) {
-        throw createProtocolError("Claude Code stdin is not writable");
+        throw errors.protocol("Claude Code stdin is not writable");
       }
       child.stdin.write(`${JSON.stringify(message)}\n`);
     };
@@ -309,7 +302,7 @@ function runClaudeCodeTurnOnce({
       return new Promise((controlResolve, controlReject) => {
         const timer = setTimeout(() => {
           pendingControls.delete(requestId);
-          controlReject(createProtocolError(`Claude Code ${request.subtype} request timed out`));
+          controlReject(errors.protocol(`Claude Code ${request.subtype} request timed out`));
         }, CONTROL_REQUEST_TIMEOUT_MS);
         timer.unref?.();
         pendingControls.set(requestId, {
@@ -329,14 +322,6 @@ function runClaudeCodeTurnOnce({
           pendingControls.delete(requestId);
         }
       });
-    };
-
-    const notifyObserver = (observer, value) => {
-      try {
-        observer?.(value);
-      } catch {
-        // Observers must not change the turn outcome.
-      }
     };
 
     const flushCommentary = () => {
@@ -436,100 +421,37 @@ function runClaudeCodeTurnOnce({
         const pending = pendingControls.get(response.request_id);
         if (!pending) return;
         pendingControls.delete(response.request_id);
-        if (response.subtype === "error") pending.reject(createProtocolError(response.error || "Claude Code control request failed"));
+        if (response.subtype === "error") pending.reject(errors.protocol(response.error || "Claude Code control request failed"));
         else pending.resolve(response.response ?? null);
         return;
       }
       if (message?.type === "control_request") handleControlRequest(message);
     };
 
-    const consumeProtocolChunk = (chunk) => {
-      const text = String(chunk || "");
-      sawProtocolOutput = true;
-      if (replacementIdleTimer && turnActive && deadlineRenewalCount > 0) armReplacementIdleDeadline();
-      protocolBytes += Buffer.byteLength(text);
-      if (protocolBytes > normalizePositiveInteger(maxProtocolBytes, DEFAULT_MAX_PROTOCOL_BYTES)) {
-        const error = createProtocolError("Claude Code protocol output exceeded its limit");
-        error.code = "CODEX_APP_SERVER_OUTPUT_LIMIT";
-        finish(error);
-        return;
-      }
-      protocolBuffer += text;
-      let newlineIndex = protocolBuffer.indexOf("\n");
-      while (newlineIndex >= 0) {
-        const line = protocolBuffer.slice(0, newlineIndex).trim();
-        protocolBuffer = protocolBuffer.slice(newlineIndex + 1);
-        if (line) {
-          let parsed;
-          try {
-            parsed = JSON.parse(line);
-          } catch (error) {
-            const protocolError = createProtocolError(`Invalid Claude Code JSON: ${error.message}`);
-            protocolError.code = "CODEX_APP_SERVER_INVALID_JSON";
-            finish(protocolError);
-            return;
-          }
-          handleProtocolMessage(parsed);
-          if (settled) return;
-        }
-        newlineIndex = protocolBuffer.indexOf("\n");
-      }
-    };
-
-    const interruptActiveTurn = () => {
-      if (!turnActive) return;
-      void controlRequest({ subtype: "interrupt" }).catch(() => undefined);
-    };
-
-    const armDeadline = ({ renewal = false } = {}) => {
-      if (settled) return false;
-      if (timeoutTimer) clearTimeout(timeoutTimer);
-      if (renewal) deadlineRenewalCount += 1;
-      timeoutTimer = setTimeout(() => {
-        const error = new Error(`Claude Code turn timed out after ${normalizedTimeoutMs}ms`);
-        error.code = "CODEX_TURN_TIMEOUT";
-        error.deadlineRenewalCount = deadlineRenewalCount;
-        interruptActiveTurn();
-        finish(error);
-      }, normalizedTimeoutMs);
-      timeoutTimer.unref?.();
-      return true;
-    };
-
-    const armReplacementIdleDeadline = () => {
-      if (replacementIdleTimer) clearTimeout(replacementIdleTimer);
-      if (settled || !turnActive || deadlineRenewalCount < 1) return false;
-      const idleTimeoutMs = Math.min(
-        normalizedTimeoutMs,
-        normalizePositiveInteger(replacementIdleTimeoutMs, DEFAULT_REPLACEMENT_IDLE_TIMEOUT_MS)
-      );
-      replacementIdleTimer = setTimeout(() => {
-        const error = new Error(`Claude Code replacement turn produced no protocol activity for ${idleTimeoutMs}ms`);
-        error.code = "CODEX_REPLACEMENT_STALLED";
-        error.deadlineRenewalCount = deadlineRenewalCount;
-        interruptActiveTurn();
-        finish(error);
-      }, idleTimeoutMs);
-      replacementIdleTimer.unref?.();
-      return true;
-    };
+    const readProtocol = createNdjsonReader({
+      errors,
+      maxBytes: normalizePositiveInteger(maxProtocolBytes, DEFAULT_MAX_PROTOCOL_BYTES),
+      isClosed: () => settled,
+      onMessage: handleProtocolMessage,
+      onError: (error) => finish(error)
+    });
 
     const steer = async (input) => {
-      if (!turnActive) throw createTurnInactiveError();
+      if (!turnActive) throw errors.inactive();
       sendUserInput(buildUserContent(input, { maxImageBytes }));
-      armDeadline({ renewal: true });
-      return { threadId, turnId, deadlineRenewalCount };
+      deadlines.arm({ renewal: true });
+      return { threadId, turnId, deadlineRenewalCount: deadlines.renewalCount };
     };
 
     const restart = async (input) => {
-      if (!turnActive) throw createTurnInactiveError();
-      if (restartInProgress) throw createTurnRestartingError();
+      if (!turnActive) throw errors.inactive();
+      if (restartInProgress) throw errors.restarting();
       const interruptedTurnId = turnId;
       restartInProgress = true;
-      armDeadline({ renewal: true });
+      deadlines.arm({ renewal: true });
       try {
         await controlRequest({ subtype: "interrupt" });
-        if (settled) throw createTurnInactiveError();
+        if (settled) throw errors.inactive();
         commentaryBuffer = { messageId: null, texts: [] };
         // The replacement input already carries every fused follow-up, so
         // steered messages the interrupt may have dropped are not awaited.
@@ -538,13 +460,10 @@ function runClaudeCodeTurnOnce({
         turnId = `claude-turn-${turnSequence}`;
         const content = buildUserContent(input, { maxImageBytes });
         sendUserInput(content);
+        const deadlineRenewalCount = deadlines.renewalCount;
         const restarted = { threadId, turnId, interruptedTurnId, deadlineRenewalCount, input };
-        armReplacementIdleDeadline();
-        try {
-          onRestarted?.(restarted);
-        } catch {
-          // Lifecycle observers must not change the replacement outcome.
-        }
+        deadlines.armReplacementIdle();
+        notifyObserver(onRestarted, restarted);
         return { threadId, turnId, interruptedTurnId, deadlineRenewalCount };
       } catch (error) {
         if (!settled) finish(error);
@@ -562,7 +481,7 @@ function runClaudeCodeTurnOnce({
 
     function abortTurn() {
       interruptActiveTurn();
-      finish(createAbortError(signal?.reason));
+      finish(errors.abort(signal?.reason));
     }
 
     const launch = async () => {
@@ -599,41 +518,26 @@ function runClaudeCodeTurnOnce({
         ephemeral
       });
       child = spawnProcess(claudePath, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
-
-      child.stdout?.setEncoding("utf8");
-      child.stderr?.setEncoding("utf8");
-      child.stdout?.on("data", consumeProtocolChunk);
-      child.stderr?.on("data", (chunk) => {
-        stderr = (stderr + String(chunk || "")).slice(-normalizePositiveInteger(maxStderrBytes, DEFAULT_MAX_STDERR_BYTES));
+      supervisor = superviseAgentChild(child, {
+        maxStderrBytes,
+        killGraceMs,
+        isSettled: () => settled,
+        onStdout: (chunk) => {
+          sawProtocolOutput = true;
+          deadlines.noteActivity();
+          readProtocol(chunk);
+        },
+        onExit,
+        onFailure: (error) => finish(error),
+        onClose: (exit) => {
+          const error = errors.exited(exit);
+          if (resumed && !sawProtocolOutput && /no conversation found|session.*not found/i.test(exit.detail)) {
+            error.code = "CLAUDE_SESSION_NOT_FOUND";
+          }
+          finish(error);
+        }
       });
-      child.stdin?.on("error", (error) => {
-        if (error?.code === "EPIPE" || error?.code === "ERR_STREAM_DESTROYED" || settled) return;
-        finish(error);
-      });
-      child.once("error", (error) => {
-        notifyExit();
-        finish(error);
-      });
-      child.once("close", (code, exitSignal) => {
-        if (forceKillTimer) clearTimeout(forceKillTimer);
-        notifyExit();
-        if (settled) return;
-        const detail = stderr.trim().slice(-4_000);
-        const error = new Error(
-          `Claude Code exited before turn completion (${code ?? exitSignal ?? "unknown"})${detail ? `: ${detail}` : ""}`
-        );
-        error.code = resumed && !sawProtocolOutput && /no conversation found|session.*not found/i.test(detail)
-          ? "CLAUDE_SESSION_NOT_FOUND"
-          : "CODEX_APP_SERVER_EXIT";
-        error.exitCode = code;
-        error.signal = exitSignal;
-        finish(error);
-      });
-      try {
-        onSpawn?.(child);
-      } catch {
-        // Lifecycle observers must not change the turn outcome.
-      }
+      notifyObserver(onSpawn, child);
 
       const turnText = resumed && resumePrompt != null ? String(resumePrompt) : String(prompt || "");
       sendUserInput(buildUserContent([
@@ -641,14 +545,10 @@ function runClaudeCodeTurnOnce({
         ...normalizeImagePaths(imagePaths)
       ], { maxImageBytes }));
       turnActive = true;
-      try {
-        onReady?.({ child, threadId, turnId, steer, restart, interrupt, resumed });
-      } catch {
-        // Lifecycle observers must not change the turn outcome.
-      }
+      notifyObserver(onReady, { child, threadId, turnId, steer, restart, interrupt, resumed });
     };
 
-    armDeadline();
+    deadlines.arm();
     signal?.addEventListener("abort", abortTurn, { once: true });
     launch().catch((error) => finish(error));
   });
@@ -741,20 +641,15 @@ export async function startClaudeToolBridge({ workDir, tools, onCall, getTurn = 
   };
 }
 
+// Converts the shared Codex-shaped tool result into MCP tool content.
 export function toMcpToolResult(result) {
-  if (result && typeof result === "object" && Array.isArray(result.contentItems)) {
-    const content = result.contentItems.map((item) => {
-      const dataUrl = String(item?.imageUrl || "").match(/^data:([^;]+);base64,(.+)$/);
-      if (item?.type === "inputImage" && dataUrl) return { type: "image", mimeType: dataUrl[1], data: dataUrl[2] };
-      return { type: "text", text: String(item?.text ?? JSON.stringify(item)) };
-    });
-    return { content, isError: result.success === false };
-  }
-  const text = typeof result === "string" ? result : JSON.stringify(result ?? { ok: true });
-  return {
-    content: [{ type: "text", text }],
-    isError: result?.ok === false || result?.success === false
-  };
+  const { contentItems, success } = normalizeDynamicToolResult(result);
+  const content = contentItems.map((item) => {
+    const dataUrl = String(item?.imageUrl || "").match(/^data:([^;]+);base64,(.+)$/);
+    if (item?.type === "inputImage" && dataUrl) return { type: "image", mimeType: dataUrl[1], data: dataUrl[2] };
+    return { type: "text", text: String(item?.text ?? JSON.stringify(item)) };
+  });
+  return { content, isError: !success };
 }
 
 export function buildUserContent(input, { maxImageBytes = DEFAULT_MAX_IMAGE_BYTES, readFile = readFileSync } = {}) {
@@ -792,51 +687,4 @@ export function sniffImageMediaType(data) {
   if (data.subarray(0, 4).toString("latin1") === "GIF8") return "image/gif";
   if (data.subarray(0, 4).toString("latin1") === "RIFF" && data.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
   return null;
-}
-
-function normalizeImagePaths(paths) {
-  return [...new Set((Array.isArray(paths) ? paths : []).map((path) => String(path || "").trim()).filter(Boolean))]
-    .map((path) => ({ type: "localImage", path }));
-}
-
-function attachErrorFields(error, fields) {
-  for (const [key, value] of Object.entries(fields)) {
-    if (error[key] != null) continue;
-    try {
-      error[key] = value;
-    } catch {
-      // Some externally supplied errors may be non-extensible.
-    }
-  }
-}
-
-function normalizePositiveInteger(value, fallback) {
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
-}
-
-function createProtocolError(message) {
-  const error = new Error(message);
-  error.code = "CODEX_APP_SERVER_PROTOCOL";
-  return error;
-}
-
-function createTurnInactiveError() {
-  const error = new Error("Claude Code turn is no longer active");
-  error.code = "CODEX_TURN_NOT_ACTIVE";
-  return error;
-}
-
-function createTurnRestartingError() {
-  const error = new Error("Claude Code turn is already being restarted");
-  error.code = "CODEX_TURN_RESTARTING";
-  return error;
-}
-
-function createAbortError(reason) {
-  if (reason instanceof Error) return reason;
-  const error = new Error(reason == null ? "Claude Code turn aborted" : String(reason));
-  error.name = "AbortError";
-  error.code = "ABORT_ERR";
-  return error;
 }

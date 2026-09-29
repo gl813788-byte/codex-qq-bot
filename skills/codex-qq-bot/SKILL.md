@@ -45,6 +45,12 @@ On this configured machine:
 - OneBot API: `http://127.0.0.1:3000`
 - Hub and dashboard: `http://127.0.0.1:3789`
 - Structured log default: `runtime/logs/hub.jsonl`
+- Interactive Codex CLI: `~/.codex/config.toml` sets
+  `features.daemon_auto_start = false`. Its shared app-server daemon socket
+  path exceeds the Unix socket limit under PRoot, and PRoot's remap is private
+  to one Termux session, so a daemon becomes unreachable (`app server did not
+  become ready`). The Hub is unaffected because it runs
+  `codex app-server --stdio` per turn.
 
 The repository helper is a different command surface and remains available as
 `npm run ncc -- <command>`. Inspect `command -v ncc`, its resolved path, and
@@ -91,6 +97,7 @@ subsystems belong in focused modules.
 | Follow-up fusion | `src/qq-reply-steering.js` |
 | App Server turn execution | `src/infrastructure/codex/` and `src/codex-app-server-turn.js` |
 | Claude Code turn execution, MCP tool bridge, child env | `src/infrastructure/claude/` |
+| Engine-neutral turn deadlines, framing, child supervision, env helpers | `src/infrastructure/agent/` |
 | Structured final output | `src/infrastructure/codex/qq-agent-output.js` |
 | Settings persistence | `src/infrastructure/storage/settings-repository.js` |
 | QQ memory and semantic recall | `src/unified-memory/` plus focused `src/qq-*memory*` modules |
@@ -220,12 +227,23 @@ fixed客服 templates and imitation of a specific group member.
 ## Agent engines
 
 `CODEX_REMOTE_CONTACT_AGENT_ENGINE` (`codex` or `claude`) selects the engine;
-`src/infrastructure/codex/qq-turn-runner.js` is the only switch point. The
-Claude adapter `src/infrastructure/claude/claude-code-turn.js` keeps the exact
-`runCodexAppServerTurn` contract (options, result, `steer`/`restart`/`interrupt`
-controls, and `CODEX_*` error codes) so prompts, tools, output parsing, fusion,
-and recovery above it stay engine-neutral. Keep it that way: do not branch on
-the engine outside the runner, config, maintenance status, and controllers.
+the engine table in `src/infrastructure/codex/qq-turn-runner.js` is the only
+switch point. The Claude adapter `src/infrastructure/claude/claude-code-turn.js`
+keeps the exact `runCodexAppServerTurn` contract (options, result,
+`steer`/`restart`/`interrupt` controls, and `CODEX_*` error codes) so prompts,
+tools, output parsing, fusion, and recovery above it stay engine-neutral. Keep
+it that way: do not branch on the engine outside the runner, config,
+maintenance status, and controllers. Both adapters build on
+`src/infrastructure/agent/` for deadlines, NDJSON framing, child supervision,
+tool-result normalization, errors, and env helpers; change shared behavior
+there instead of in one adapter. Engine display facts and capability flags
+(`reportsQuota`, `modelCatalog`) live in
+`src/infrastructure/agent/agent-engines.js`: outside the runner, check a
+capability rather than an engine name. Agent turn, tool, progress, and model
+output logs use the `agent` category with `details.engine`; legacy `codex`
+entries are read as Codex agent entries. `/api/state` `ai.active*` and
+`/api/maintenance` `agent` describe the engine actually running, and the
+dashboard, QQ `/状态`, and menu show it.
 
 Claude invariants that must not be weakened:
 
@@ -324,6 +342,7 @@ Common machine-controller intent:
 | Start Hub only | `ncc hub` |
 | Show one-shot startup resource profile | `ncc resources` |
 | Logs | `ncc logs` or `ncc logs --compact` |
+| One engine's agent logs | `ncc logs --category agent --engine claude` |
 | Stop Hub | `ncc stop-hub` |
 | Show or set the AI engine | `ncc engine` / `ncc engine claude` / `ncc engine codex` |
 | Claude Code path, login, model, profile | `ncc claude-status` |

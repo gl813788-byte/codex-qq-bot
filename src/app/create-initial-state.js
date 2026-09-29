@@ -114,12 +114,14 @@ export function createInitialState({
         selfId: null,
         nickname: null
       },
-      codex: {
-        path: config.codexCliPath,
+      agent: {
         lastRunAt: null,
         lastDurationMs: null,
         lastOk: null,
-        lastError: null,
+        lastError: null
+      },
+      codex: {
+        path: config.codexCliPath,
         quota: null
       },
       webLookup: {

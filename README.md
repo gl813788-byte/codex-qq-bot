@@ -166,6 +166,7 @@ src/
   config/                environment parsing and defaults
   infrastructure/codex/  Codex calls, QQ tools, structured output
   infrastructure/claude/ Claude Code calls and the QQ tool bridge
+  infrastructure/agent/  plumbing shared by both engines
   qq-enhancer/           image handling, proactive replies
   unified-memory/        unified memory
   server.js              composition root (still being split up)

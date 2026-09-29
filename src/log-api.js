@@ -1,10 +1,12 @@
 import { readLogEntries, summarizeLogEntries } from "./logger.js";
 import { formatLogError, formatLogMessage, localizeLogDetails } from "./log-presentation.js";
+import { canonicalLogCategory, resolveLogEngine } from "./infrastructure/agent/agent-engines.js";
 
 export async function buildLogsResponse(logFilePath, searchParams) {
   const limit = Number(searchParams.get("limit") || 100);
   const level = searchParams.get("level") || "";
   const category = searchParams.get("category") || "";
+  const engine = searchParams.get("engine") || "";
   const traceId = searchParams.get("traceId") || searchParams.get("trace") || "";
   const query = searchParams.get("q") || searchParams.get("query") || "";
   const groupId = searchParams.get("groupId") || searchParams.get("group") || "";
@@ -21,6 +23,7 @@ export async function buildLogsResponse(logFilePath, searchParams) {
     limit: 1000,
     level,
     category,
+    engine,
     traceId,
     query,
     groupId,
@@ -31,7 +34,7 @@ export async function buildLogsResponse(logFilePath, searchParams) {
     until,
     minDurationMs
   });
-  const hasAdvancedFilter = Boolean(traceId || query || groupId || senderId || scopeId || operation || since || until || minDurationMs);
+  const hasAdvancedFilter = Boolean(engine || traceId || query || groupId || senderId || scopeId || operation || since || until || minDurationMs);
   const visibleEntries = entries
     .filter((entry) => isVisibleByDefault(entry, { verbose, level, category, hasAdvancedFilter }))
     .slice(-normalizedLimit)
@@ -41,6 +44,7 @@ export async function buildLogsResponse(logFilePath, searchParams) {
     level: level || null,
     category: category || null,
     filters: {
+      engine: engine || null,
       traceId: traceId || null,
       query: query || null,
       groupId: groupId || null,
@@ -72,6 +76,7 @@ function isVisibleByDefault(entry, { verbose, level, category, hasAdvancedFilter
 function compactEntry(entry) {
   const details = {};
   const allowedKeys = new Set([
+    "engine", "model", "reasoningEffort",
     "durationMs", "totalDurationMs", "rememberDurationMs", "decisionDurationMs", "generationDurationMs", "sendDurationMs", "memoryDurationMs", "timeoutMs",
     "deadlineRenewalCount",
     "resultCount", "status", "outcome", "code", "error", "reason", "decisionReason", "url", "diagnostic", "diagnosticOmittedLines",
@@ -108,6 +113,9 @@ function presentEntry(entry) {
   const error = entry.details?.error ?? entry.details?.modelError ?? entry.details?.diagnostic ?? null;
   return {
     ...entry,
+    // Legacy "codex" entries read as agent entries from the Codex engine.
+    category: canonicalLogCategory(entry.category) || "system",
+    engine: resolveLogEngine(entry),
     messageZh: formatLogMessage(entry.message, "zh"),
     errorZh: error == null ? null : formatLogError(error, "zh"),
     detailsZh: localizeLogDetails(entry.details || {}, "zh")

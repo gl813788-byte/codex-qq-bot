@@ -41,7 +41,11 @@
 | `src/qq-language-style.js` | QQ 语言统计候选 | 群/成员标点与功能性短语计数及高频候选，不分配任何含义 |
 | `src/qq-message-run-compaction.js` | 模型上下文连续复读压缩 | 相邻同文消息的语义签名、计数合并和中文条数标注 |
 | `src/codex-app-server-turn.js` | Codex app-server 单轮客户端 | `thread/start`/`thread/resume`、`turn/start`、运行中控制、直接截断续开、inactive turn 竞态恢复、超时和中断 |
-| `src/infrastructure/codex/qq-turn-runner.js` | QQ App Server 生命周期适配器 | 限流、按引擎选择 Codex 或 Claude Code、隔离子进程环境、原生轮次参数、诊断、融合恢复、取消和配额刷新 |
+| `src/infrastructure/codex/qq-turn-runner.js` | QQ App Server 生命周期适配器 | 限流、用一张引擎表集中 Codex/Claude Code 的全部差异、隔离子进程环境、原生轮次参数、诊断、融合恢复、取消和配额刷新 |
+| `src/infrastructure/agent/agent-turn-process.js` | 引擎无关的轮次底层 | 两个单轮客户端共用：总超时与替代轮空闲超时、带输出上限的 NDJSON 分帧、子进程托管（stderr 尾部、终止、只通知一次退出）、动态工具结果归一化和 `CODEX_*` 错误码 |
+| `src/infrastructure/agent/agent-engines.js` | 引擎信息与能力 | 不依赖任何模块的引擎表：展示名、运行方式、模型选择和能力标记（`reportsQuota`、`modelCatalog`），以及 `agent` 日志分类、旧 `codex` 条目兼容和按条目识别引擎，供日志写入、日志 API、终端查看器和仪表盘接口共用 |
+| `src/infrastructure/agent/agent-cli-version.js` | Agent CLI 版本探测 | 给仪表盘用的 `--version` 缓存结果，用最小环境在后台刷新 |
+| `src/infrastructure/agent/agent-child-env.js` | 引擎无关的子进程环境工具 | 两个引擎子进程环境共用的基础运行时白名单、白名单过滤和 ncc profile env 解析 |
 | `src/infrastructure/claude/claude-code-turn.js` | Claude Code 单轮客户端 | 与 `runCodexAppServerTurn` 同一接口：`claude -p` stream-json、`--json-schema` 结构化输出、追问/替代/中断、沙箱到 `--restricted` 工具集的映射、失效会话重建 |
 | `src/infrastructure/claude/qq-mcp-bridge.mjs` | QQ 动态工具的 MCP 桥 | Claude Code 拉起的 stdio MCP 服务，通过本轮私有 Unix socket 把工具调用交回 Hub 按原权限执行 |
 | `src/infrastructure/claude/claude-child-env.js` | Claude 子进程环境 | 白名单变量、连接 profile 和固定的静默开关 |

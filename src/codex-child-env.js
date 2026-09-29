@@ -1,13 +1,15 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+  baseAgentRuntimeEnvKeys,
+  pickAgentChildEnv,
+  readEnvFile,
+  readTextFile
+} from "./infrastructure/agent/agent-child-env.js";
 
 const profileAuthKeys = ["OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL"];
 const codexRuntimeEnvKeys = new Set([
-  "HOME", "USER", "LOGNAME", "PATH", "SHELL", "TMPDIR", "TMP", "TEMP", "TZ", "TERM",
-  "LANG", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
-  "NODE_OPTIONS", "UV_THREADPOOL_SIZE", "MALLOC_ARENA_MAX",
-  "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
-  "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+  ...baseAgentRuntimeEnvKeys,
   "CODEX_HOME", "CODEX_CONFIG_PATH", "CODEX_ENV_FILE",
   ...profileAuthKeys
 ]);
@@ -37,14 +39,7 @@ export function buildIsolatedCodexChildEnv(options = {}) {
   const overrides = options?.overrides && typeof options.overrides === "object"
     ? options.overrides
     : {};
-  const source = buildCodexChildEnv(options);
-  const env = {};
-  for (const [key, value] of Object.entries(source)) {
-    if (codexRuntimeEnvKeys.has(key) || key.startsWith("LC_") || Object.hasOwn(overrides, key)) {
-      env[key] = value;
-    }
-  }
-  return env;
+  return pickAgentChildEnv(buildCodexChildEnv(options), codexRuntimeEnvKeys, (key) => Object.hasOwn(overrides, key));
 }
 
 function findMatchingProfileEnv(configPath, profileDir) {
@@ -110,40 +105,4 @@ function sameCodexAuthConfig(left, right) {
     && left.provider === right.provider
     && left.baseUrl === right.baseUrl
     && left.envKey === right.envKey);
-}
-
-function readTextFile(path) {
-  try {
-    return readFileSync(path, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    return null;
-  }
-}
-
-function readEnvFile(path) {
-  const body = readTextFile(path);
-  return body == null ? null : parseEnvFile(body);
-}
-
-export function parseEnvFile(body) {
-  const values = {};
-  for (const rawLine of String(body || "").split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-    if (!match) continue;
-    values[match[1]] = parseEnvValue(match[2].trim());
-  }
-  return values;
-}
-
-function parseEnvValue(value) {
-  if (value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1).replace(/'\\''/g, "'");
-  }
-  if (value.startsWith('"') && value.endsWith('"')) {
-    return value.slice(1, -1).replace(/\\([\\"$`])/g, "$1");
-  }
-  return value.replace(/\s+#.*$/, "").trim();
 }
