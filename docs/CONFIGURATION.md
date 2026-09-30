@@ -174,6 +174,10 @@ A non-loopback listener requires explicit remote allowance and a token. Wildcard
 
 The Hub classifies each Codex task and scales its base deadline by the current reasoning effort: `low ×1`, `medium ×1.5`, `high ×2`, `xhigh ×3`, `max ×4`, and `ultra ×5`. Ordinary text replies therefore start at two minutes for `low` and rise by effort, while vision, summary, file, and image tasks retain distinct bases. Values are milliseconds. Effective normal-task deadlines are capped at 30 minutes and image generation at 60 minutes. App Server owns native multi-turn tools and context compaction; the removed text budget/continue protocol no longer changes these limits. When an active QQ turn accepts steered follow-up input or a fused follow-up starts a replacement turn, it receives a fresh full task-specific window. A fused replacement must also remain protocol-idle for that full effective window before the Hub isolates it and performs the one allowed fresh-thread retry; this replaces the former fixed one-minute cutoff. `/详细配置`, `/api/state`, `/api/maintenance`, and structured Codex logs expose current native settings and task timing.
 
+### Manual AI task execution options
+
+`--force` bypasses cooldown/sample thresholds; the new `--background` option immediately returns a job id and uses the existing model queue; `--full` uses the full history limit. These options are independent and may be combined as `ncc ai-run all GROUP_ID --force --background --full`; QQ uses `/AI任务 强制 后台 全部 完整历史`. The management API accepts boolean fields `force`, `background`, and `fullHistory`. Agent tools always submit AI tasks in the background; this deadlock prevention rule requires no additional environment configuration.
+
 ### AI engine (Codex / Claude Code)
 
 | Variable | Default | Purpose |

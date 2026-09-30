@@ -1,3 +1,5 @@
+import { parseQqManualAiTaskCommand } from "../../qq-manual-ai-task.js";
+
 const objectSchema = (properties, required = Object.keys(properties)) => ({
   type: "object",
   additionalProperties: false,
@@ -178,7 +180,7 @@ export function buildQqNativeToolSpecs({
       tools: [{
         type: "function",
         name: "configure",
-        description: "Inspect or change the next-turn model, reasoning effort, Codex session mode, web/interest settings, allowlist, or other existing Hub settings.",
+        description: "Inspect or change Hub settings. AI任务 commands always submit background jobs; acceptance is not completion. Use 强制 only when requested to bypass cooldown/sample thresholds, and 后台 for nonblocking execution.",
         inputSchema: objectSchema({ command: string("An existing QQ management command without leading slash, for example 思考强度 high, 模型 2, 会话模式 长期, 详细配置.") })
       }, {
         type: "function",
@@ -330,7 +332,11 @@ export function mapQqNativeToolToCommand(namespace, tool, args = {}, { event = n
     if (args.action === "label") return `/表情标签 ${clean(args.selector)} | ${clean(args.tags)} | ${clean(args.description)}`;
     if (args.action === "favorite") return `/收藏表情 ${clean(args.selector)}`;
   }
-  if (ns === "qq_runtime" && name === "configure" && (event?.isOwner || event?.isBotAdmin)) return `/${clean(args.command).replace(/^\/+/, "")}`;
+  if (ns === "qq_runtime" && name === "configure" && (event?.isOwner || event?.isBotAdmin)) {
+    const command = `/${clean(args.command).replace(/^\/+/, "")}`;
+    const task = parseQqManualAiTaskCommand(command);
+    return task?.action === "run" && !task.background ? `${command} 后台` : command;
+  }
   if (ns === "qq_runtime" && name === "summarize" && (event?.isOwner || event?.isBotAdmin)) return `/聊天记录 ${clean(args.range || "最近 300")}`;
   if (ns === "qq_social" && name === "act") return mapSocialCommand(args);
   return "";

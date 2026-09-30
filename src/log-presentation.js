@@ -584,6 +584,8 @@ const detailLabelsZh = Object.freeze({
   periodicRuntime: "周期任务状态",
   taskId: "任务标识",
   fullHistory: "完整历史",
+  background: "后台执行",
+  jobId: "任务编号",
   force: "强制执行",
   sampleSize: "总样本数",
   confidence: "可信度",

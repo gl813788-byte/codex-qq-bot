@@ -224,6 +224,8 @@ Casual turns may express personality strongly; factual, high-risk, and task turn
 should be more restrained while remaining recognizably the same assistant. Avoid
 fixed客服 templates and imitation of a specific group member.
 
+Manual AI tasks support independent `--force`, `--full`, and `--background` options (QQ: `/AI任务 强制 后台 全部`; local API: `background: true`). Background acceptance returns a job id and is never completion. Inspect `jobs` in `/api/qq/ai-tasks` or `ncc ai-tasks`; bounded job history lasts only for the current Hub process. Native runtime tools always submit AI tasks in the background. Both engines reject synchronous nested model calls from dynamic tools with `CODEX_NESTED_TURN_BLOCKED`; never raise global concurrency to hide that deadlock. Background work retains the normal limiter, task locks, permissions, and deadlines.
+
 ## Agent engines
 
 `CODEX_REMOTE_CONTACT_AGENT_ENGINE` (`codex` or `claude`) selects the engine;

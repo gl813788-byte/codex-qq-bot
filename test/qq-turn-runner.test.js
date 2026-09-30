@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { formatLogMessage } from "../src/log-presentation.js";
 import { runClaudeCodeTurn } from "../src/infrastructure/claude/claude-code-turn.js";
 import { runCodexAppServerTurn } from "../src/codex-app-server-turn.js";
-import { selectQqAgentEngine } from "../src/infrastructure/codex/qq-turn-runner.js";
+import { createQqCodexTurnRunner, selectQqAgentEngine } from "../src/infrastructure/codex/qq-turn-runner.js";
+import { runAgentToolCall } from "../src/infrastructure/agent/agent-tool-context.js";
 
 const claudeThreadId = "claude:11111111-2222-4333-8444-555555555555";
 
@@ -37,4 +38,39 @@ test("every engine's turn log message has a Chinese presentation", () => {
       assert.notEqual(formatLogMessage(message, "zh"), message, message);
     }
   }
+});
+
+test("nested Agent turns are rejected before entering the model queue for either engine", async () => {
+  for (const engine of ["codex", "claude"]) {
+    let queued = false;
+    const noop = () => null;
+    const runner = createQqCodexTurnRunner({
+      engine, limiter: { run() { queued = true; } },
+      getReplyScope: noop, createStoppedError: noop, trackGeneration: noop,
+      attachSteering: noop, clearGeneration: noop
+    });
+    await assert.rejects(runAgentToolCall(() => runner("nested summary")), { code: "CODEX_NESTED_TURN_BLOCKED" });
+    assert.equal(queued, false);
+  }
+});
+
+test("turn startup failures preserve the actual error and record model settings", async () => {
+  const errors = [];
+  const noop = () => null;
+  const state = { ai: { model: "test-model", reasoningEffort: "low" }, maintenance: { codex: { quota: null }, agent: {} } };
+  const runner = createQqCodexTurnRunner({
+    limiter: { run: (operation) => operation() }, state,
+    codexPath: "/nonexistent/qq-agent-regression", activeChildren: new Set(),
+    stoppedGenerationIds: new Set(), getReplyScope: noop,
+    createStoppedError: noop, trackGeneration: noop, attachSteering: noop,
+    clearGeneration: noop, logContext: noop, logger: { error: (message, details) => errors.push(details) }
+  });
+  await assert.rejects(runner("test", { cwd: "/tmp", timeout: 1000 }), (error) => {
+    assert.notEqual(error.name, "ReferenceError");
+    assert.match(error.message, /ENOENT|spawn|start/i);
+    return true;
+  });
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].model, "test-model");
+  assert.equal(state.maintenance.agent.lastOk, false);
 });

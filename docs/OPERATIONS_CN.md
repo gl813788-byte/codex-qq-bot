@@ -129,11 +129,16 @@ npm run ncc -- ai-run style-review 群号 --force
 npm run ncc -- ai-run global-persona
 npm run ncc -- ai-run knowledge-review --force
 npm run ncc -- ai-run all 群号 --full
+npm run ncc -- ai-run all 群号 --force --background
 ```
 
 支持 `chat-summary`（聊天总结与知识提取）、`scope-summary`（当前范围的人设证据/记忆总结）、`style-review`（群风格复盘）、`global-persona`（全局人设刷新）、`knowledge-review`（到期低频黑话的双模型审核）和 `all`。QQ 中使用 `/AI任务 任务名`；`/AI任务 强制 任务名` 显式开启强制执行。
 
 普通手动运行会跳过自动周期的“尚未到期”，但仍遵守任务本身的常规数据门槛。`--force` / “强制”还会跳过冷却与常规样本门槛；它不会绕过 QQ 主人/菜单权限、群白名单、本机回环 API 限制、并发锁、OneBot 身份或完全没有数据的保护。知识强制审核只扩大候选范围，仍严格执行“兴趣模型初筛 → 主模型终审 → 活动/内容变更保护”，绝不直接删除。任务真实调用当前 QQ 模型并使用既有任务超时；Hub 必须正在运行。
+
+新增 `--background` 可与 `--force`、`--full` 独立组合；QQ 对应 `/AI任务 强制 后台 全部`，本机管理 API 对应 `background: true`。后台提交立即返回 HTTP 202 和任务编号，表示已受理、尚未完成；用 `/AI任务`、`ncc ai-tasks` 或 `/api/qq/ai-tasks` 的 `jobs` 查看最近执行状态，具体结果写入既有总结/记忆和日志。任务记录仅保留当前 Hub 进程最近 50 项，重启后不自动重放手动任务。
+
+Agent 的 `qq_runtime.configure` 调用任何 AI 任务时自动采用后台提交，避免聊天轮次占住唯一模型名额并同步等待另一轮总结。两种引擎都拒绝工具内同步嵌套模型调用，错误代码为 `CODEX_NESTED_TURN_BLOCKED`；后台任务仍使用原并发限制、同任务锁、权限和任务时限。
 
 ## 周期行为的重启补做
 

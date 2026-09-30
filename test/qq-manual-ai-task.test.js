@@ -62,6 +62,16 @@ test("validates group allowlists, private history, and task scope kinds", () => 
   }).ok, true);
 });
 
+test("background execution is independent of force and full history", () => {
+  assert.deepEqual(parseQqManualAiTaskCommand("/AI任务 强制 后台 全部"), {
+    action: "run", taskId: "all", fullHistory: false, force: true, background: true
+  });
+  assert.deepEqual(parseQqManualAiTaskCommand("/AI任务 聊天总结 完整历史 --background"), {
+    action: "run", taskId: "chat-summary", fullHistory: true, force: false, background: true
+  });
+  assert.equal(parseQqManualAiTaskCommand("/AI任务 后台 风格复盘 强制").force, true);
+});
+
 test("task center and QQ menu use readable visual sections", () => {
   const taskCenter = formatQqManualAiTaskCenter({ running: ["style-review"], includeNccHint: true });
   assert.match(taskCenter, /🤖 AI 手动任务中心/);

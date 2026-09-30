@@ -71,6 +71,8 @@ environment + runtime paths
 | `src/qq-short-term-memory.js` | QQ short-term memory domain | legacy migration, brief/detail, overwrite and stale lifecycle |
 | `src/qq-style-review.js` | Human/Bot style-review boundary | flexible main-model prompt, phrase/sentence usage review, punctuation-to-slang references with confidence/boundaries, scoped slang patches, structured parsing and safe compaction |
 | `src/qq-manual-ai-task.js` + `src/qq-menu.js` | Pure manual-model-task and QQ-menu policy/presentation boundaries | changing task aliases, scope validation, force-mode guidance, or visual menu sections |
+| `src/qq-manual-ai-task-runner.js` | Manual AI task lifecycle | Foreground results/background acceptance, task locks, bounded job history; background work keeps the existing model limiter |
+| `src/infrastructure/agent/agent-tool-context.js` | Native-tool model-call boundary | Mark async tool context, reject synchronous nested models, explicitly detach background submission from the tool wait chain |
 | `src/unified-memory/` | Cross-channel memory | SQLite/FTS/vector hybrid recall, QQ-id/unique-alias person resolution, AI profile promotion, cross-session person scoping, and one-shot brief injection |
 | `src/*.js` | Existing domain and infrastructure modules | changing the named capability while it is migrated incrementally |
 | `modules/` | Platform clients and optional integrations | changing shared UI, launchers or the QQ social bridge |
