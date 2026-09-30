@@ -1,3 +1,6 @@
+import { getQqCommand } from "./qq-command-catalog.js";
+import { formatQqCard, formatQqDone, formatQqUsageSection, formatQqWarning } from "./qq-command-reply.js";
+
 const scopePattern = /^(?:private:)?[1-9][0-9]{4,12}$/;
 
 export const qqManualAiTaskCatalog = [
@@ -7,7 +10,7 @@ export const qqManualAiTaskCatalog = [
     icon: "📝",
     scope: "chat",
     aliases: ["chat-summary", "summary", "聊天总结", "聊天记录", "总结聊天", "总结记录"],
-    usage: "/AI任务 [强制] 聊天总结 [最近|全部]",
+    usage: "/AI任务 [强制] 聊天总结 [全部]",
     description: "总结当前群聊或私聊，并提取可复用知识"
   },
   {
@@ -134,21 +137,88 @@ export function formatQqManualAiTaskCenter({
   includeNccHint = false
 } = {}) {
   const runningSet = new Set((Array.isArray(running) ? running : []).map(String));
-  const rows = qqManualAiTaskCatalog.map((task, index) => [
-    `${index + 1}. ${task.icon} ${task.label}${runningSet.has(task.id) ? " 〔运行中〕" : ""}`,
-    `   ${task.usage}`,
-    `   ${task.description}`
-  ].join("\n"));
-  return [
-    "╭─ 🤖 AI 手动任务中心",
-    "│ 后台模型任务可随时手动运行；自动周期仍会继续。",
-    "╰────────────────",
-    "",
-    ...rows.flatMap((row) => [row, ""]),
-    ...jobs.slice(-5).map((job) => `任务 ${job.jobId}：${job.taskId} · ${({ running: "运行中", completed: "已完成", failed: "失败", skipped: "已跳过", busy: "繁忙" })[job.state] || job.state}${job.reason ? ` · ${job.reason}` : ""}`),
-    "强制格式：/AI任务 强制 任务名（跳过到期/冷却，但不绕过权限与数据安全）。",
-    "后台格式：/AI任务 强制 后台 任务名（立即返回任务编号；结果在任务中心和日志中查看）。",
-    "提示：任务会真实调用当前配置的模型，并受并发与超时保护。",
-    includeNccHint ? "NCC：ncc ai-tasks / ncc ai-run <任务> [范围]" : null
-  ].filter((line) => line != null).join("\n").trim();
+  return formatQqCard({
+    icon: "🤖",
+    title: "AI 手动任务中心",
+    notes: ["后台模型任务可随时手动运行；自动周期仍会继续。"],
+    sections: [
+      {
+        icon: "📋",
+        title: "任务",
+        rows: qqManualAiTaskCatalog.map((task, index) => ({
+          text: `${index + 1}. ${task.icon} ${task.label}${runningSet.has(task.id) ? " 〔运行中〕" : ""}`,
+          detail: [task.description, task.usage]
+        }))
+      },
+      {
+        icon: "🗂️",
+        title: "最近任务",
+        rows: (Array.isArray(jobs) ? jobs : []).slice(-5).map((job) => [
+          `${job.jobId}：${job.taskId}`,
+          jobStateLabels[job.state] || job.state,
+          job.reason
+        ].filter(Boolean).join(" · "))
+      },
+      formatQqUsageSection(getQqCommand("aiTasks"))
+    ],
+    hints: [
+      "强制只跳过到期、冷却和常规样本门槛，不绕过权限与数据安全。",
+      "任务会真实调用当前配置的模型，并受并发与超时保护。",
+      includeNccHint ? "本机：ncc ai-tasks / ncc ai-run <任务> [范围]" : null
+    ]
+  });
 }
+
+export function formatQqManualAiTaskResult(result) {
+  if (!result) return formatQqWarning("AI 手动任务没有返回结果。");
+  const task = qqManualAiTaskCatalog.find((item) => item.id === result.taskId);
+  const prefix = `${task?.icon || "🤖"} ${task?.label || result.taskId || "AI 任务"}`;
+  if (result.accepted) {
+    return formatQqDone(`${prefix}：已提交后台，尚未完成`, [
+      `任务编号：${result.jobId}`,
+      "💡 发送 /AI任务 或在本机运行 ncc ai-tasks 查看进度。"
+    ]);
+  }
+  if (result.taskId === "all" && Array.isArray(result.results)) {
+    const chatSummary = result.results.find((item) => item.taskId === "chat-summary" && item.summary)?.summary;
+    const card = formatQqCard({
+      icon: "🚀",
+      title: "全部适用任务已处理",
+      notes: result.results.map((item) => (item.taskId === "chat-summary" && item.summary
+        ? formatQqManualAiTaskResult({ ...item, summary: "" })
+        : formatQqManualAiTaskResult(item)).split("\n")[0])
+    });
+    return chatSummary ? `${card}\n\n📝 聊天总结\n${chatSummary}` : card;
+  }
+  if (result.taskId === "chat-summary" && result.summary) return result.summary;
+  if (!result.ok) {
+    return formatQqWarning(`${prefix}：${result.busy ? "正在运行" : "未运行"}`, [
+      result.reason || result.error || "没有满足执行条件。"
+    ]);
+  }
+  return formatQqDone(`${prefix}：完成`, [formatQqManualAiTaskOutcome(result)]);
+}
+
+function formatQqManualAiTaskOutcome(result) {
+  if (result.taskId === "scope-summary") {
+    return `复盘 ${result.historyMessageCount || 0} 条记录，范围摘要第 ${result.summaryRevision || 0} 版，更新 ${result.knowledgePatchCount || 0} 条知识、${result.socialMemoryUpdated ? "已融合" : "未新增"}社交印象，提升 ${result.promotedPersonCount || 0} 位深刻印象人物到统一记忆。`;
+  }
+  if (result.taskId === "style-review") {
+    return `样本 ${result.humanSamples || 0} 条真人 / ${result.botSamples || 0} 条 Bot，生成 ${result.guidanceCount || 0} 条适应规则，融合 ${result.knowledgePatchCount || 0} 条词语/标点黑话知识。`;
+  }
+  if (result.taskId === "global-persona") {
+    return `全局人设已更新到第 ${result.revision || 0} 版，使用 ${result.summarizedScopes || 0} 个范围摘要。`;
+  }
+  if (result.taskId === "knowledge-review") {
+    return `“${result.title || "知识条目"}”已${result.decision === "deleted" ? "删除" : "保留"}。`;
+  }
+  return "";
+}
+
+const jobStateLabels = {
+  running: "运行中",
+  completed: "已完成",
+  failed: "失败",
+  skipped: "已跳过",
+  busy: "繁忙"
+};

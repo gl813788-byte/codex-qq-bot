@@ -42,7 +42,7 @@ test("ncc log viewer is detailed by default and compacts only when requested", a
   assert.match(compact.stdout, /QQ 联网搜索失败/);
   assert.match(compact.stdout, /QQ 联网搜索开始/);
   assert.doesNotMatch(compact.stdout, /收到 OneBot 消息|private message|result title|internal detail/);
-  assert.match(compact.stdout, /\.\.\./);
+  assert.match(compact.stdout, /查询：(?:search-query-)+\S*…/);
 
   const all = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--plain", "--all"]);
   assert.match(all.stdout, /收到 OneBot 消息/);
@@ -81,10 +81,10 @@ test("ncc log viewer localizes startup learning snapshots and model output field
   await writeFile(filePath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
 
   const result = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--plain", "--verbose"]);
-  assert.match(result.stdout, /自动学习数据: 总样本数: 42，平均文字长度: 8\.5，当前活跃度: 一般/);
-  assert.match(result.stdout, /主动兴趣间隔: 消息间隔: 20，原因: 当前活跃度一般/);
+  assert.match(result.stdout, /自动学习数据：总样本数 42，平均文字长度 8\.5，当前活跃度 一般/);
+  assert.match(result.stdout, /主动兴趣间隔：消息间隔 20，原因 当前活跃度一般/);
   assert.match(result.stdout, /Codex 模型输出已记录/);
-  assert.match(result.stdout, /模型具体输出: 模型原样输出/);
+  assert.match(result.stdout, /模型具体输出：模型原样输出/);
 });
 
 test("ncc log viewer highlights at-bot QQ entries separately", async (t) => {
@@ -137,10 +137,10 @@ test("ncc log viewer highlights at-bot QQ entries separately", async (t) => {
   assert.match(result.stdout, /\x1b\[93mQQ\s+\x1b\[0m \x1b\[93m收到 QQ 消息详情\x1b\[0m/);
   assert.match(result.stdout, /\x1b\[93m搜索\s+\x1b\[0m \x1b\[93mQQ 消息触发联网搜索\x1b\[0m/);
   assert.match(result.stdout, /\x1b\[92m成功\x1b\[0m \x1b\[97m流程\s+\x1b\[0m/);
-  assert.match(result.stdout, /\x1b\[92mQQ 回复流程完成\x1b\[0m \x1b\[2m结果:\x1b\[0m \x1b\[92m已发送\x1b\[0m/);
-  assert.match(result.stdout, /\x1b\[2m总用时:\x1b\[0m \x1b\[93m2\.30s\x1b\[0m/);
+  assert.match(result.stdout, /\x1b\[92mQQ 回复流程完成\x1b\[0m \x1b\[2m结果：\x1b\[0m\x1b\[92m已发送\x1b\[0m/);
+  assert.match(result.stdout, /\x1b\[2m总耗时：\x1b\[0m\x1b\[93m2\.30s\x1b\[0m/);
   assert.match(result.stdout, /\x1b\[93m警告\x1b\[0m \x1b\[96m搜索\s+\x1b\[0m \x1b\[93mQQ 联网搜索失败\x1b\[0m/);
-  assert.match(result.stdout, /\x1b\[2m错误:\x1b\[0m \x1b\[91msearch timeout\x1b\[0m/);
+  assert.match(result.stdout, /\x1b\[2m错误：\x1b\[0m\x1b\[91msearch timeout\x1b\[0m/);
   assert.match(result.stdout, /\x1b\[97m日志摘要\x1b\[0m/);
 });
 
@@ -277,6 +277,55 @@ test("ncc log viewer follows a trace, finds slow operations, and prints a summar
     "session"
   ]);
   assert.match(scoped.stdout, /QQ 跨会话消息发送完成/);
-  assert.match(scoped.stdout, /目标会话: private:30003/);
+  assert.match(scoped.stdout, /目标会话：private:30003/);
   assert.doesNotMatch(scoped.stdout, /QQ 回复流程完成|unrelated failure/);
+});
+
+test("ncc log viewer prints help and rejects bad arguments in Chinese", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-qq-log-args-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = join(directory, "hub.jsonl");
+  await writeFile(filePath, "", "utf8");
+
+  const help = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--help"]);
+  assert.match(help.stdout, /^用法：ncc logs \[选项\]/);
+  assert.match(help.stdout, /--engine NAME\s+只看某个引擎的智能体日志：codex,claude/);
+
+  for (const [args, message] of [
+    [["--bogus"], /错误：未知参数 --bogus/],
+    [["--level", "fatal"], /错误：--level 不支持 fatal；可选：debug,info,success,warn,error/],
+    [["--engine", "gpt"], /错误：--engine 不支持 gpt/],
+    [["--since", "yesterday"], /错误：无法识别的时间 yesterday/],
+    [["--tail"], /错误：--tail 需要一个值/]
+  ]) {
+    await assert.rejects(
+      execFileAsync(process.execPath, [viewerPath.pathname, filePath, ...args]),
+      (error) => error.code === 2 && message.test(error.stderr) && !/at parseArgs|Error:/.test(error.stderr)
+    );
+  }
+});
+
+test("ncc log viewer aligns CJK columns and formats every duration the same way", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-qq-log-align-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = join(directory, "hub.jsonl");
+  const entries = [
+    { ts: "2026-01-01T00:00:00.000Z", level: "info", category: "qq", message: "m1", details: {} },
+    { ts: "2026-01-01T00:00:01.000Z", level: "info", category: "onebot", message: "m2", details: {} },
+    { ts: "2026-01-01T00:00:02.000Z", level: "warn", category: "memory", message: "m3", details: {} },
+    {
+      ts: "2026-01-01T00:00:03.000Z",
+      level: "success",
+      category: "lifecycle",
+      message: "m4",
+      details: { outcome: "command", modelDurationMs: 1500, attemptTimeoutMs: 6500, replyChars: 12 }
+    }
+  ];
+  await writeFile(filePath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+
+  const { stdout } = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--plain"]);
+  const width = (text) => [...text].reduce((sum, character) => sum + (/[⺀-꓏＀-｠]/.test(character) ? 2 : 1), 0);
+  const columns = stdout.trim().split("\n").map((line) => width(line.slice(0, line.search(/m\d/))));
+  assert.equal(new Set(columns).size, 1, `message column differs: ${columns.join(",")}`);
+  assert.match(stdout, /结果：指令已处理 · 模型耗时：1\.50s · 单次超时：6\.50s · 回复字符数：12/);
 });

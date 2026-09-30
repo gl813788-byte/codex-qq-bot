@@ -89,10 +89,12 @@ test("task center and QQ menu use readable visual sections", () => {
       { category: "intelligence", menuLine: "/AI任务", description: "手动运行总结", public: false }
     ]
   });
-  assert.match(menu, /小星 · QQ 控制台/);
-  assert.match(menu, /💬 会话与上下文/);
-  assert.match(menu, /🧠 AI 与学习/);
-  assert.match(menu, /\/新对话  ◦ 公开/);
+  assert.match(menu, /^╭─ 👑 小星 · 指令菜单$/m);
+  assert.match(menu, /^│ 身份：主人$/m);
+  assert.match(menu, /^💬 会话$/m);
+  assert.match(menu, /^🧠 AI 与学习$/m);
+  assert.match(menu, /^  \/新对话  ◦ 公开\n    清空当前上下文$/m);
+  assert.doesNotMatch(menu, /👥 群与成员/, "empty sections are omitted");
 
   const administratorMenu = formatQqVisualMenu({
     administrator: true,

@@ -31,9 +31,18 @@ import {
 import { createLogger } from "./logger.js";
 import { buildLogsResponse } from "./log-api.js";
 import { importOptionalModule } from "./optional-modules.js";
-import { defaultQqPublicCommands, qqCommandCatalog } from "./qq-command-catalog.js";
+import { defaultQqPublicCommands, getQqCommand, qqCommandCatalog } from "./qq-command-catalog.js";
+import {
+  formatQqCard,
+  formatQqCommandUsage,
+  formatQqDone,
+  formatQqSwitch,
+  formatQqUsageSection,
+  formatQqWarning
+} from "./qq-command-reply.js";
 import {
   formatQqManualAiTaskCenter,
+  formatQqManualAiTaskResult,
   parseQqManualAiTaskCommand,
   qqManualAiTaskCatalog,
   validateQqManualAiTaskRequest
@@ -5440,11 +5449,11 @@ function buildQqCodexSessionModeAction(normalized, event) {
   else return null;
 
   const scopeId = getQqMemoryScopeId(event);
-  if (!scopeId) return { reply: "当前消息无法确定会话范围。" };
+  if (!scopeId) return { reply: formatQqWarning("当前消息无法确定会话范围。") };
   if (requested) {
     const mode = normalizeQqCodexSessionMode(requested, "");
     if (!mode) {
-      return { reply: "会话模式只能设为：自动、长期、临时。" };
+      return { reply: formatQqCommandUsage(getQqCommand("session"), { notice: "会话模式只能设为：自动、长期、临时。" }) };
     }
     state.qq.codexSession.settings.scopes[scopeId] = mode;
     if (mode === "temporary") {
@@ -5458,19 +5467,26 @@ function buildQqCodexSessionModeAction(normalized, event) {
     scopeId,
     recentReplyEntries: state.qq.memory.entries[scopeId] || []
   });
-  const lines = [
-    `${event.groupId ? `群 ${event.groupId}` : `私聊 ${event.senderId}`}会话模式：${formatQqCodexSessionMode(plan.configuredMode)}`,
-    `当前实际：${formatQqCodexSessionMode(plan.effectiveMode)}`,
-    plan.configuredMode === "auto"
-      ? `自动判断依据：6 小时 ${plan.recentReplies6h} 次回复、24 小时 ${plan.recentReplies24h} 次回复${plan.existingThread ? "，已有可续用线程" : ""}。`
-      : null,
-    plan.persistent
-      ? "长期模式会续用 Codex 线程，只补未见过的增量语境；同一轮追问仍与临时模式一样合并后注入当前回答。"
-      : "临时模式每轮使用独立 Codex 线程；同一轮追问仍会合并后注入当前回答。",
-    requested ? "设置已保存，从下一次模型回复开始生效。" : "设置方法：/会话模式 自动、/会话模式 长期、/会话模式 临时"
-  ].filter(Boolean);
+  const card = formatQqCard({
+    icon: getQqCommand("session").icon,
+    title: "会话模式",
+    fields: [
+      ["范围", event.groupId ? `群 ${event.groupId}` : `私聊 ${event.senderId}`],
+      ["设置", formatQqCodexSessionMode(plan.configuredMode)],
+      ["实际", formatQqCodexSessionMode(plan.effectiveMode)],
+      plan.configuredMode === "auto"
+        ? ["自动依据", `6 小时 ${plan.recentReplies6h} 次回复 · 24 小时 ${plan.recentReplies24h} 次回复${plan.existingThread ? " · 已有可续用线程" : ""}`]
+        : null
+    ],
+    sections: requested ? [] : [formatQqUsageSection(getQqCommand("session"))],
+    hints: [
+      plan.persistent
+        ? "长期模式续用同一线程，只补未见过的增量语境。"
+        : "临时模式每轮使用独立线程。"
+    ]
+  });
   return {
-    reply: lines.join("\n"),
+    reply: requested ? `${formatQqDone("会话模式已保存，从下一次模型回复开始生效")}\n\n${card}` : card,
     beforeSend: requested
       ? async () => Promise.all([saveSettings(), saveQqCodexSessions()])
       : undefined
@@ -5667,38 +5683,6 @@ async function runQqManualAiTaskRequest({
   });
 }
 
-function formatQqManualAiTaskResult(result) {
-  if (!result) return "AI 手动任务没有返回结果。";
-  if (result.accepted) return `AI 任务已提交后台，尚未完成。\n任务编号：${result.jobId}\n可用 NCC 的 ai-tasks 或任务中心日志查看执行状态。`;
-  if (result.taskId === "all" && Array.isArray(result.results)) {
-    const rows = result.results.map((item) => formatQqManualAiTaskResult(item).split("\n")[0]);
-    const chatSummary = result.results.find((item) => item.taskId === "chat-summary" && item.summary)?.summary;
-    return [
-      "╭─ 🚀 全部适用任务已处理",
-      ...rows.map((row) => `│ ${row}`),
-      "╰────────────────",
-      chatSummary ? `\n📝 聊天总结\n${chatSummary}` : null
-    ].filter(Boolean).join("\n");
-  }
-  if (result.taskId === "chat-summary" && result.summary) return result.summary;
-  const task = qqManualAiTaskCatalog.find((item) => item.id === result.taskId);
-  const prefix = `${task?.icon || "🤖"} ${task?.label || result.taskId || "AI 任务"}`;
-  if (!result.ok) return `${prefix}：${result.busy ? "正在运行" : "未运行"}\n${result.reason || result.error || "没有满足执行条件。"}`;
-  if (result.taskId === "scope-summary") {
-    return `${prefix}：完成\n复盘 ${result.historyMessageCount || 0} 条记录，范围摘要第 ${result.summaryRevision || 0} 版，更新 ${result.knowledgePatchCount || 0} 条知识、${result.socialMemoryUpdated ? "已融合" : "未新增"}社交印象，提升 ${result.promotedPersonCount || 0} 位深刻印象人物到统一记忆。`;
-  }
-  if (result.taskId === "style-review") {
-    return `${prefix}：完成\n样本 ${result.humanSamples || 0} 条真人 / ${result.botSamples || 0} 条 Bot，生成 ${result.guidanceCount || 0} 条适应规则，融合 ${result.knowledgePatchCount || 0} 条词语/标点黑话知识。`;
-  }
-  if (result.taskId === "global-persona") {
-    return `${prefix}：完成\n全局人设已更新到第 ${result.revision || 0} 版，使用 ${result.summarizedScopes || 0} 个范围摘要。`;
-  }
-  if (result.taskId === "knowledge-review") {
-    return `${prefix}：完成\n“${result.title || "知识条目"}”已${result.decision === "deleted" ? "删除" : "保留"}。`;
-  }
-  return `${prefix}：完成`;
-}
-
 async function buildQqCommandAction(event) {
   const command = stripMentionText(event.text).trim();
   if (!command.startsWith("/")) return null;
@@ -5732,7 +5716,7 @@ async function buildQqCommandAction(event) {
   const manualAiTask = parseQqManualAiTaskCommand(normalized);
   if (manualAiTask) {
     if (!isQqCommandAllowedForEvent("aiTasks", event)) {
-      return { reply: `${pickActionBeat(event)}AI 手动任务现在没有对你开放。` };
+      return { reply: formatQqWarning("AI 手动任务现在没有对你开放。") };
     }
     if (manualAiTask.action === "list") {
       return {
@@ -5745,7 +5729,7 @@ async function buildQqCommandAction(event) {
     }
     if (manualAiTask.action === "unknown") {
       return {
-        reply: `没有找到“${manualAiTask.input}”这个任务。\n\n${formatQqManualAiTaskCenter({
+        reply: `${formatQqWarning(`没有找到“${manualAiTask.input}”这个任务。`)}\n\n${formatQqManualAiTaskCenter({
           running: [...qqManualAiTaskPromises.keys()].map((key) => key.split(":")[0]),
           includeNccHint: hasQqPrivilegedAccess(event)
         })}`
@@ -5765,13 +5749,13 @@ async function buildQqCommandAction(event) {
 
   if (!hasQqPrivilegedAccess(event) && isOwnerOnlyQqCommand(normalized, compact) && !isAllowedPublicQqCommand(normalized, compact, event)) {
     return {
-      reply: `${pickActionBeat(event)}这个指令现在不对普通群友开放。`
+      reply: formatQqWarning("这个指令现在不对普通群友开放。")
     };
   }
 
   if (!hasQqPrivilegedAccess(event) && isPermissionManagementCommand(normalized, compact)) {
     return {
-      reply: `${pickActionBeat(event)}这个是管理指令，只听${ownerLabel}的哦。`
+      reply: formatQqWarning(`这是管理指令，只有${ownerLabel}和 Bot 管理员可以使用。`)
     };
   }
 
@@ -5815,13 +5799,13 @@ async function buildQqCommandAction(event) {
   if (isQqCommandAllowedForEvent("ban", event) && /^(ban|封禁|拉黑)/i.test(normalized)) {
     const targetId = extractQqCommandTarget(event, normalized);
     if (!targetId) {
-      return { reply: `${pickActionBeat(event)}要封禁谁呀？可以用 /ban @对方、/ban QQ号，或 /ban QQ号 10m。` };
+      return { reply: formatQqCommandUsage(getQqCommand("ban"), { notice: "请 @ 要封禁的成员，或写出 QQ 号。" }) };
     }
     if (isProtectedQqAuthorityTarget(targetId)) {
-      return { reply: `${pickActionBeat(event)}主人和 Bot 管理员受保护；请先由主人撤销管理员身份，再执行 ban。` };
+      return { reply: formatQqWarning(`${ownerLabel}和 Bot 管理员受保护；请先由${ownerLabel}撤销管理员身份，再执行 ban。`) };
     }
     if (event.selfId && targetId === String(event.selfId)) {
-      return { reply: `${pickActionBeat(event)}不能把我自己 ban 掉啦，不然这个接口会当场打结。` };
+      return { reply: formatQqWarning("不能封禁 Bot 自己。") };
     }
     const banDuration = parseQqBanDuration(normalized);
     state.qq.bannedUserIds = normalizeList([...state.qq.bannedUserIds, targetId]);
@@ -5831,7 +5815,7 @@ async function buildQqCommandAction(event) {
       delete state.qq.bannedUntilByUserId[targetId];
     }
     return {
-      reply: `${pickActionBeat(event)}已加入 ban 名单：${targetId}${banDuration.label ? `（${banDuration.label}）` : "（永久）"}。之后这个 QQ 号的 @ 或回复不会被受理。`,
+      reply: formatQqDone(`已加入封禁名单：${targetId}（${banDuration.label || "永久"}）`, ["之后这个 QQ 号的 @ 或回复不会被受理。"]),
       beforeSend: saveSettings
     };
   }
@@ -5839,25 +5823,32 @@ async function buildQqCommandAction(event) {
   if (isQqCommandAllowedForEvent("ban", event) && /^(unban|解禁|解除封禁|取消拉黑)/i.test(normalized)) {
     const targetId = extractQqCommandTarget(event, normalized);
     if (!targetId) {
-      return { reply: `${pickActionBeat(event)}要解禁谁呀？可以用 /unban @对方 或 /unban QQ号。` };
+      return { reply: formatQqCommandUsage(getQqCommand("ban"), { notice: "请 @ 要解禁的成员，或写出 QQ 号。" }) };
     }
     if (isProtectedQqOwnerTarget(targetId) && !event.isOwner) {
-      return { reply: `${pickActionBeat(event)}不能修改${ownerLabel}的权限状态。` };
+      return { reply: formatQqWarning(`不能修改${ownerLabel}的权限状态。`) };
     }
     state.qq.bannedUserIds = state.qq.bannedUserIds.filter((id) => id !== targetId);
     delete state.qq.bannedUntilByUserId[targetId];
     return {
-      reply: `${pickActionBeat(event)}已解禁：${targetId}。`,
+      reply: formatQqDone(`已移出封禁名单：${targetId}`),
       beforeSend: saveSettings
     };
   }
 
   if (isQqCommandAllowedForEvent("ban", event) && /^(banlist|封禁列表|ban列表)$/i.test(compact)) {
     pruneExpiredQqBans();
-    const list = state.qq.bannedUserIds.length
-      ? state.qq.bannedUserIds.map((id) => formatQqBanListEntry(id)).join("\n")
-      : "暂无 ban 用户。";
-    return { reply: `当前 QQ ban 名单：\n${list}` };
+    return {
+      reply: formatQqCard({
+        icon: getQqCommand("ban").icon,
+        title: "封禁名单",
+        fields: [["人数", state.qq.bannedUserIds.length]],
+        sections: [
+          { rows: state.qq.bannedUserIds.map((id) => formatQqBanListEntry(id)), empty: "暂无封禁用户。" },
+          formatQqUsageSection(getQqCommand("ban"))
+        ]
+      })
+    };
   }
 
   if (isQqCommandAllowedForEvent("allowlist", event) && /^(白名单|群白名单|白名单列表)$/i.test(compact)) {
@@ -5865,14 +5856,14 @@ async function buildQqCommandAction(event) {
   }
 
   if (isQqCommandAllowedForEvent("model", event) && /^(5|5\.5|5\.4|5\.4mini|5\.4-mini|mini|5\.3|5\.3codex|5\.3-codex|codex)$/i.test(compact)) {
-    return selectQqModel(compact, event);
+    return selectQqModel(compact);
   }
 
   const addGroupMatch = isQqCommandAllowedForEvent("allowlist", event) ? normalized.match(/^(?:加群|添加群|加入群|群添加|群加入|白名单添加|添加白名单群|加入白名单群)\s*([0-9]+)$/) : null;
   if (addGroupMatch) {
     state.qq.allowedGroups = normalizeAllowedGroups([...state.qq.allowedGroups, addGroupMatch[1]]);
     return {
-      reply: `已加入 QQ 群白名单：${addGroupMatch[1]}`,
+      reply: formatQqDone(`已加入群白名单：${addGroupMatch[1]}`),
       beforeSend: saveSettings
     };
   }
@@ -5882,7 +5873,7 @@ async function buildQqCommandAction(event) {
     state.qq.allowedGroups = normalizeAllowedGroups(state.qq.allowedGroups.filter((groupId) => groupId !== removeGroupMatch[1]));
     const periodicChanged = pruneQqPeriodicRuntimeToAllowedGroups();
     return {
-      reply: `已移出 QQ 群白名单：${removeGroupMatch[1]}`,
+      reply: formatQqDone(`已移出群白名单：${removeGroupMatch[1]}`),
       beforeSend: async () => Promise.all([
         saveSettings(),
         periodicChanged ? saveQqMemory() : Promise.resolve()
@@ -5895,7 +5886,7 @@ async function buildQqCommandAction(event) {
 
   const modelMatch = isQqCommandAllowedForEvent("model", event) ? normalized.match(/^(?:模型|qq模型|切模型|切换模型)\s+(.+)$/i) : null;
   if (modelMatch) {
-    return selectQqModel(modelMatch[1].trim(), event);
+    return selectQqModel(modelMatch[1].trim());
   }
 
   if (isQqCommandAllowedForEvent("reasoning", event)) {
@@ -5904,8 +5895,7 @@ async function buildQqCommandAction(event) {
       state,
       modelCatalog: codexModelCatalog,
       findModel: findCodexModel,
-      persist: saveSettings,
-      actionBeat: pickActionBeat(event)
+      persist: saveSettings
     });
     if (runtimeSettingAction) return runtimeSettingAction;
   }
@@ -5919,7 +5909,13 @@ function buildQqModelCatalogUnavailableReply() {
   const activeAgent = describeActiveAgent();
   if (activeAgent.modelCatalog) return null;
   return {
-    reply: `当前由 ${formatAgentEngineSummary(activeAgent)} 驱动。\n${activeAgent.name} 的模型在启动配置里设置（CODEX_REMOTE_CONTACT_CLAUDE_MODEL / CODEX_REMOTE_CONTACT_CLAUDE_EFFORT），改完重启 Hub 生效；/模型 只用于切换 Codex 模型。`
+    reply: formatQqCard({
+      icon: getQqCommand("model").icon,
+      title: "模型",
+      fields: [["AI 引擎", formatAgentEngineSummary(activeAgent)]],
+      notes: [`${activeAgent.name} 的模型在启动配置里设置，改完重启 Hub 生效；/模型 只用于切换 Codex 模型。`],
+      hints: ["配置项：CODEX_REMOTE_CONTACT_CLAUDE_MODEL / CODEX_REMOTE_CONTACT_CLAUDE_EFFORT"]
+    })
   };
 }
 
@@ -5928,23 +5924,36 @@ async function buildQqModelPicker() {
   if (unavailable) return unavailable;
   try {
     const models = await codexModelCatalog.list({ refresh: true });
-    if (models.length === 0) return { reply: "Codex 当前没有返回可选模型。" };
-    const lines = models.map((item, index) => `${index + 1}. ${item.displayName}（${item.model}）${item.model === state.ai.model ? " ← 当前" : ""}`);
-    return { reply: `当前可用模型：\n${lines.join("\n")}\n发送 /模型 序号 进行切换。` };
+    if (models.length === 0) return { reply: formatQqWarning("Codex 当前没有返回可选模型。") };
+    return {
+      reply: formatQqCard({
+        icon: getQqCommand("model").icon,
+        title: "模型",
+        fields: [["当前", state.ai.model]],
+        sections: [
+          {
+            icon: "📋",
+            title: "可用模型",
+            rows: models.map((item, index) => `${index + 1}. ${item.displayName}（${item.model}）${item.model === state.ai.model ? " ← 当前" : ""}`)
+          },
+          formatQqUsageSection(getQqCommand("model"))
+        ]
+      })
+    };
   } catch (error) {
     logger.warn("Unable to load Codex model catalog", { engine: "codex", error: error.message }, AGENT_LOG_CATEGORY);
-    return { reply: `读取 Codex 可用模型失败：${error.message}` };
+    return { reply: formatQqWarning(`读取 Codex 可用模型失败：${error.message}`) };
   }
 }
 
-async function selectQqModel(selector, event) {
+async function selectQqModel(selector) {
   const unavailable = buildQqModelCatalogUnavailableReply();
   if (unavailable) return unavailable;
   try {
     const models = await codexModelCatalog.list();
     const requested = resolveQqModelAlias(selector);
     const selected = findCodexModel(models, selector) || findCodexModel(models, requested);
-    if (!selected) return { reply: `${pickActionBeat(event)}这个模型不在当前账号的可用列表里，请先发送 /模型 查看。` };
+    if (!selected) return { reply: formatQqWarning("这个模型不在当前账号的可用列表里。", ["💡 发送 /模型 查看可用模型。"]) };
     state.ai.model = selected.model;
     if (!selected.supportedReasoningEfforts.includes(state.ai.reasoningEffort)) {
       state.ai.reasoningEffort = selected.defaultReasoningEffort;
@@ -5953,12 +5962,15 @@ async function selectQqModel(selector, event) {
       state.ai.serviceTier = selected.defaultServiceTier || "";
     }
     return {
-      reply: `${pickActionBeat(event)}QQ 通道模型已切换：${selected.displayName}（${selected.model}）\n思考强度：${state.ai.reasoningEffort}\n服务档位：${state.ai.serviceTier || "默认"}`,
+      reply: formatQqDone(`QQ 通道模型已切换：${selected.displayName}（${selected.model}）`, [
+        `思考强度：${state.ai.reasoningEffort}`,
+        `服务档位：${state.ai.serviceTier || "默认"}`
+      ]),
       beforeSend: saveSettings
     };
   } catch (error) {
     logger.warn("Unable to select Codex model", { engine: "codex", error: error.message }, AGENT_LOG_CATEGORY);
-    return { reply: `读取 Codex 可用模型失败：${error.message}` };
+    return { reply: formatQqWarning(`读取 Codex 可用模型失败：${error.message}`) };
   }
 }
 
@@ -6036,25 +6048,15 @@ function isQqGroupAdminCommand(normalized, compact) {
 
 async function buildQqGroupAdminAction(normalized, event) {
   const groupId = event.groupId == null ? "" : String(event.groupId);
-  if (!groupId) return { reply: `${pickActionBeat(event)}群管理指令只能在目标群里使用。` };
+  if (!groupId) return { reply: formatQqWarning("群管理指令只能在目标群里使用。") };
   const compact = String(normalized || "").replace(/\s+/g, "");
   if (/^群管理$/i.test(compact)) {
-    return {
-      reply: [
-        "群管理命令：",
-        "/禁言 @用户 10m（默认 10 分钟，最长 30 天）",
-        "/解禁言 @用户",
-        "/踢人 @用户",
-        "/踢人 @用户 拒绝再加",
-        "/全员禁言 开启 或 /全员禁言 关闭",
-        "/群禁言列表"
-      ].join("\n")
-    };
+    return { reply: formatQqCommandUsage(getQqCommand("groupAdmin")) };
   }
 
   if (/^(群禁言列表|禁言列表)$/i.test(compact)) {
     const result = await callOneBotAction("get_group_shut_list", { group_id: Number(groupId) });
-    if (!result.ok) return { reply: formatOneBotActionFailure("读取群禁言列表", result) };
+    if (!result.ok) return { reply: formatQqWarning(formatOneBotActionFailure("读取群禁言列表", result)) };
     const members = Array.isArray(result.body?.data) ? result.body.data : [];
     const nowSeconds = Math.floor(Date.now() / 1000);
     const lines = members
@@ -6064,7 +6066,14 @@ async function buildQqGroupAdminAction(normalized, event) {
         const until = Number(member.shut_up_timestamp || member.shutUpTime || 0) * 1000;
         return `${member.nickname || member.card || userId}(${userId})，到 ${formatQqBanUntil(until)}`;
       });
-    return { reply: lines.length ? `当前群禁言成员：\n${lines.join("\n")}` : "当前群没有正在禁言的成员。" };
+    return {
+      reply: formatQqCard({
+        icon: getQqCommand("groupAdmin").icon,
+        title: "群禁言列表",
+        fields: [["群", groupId], ["人数", lines.length]],
+        sections: [{ rows: lines, empty: "当前群没有正在禁言的成员。" }]
+      })
+    };
   }
 
   const wholeBanMatch = String(normalized || "").match(/^全员禁言\s*(开启|打开|启用|on|关闭|关掉|停用|off)$/i);
@@ -6073,15 +6082,15 @@ async function buildQqGroupAdminAction(normalized, event) {
     const result = await callOneBotAction("set_group_whole_ban", { group_id: Number(groupId), enable });
     return {
       reply: result.ok
-        ? `已${enable ? "开启" : "关闭"}群 ${groupId} 的全员禁言。`
-        : formatOneBotActionFailure(`${enable ? "开启" : "关闭"}全员禁言`, result)
+        ? formatQqDone(`已${enable ? "开启" : "关闭"}全员禁言：群 ${groupId}`)
+        : formatQqWarning(formatOneBotActionFailure(`${enable ? "开启" : "关闭"}全员禁言`, result))
     };
   }
 
   const targetId = extractQqCommandTarget(event, normalized);
-  if (!targetId) return { reply: `${pickActionBeat(event)}请 @ 目标成员，或写出目标 QQ 号。` };
-  if (isProtectedQqAuthorityTarget(targetId)) return { reply: `${ownerLabel}和 Bot 管理员受保护，不能被 Bot 群管工具禁言或踢出。` };
-  if (event.selfId && targetId === String(event.selfId)) return { reply: "不能对 Bot 自己执行群管动作。" };
+  if (!targetId) return { reply: formatQqCommandUsage(getQqCommand("groupAdmin"), { notice: "请 @ 目标成员，或写出目标 QQ 号。" }) };
+  if (isProtectedQqAuthorityTarget(targetId)) return { reply: formatQqWarning(`${ownerLabel}和 Bot 管理员受保护，不能被 Bot 群管工具禁言或踢出。`) };
+  if (event.selfId && targetId === String(event.selfId)) return { reply: formatQqWarning("不能对 Bot 自己执行群管动作。") };
 
   if (/^(解禁言|解除禁言)/i.test(normalized)) {
     const result = await callOneBotAction("set_group_ban", {
@@ -6089,7 +6098,7 @@ async function buildQqGroupAdminAction(normalized, event) {
       user_id: Number(targetId),
       duration: 0
     });
-    return { reply: result.ok ? `已解除 ${targetId} 在群 ${groupId} 的禁言。` : formatOneBotActionFailure("解除禁言", result) };
+    return { reply: result.ok ? formatQqDone(`已解除禁言：${targetId}`) : formatQqWarning(formatOneBotActionFailure("解除禁言", result)) };
   }
 
   if (/^禁言/i.test(normalized)) {
@@ -6101,8 +6110,8 @@ async function buildQqGroupAdminAction(normalized, event) {
     });
     return {
       reply: result.ok
-        ? `已禁言 ${targetId}：${duration.label}。`
-        : formatOneBotActionFailure("禁言", result)
+        ? formatQqDone(`已禁言：${targetId}（${duration.label}）`)
+        : formatQqWarning(formatOneBotActionFailure("禁言", result))
     };
   }
 
@@ -6115,12 +6124,12 @@ async function buildQqGroupAdminAction(normalized, event) {
     });
     return {
       reply: result.ok
-        ? `已将 ${targetId} 移出群 ${groupId}${rejectAddRequest ? "，并拒绝其再次加群" : ""}。`
-        : formatOneBotActionFailure("踢人", result)
+        ? formatQqDone(`已移出群：${targetId}`, [rejectAddRequest ? "已拒绝其再次加群。" : ""])
+        : formatQqWarning(formatOneBotActionFailure("踢人", result))
     };
   }
 
-  return { reply: "未识别的群管理动作；发送 /群管理 查看用法。" };
+  return { reply: formatQqCommandUsage(getQqCommand("groupAdmin"), { notice: "未识别的群管理动作。" }) };
 }
 
 function buildQqInterestConfigAction(normalized, event) {
@@ -6136,7 +6145,7 @@ function buildQqInterestConfigAction(normalized, event) {
     state.qq.proactive.enabled = state.qq.enhancer.enabled && enabled;
     resetQqProactiveRuntimeCycles();
     return {
-      reply: `主动兴趣判定已${state.qq.proactive.enabled ? "开启" : "关闭"}。`,
+      reply: formatQqDone(`主动兴趣判定已${formatQqSwitch(state.qq.proactive.enabled)}`),
       beforeSend: saveQqProactiveSettingsAndCycles
     };
   }
@@ -6148,7 +6157,7 @@ function buildQqInterestConfigAction(normalized, event) {
     state.qq.proactive.judgeEveryMessages = value;
     resetQqProactiveRuntimeCycles();
     return {
-      reply: `主动兴趣判定间隔已改为：每 ${value} 条普通群消息判断一次。`,
+      reply: formatQqDone(`兴趣判断间隔已改为：每 ${value} 条普通群消息`),
       beforeSend: saveQqProactiveSettingsAndCycles
     };
   }
@@ -6163,8 +6172,8 @@ function buildQqInterestConfigAction(normalized, event) {
     resetQqProactiveRuntimeCycles();
     return {
       reply: value > 0
-        ? `主动兴趣分钟检查已改为：有新增普通群消息时，每 ${value} 分钟最多判断一次；消息数检查仍独立生效。`
-        : "主动兴趣分钟检查已关闭；消息数检查仍正常生效。",
+        ? formatQqDone(`兴趣分钟检查已改为：每 ${value} 分钟`, ["有新增普通群消息时最多判断一次；消息数检查仍独立生效。"])
+        : formatQqDone("兴趣分钟检查已关闭", ["消息数检查仍正常生效。"]),
       beforeSend: saveQqProactiveSettingsAndCycles
     };
   }
@@ -6173,7 +6182,7 @@ function buildQqInterestConfigAction(normalized, event) {
   if (providerMatch) {
     const requested = String(providerMatch[1] || "").trim().toLowerCase();
     if (!requested) {
-      return { reply: "可选兴趣模型厂商：OpenRouter、DeepSeek、自定义（custom）。" };
+      return { reply: formatQqCommandUsage(getQqCommand("interest"), { notice: "请写出兴趣模型厂商：openrouter、deepseek 或 custom。" }) };
     }
     const aliases = {
       openrouter: "openrouter",
@@ -6187,12 +6196,15 @@ function buildQqInterestConfigAction(normalized, event) {
     };
     const provider = aliases[requested];
     if (!provider) {
-      return { reply: `${pickActionBeat(event)}不支持这个兴趣模型厂商；可选：OpenRouter、DeepSeek、自定义（custom）。` };
+      return { reply: formatQqWarning("不支持这个兴趣模型厂商。", ["可选：openrouter、deepseek、custom"]) };
     }
     state.qq.proactive.judge.provider = provider;
     const active = syncActiveQqInterestModelConfig({ resetBaseUrl: true, resetModel: true });
     return {
-      reply: `兴趣模型厂商已切换为 ${active.label}，默认模型：${active.model}，Key：${active.apiKeyConfigured ? "已配置" : "未配置"}。`,
+      reply: formatQqDone(`兴趣模型厂商已切换：${active.label}`, [
+        `默认模型：${active.model}`,
+        `Key：${active.apiKeyConfigured ? "已配置" : "未配置"}`
+      ]),
       beforeSend: saveSettings
     };
   }
@@ -6202,11 +6214,11 @@ function buildQqInterestConfigAction(normalized, event) {
   if (modelMatch) {
     const model = modelMatch[1].trim();
     if (!isValidInterestModelId(model)) {
-      return { reply: `${pickActionBeat(event)}这个兴趣判定模型名看起来不太对；当前厂商示例：${getDefaultInterestModel(state.qq.proactive.judge.provider)}。` };
+      return { reply: formatQqWarning("兴趣判定模型名格式不正确。", [`当前厂商示例：${getDefaultInterestModel(state.qq.proactive.judge.provider)}`]) };
     }
     state.qq.proactive.judge.model = model;
     return {
-      reply: `主动兴趣判定模型已切换：${model}`,
+      reply: formatQqDone(`兴趣判定模型已切换：${model}`),
       beforeSend: saveSettings
     };
   }
@@ -6217,7 +6229,7 @@ function buildQqInterestConfigAction(normalized, event) {
     const timeoutMs = Math.max(1500, Math.min(20000, Number(timeoutMatch[1])));
     state.qq.proactive.judge.timeoutMs = timeoutMs;
     return {
-      reply: `主动兴趣判定 Token 静默超时已改为：${timeoutMs}ms。`,
+      reply: formatQqDone(`兴趣判定 Token 静默超时已改为：${timeoutMs}ms`),
       beforeSend: saveSettings
     };
   }
@@ -6228,7 +6240,7 @@ function buildQqInterestConfigAction(normalized, event) {
     const maxRecentMessages = Math.max(1, Math.min(12, Number(recentMatch[1])));
     state.qq.proactive.judge.maxRecentMessages = maxRecentMessages;
     return {
-      reply: `主动兴趣判定上下文已改为：最近 ${maxRecentMessages} 条消息。`,
+      reply: formatQqDone(`兴趣判定上下文已改为：最近 ${maxRecentMessages} 条消息`),
       beforeSend: saveSettings
     };
   }
@@ -6236,12 +6248,12 @@ function buildQqInterestConfigAction(normalized, event) {
   if (/^(兴趣重置|主动重置|兴趣配置\s*重置|主动配置\s*重置|interest\s+reset|proactive\s+reset)$/i.test(body)) {
     resetQqProactiveRuntimeCycles();
     return {
-      reply: "主动兴趣判定的消息计数和分钟周期已一起重置。",
+      reply: formatQqDone("兴趣判定的消息计数和分钟周期已重置"),
       beforeSend: saveQqProactiveSettingsAndCycles
     };
   }
 
-  return { reply: buildQqInterestConfigHelp() };
+  return { reply: formatQqCommandUsage(getQqCommand("interest"), { notice: "未识别的兴趣配置指令。" }) };
 }
 
 async function saveQqProactiveSettingsAndCycles() {
@@ -6293,11 +6305,11 @@ function clearQqContextForEvent(event, { silent = false, source = "new-dialog", 
     state.qq.periodicRuntime = clearQqOrdinaryInterestCycle(state.qq.periodicRuntime, event.groupId);
     qqProactiveLatestEventByGroupId.delete(String(event.groupId));
     logClear();
-    return silent ? "" : "已开启新对话。";
+    return silent ? "" : formatQqDone("已开启新对话");
   }
   if (scopeId) {
     logClear();
-    return silent ? "" : "已开启新对话。";
+    return silent ? "" : formatQqDone("已开启新对话");
   }
   state.qq.memory.entries = createSafeRecord();
   state.qq.memory.deliveryFailures = createSafeRecord();
@@ -6314,7 +6326,7 @@ function clearQqContextForEvent(event, { silent = false, source = "new-dialog", 
   qqProactiveLatestEventByGroupId.clear();
   qqConversationFollowUps.reset();
   logClear();
-  return silent ? "" : "已开启新对话。";
+  return silent ? "" : formatQqDone("已开启新对话");
 }
 
 function stopQqGenerationForEvent(event) {
@@ -6339,8 +6351,8 @@ function stopQqGenerationForEvent(event) {
     codexSessionPreserved: sessionPreserved
   }, "qq", qqLogContext(event));
   return stopped || cancelledScope
-    ? "已暂停当前回复，会话和上下文已保留。"
-    : "当前没有正在生成的回复，会话和上下文保持不变。";
+    ? formatQqDone("已暂停当前回复", ["会话和上下文已保留。"])
+    : formatQqWarning("当前没有正在生成的回复", ["会话和上下文保持不变。"]);
 }
 
 function preserveStoppedQqCodexSession(active) {
@@ -6433,9 +6445,7 @@ async function buildQqCrossSessionCommandAction(normalized, event) {
     } else if (listMatch) {
       value = listMatch[1] || "";
     } else {
-      return {
-        reply: "用法：/跨会话 列表 [筛选]；/跨会话 查看 group:群号 最近30；/跨会话 发送 private:QQ号 | 消息。"
-      };
+      return { reply: formatQqCommandUsage(getQqCommand("crossSession"), { notice: "未识别的跨会话动作。" }) };
     }
   }
   const result = await executeQqCrossSessionNativeTool({
@@ -6443,7 +6453,7 @@ async function buildQqCrossSessionCommandAction(normalized, event) {
     tool: "manage",
     arguments: { action, scopeId, value }
   }, event, { rootEvent: event });
-  return { reply: result.reply || result.error || "跨会话操作没有返回结果。" };
+  return { reply: result.reply || (result.error ? formatQqWarning(result.error) : formatQqWarning("跨会话操作没有返回结果。")) };
 }
 
 function buildQqBotAdministratorAction(normalized, event) {
@@ -6453,28 +6463,31 @@ function buildQqBotAdministratorAction(normalized, event) {
   if (!match) return null;
   const action = String(match[1] || "列表");
   const targetUserId = String(match[2] || "");
-  const list = state.qq.adminUserIds.length ? state.qq.adminUserIds.join("\n") : "暂无 Bot 管理员。";
   if (/^(列表|查看)$/i.test(action)) {
     return {
-      reply: [
-        "当前 Bot 管理员：",
-        list,
-        "Bot 管理员可使用完整菜单、原生 Agent 和跨会话能力；不能授予/撤销管理员，也不能冒充主人。",
-        `仅${ownerLabel}可用：/Bot管理员 添加 QQ号、/Bot管理员 删除 QQ号。`
-      ].join("\n")
+      reply: formatQqCard({
+        icon: getQqCommand("botAdmins").icon,
+        title: "Bot 管理员",
+        fields: [["人数", state.qq.adminUserIds.length]],
+        sections: [
+          { rows: state.qq.adminUserIds, empty: "暂无 Bot 管理员。" },
+          formatQqUsageSection(getQqCommand("botAdmins"))
+        ],
+        hints: [`Bot 管理员可使用完整菜单、原生 Agent 和跨会话能力；不能授予或撤销管理员，也不能冒充${ownerLabel}。`]
+      })
     };
   }
   if (!event?.isOwner) {
-    return { reply: `只有${ownerLabel}能添加或移除 Bot 管理员。` };
+    return { reply: formatQqWarning(`只有${ownerLabel}能添加或移除 Bot 管理员。`) };
   }
   if (!targetUserId) {
-    return { reply: "请提供 QQ 号：/Bot管理员 添加 QQ号，或 /Bot管理员 删除 QQ号。" };
+    return { reply: formatQqCommandUsage(getQqCommand("botAdmins"), { notice: "请写出 QQ 号。" }) };
   }
   if (isProtectedQqOwnerTarget(targetUserId)) {
-    return { reply: `${targetUserId} 是${ownerLabel}，无需也不能改成 Bot 管理员。` };
+    return { reply: formatQqWarning(`${targetUserId} 是${ownerLabel}，无需也不能改成 Bot 管理员。`) };
   }
   if (event.selfId && targetUserId === String(event.selfId)) {
-    return { reply: "不能把 Bot 自己加入管理员列表。" };
+    return { reply: formatQqWarning("不能把 Bot 自己加入管理员列表。") };
   }
   const adding = /^(添加|加入|授权)$/i.test(action);
   const previousAdminUserIds = [...state.qq.adminUserIds];
@@ -6498,8 +6511,8 @@ function buildQqBotAdministratorAction(normalized, event) {
   });
   return {
     reply: adding
-      ? `已添加 Bot 管理员：${targetUserId}。对方现在可使用完整菜单、Agent 与跨会话能力。`
-      : `已移除 Bot 管理员：${targetUserId}。`,
+      ? formatQqDone(`已添加 Bot 管理员：${targetUserId}`, ["对方现在可使用完整菜单、Agent 与跨会话能力。"])
+      : formatQqDone(`已移除 Bot 管理员：${targetUserId}`),
     beforeSend: async () => {
       try {
         await saveSettings();
@@ -6529,15 +6542,15 @@ function buildQqPermissionAction(normalized) {
   const targetUserId = match[2] ? String(match[2]) : "";
   const command = qqCommandCatalog.find((item) => item.key === key);
   if (!command) {
-    return { reply: `未知指令 key：${key}。\n${formatQqCommandPermissions()}` };
+    return { reply: `${formatQqWarning(`未知指令 key：${key}`)}\n\n${formatQqCommandPermissions()}` };
   }
   if (!command.configurable) {
-    return { reply: `${command.key} 是主人专用指令，不能开放给其他人。` };
+    return { reply: formatQqWarning(`${command.menuLine}（${command.key}）只对${ownerLabel}和 Bot 管理员开放，不能单独授权。`) };
   }
   const enabled = /^(允许指令|开放指令|启用指令)$/i.test(action);
   if (targetUserId) {
     if (isProtectedQqAuthorityTarget(targetUserId)) {
-      return { reply: `${targetUserId} 已拥有主人或 Bot 管理员权限，不需要单独授权。` };
+      return { reply: formatQqWarning(`${targetUserId} 已拥有${ownerLabel}或 Bot 管理员权限，不需要单独授权。`) };
     }
     const current = normalizeQqUserPermissionIds(state.qq.commandPermissions.userCommands[command.key]);
     const next = enabled
@@ -6549,13 +6562,13 @@ function buildQqPermissionAction(normalized) {
       delete state.qq.commandPermissions.userCommands[command.key];
     }
     return {
-      reply: `${enabled ? "已允许" : "已禁用"}个人指令：${targetUserId} -> ${formatQqCommandMenuLabel(command)} (${command.key})`,
+      reply: formatQqDone(`${enabled ? "已对个人开放" : "已对个人关闭"}：${command.menuLine}（${command.key}）`, [`QQ：${targetUserId}`]),
       beforeSend: saveSettings
     };
   }
   state.qq.commandPermissions.publicCommands[command.key] = enabled;
   return {
-    reply: `${enabled ? "已允许" : "已禁用"}公开指令：${formatQqCommandMenuLabel(command)} (${command.key})`,
+    reply: formatQqDone(`${enabled ? "已公开" : "已取消公开"}：${command.menuLine}（${command.key}）`),
     beforeSend: saveSettings
   };
 }
@@ -6566,44 +6579,42 @@ function formatQqCommandPermissions() {
     const visibility = command.configurable
       ? [
           state.qq.commandPermissions.publicCommands[command.key] === true ? "公开" : "关闭",
-          userIds.length ? `个人:${userIds.join(",")}` : null
-        ].filter(Boolean).join(" ")
-      : command.key === "botAdmins" ? "主人增删 / 管理员可查看" : "主人 / Bot 管理员";
-    return `${command.key}: ${visibility} ${formatQqCommandMenuLabel(command)}`;
+          userIds.length ? `个人 ${userIds.join("、")}` : null
+        ].filter(Boolean).join(" · ")
+      : command.key === "botAdmins" ? `${ownerLabel}增删 · 管理员可查看` : `仅${ownerLabel}和管理员`;
+    return { text: `${command.menuLine}（${command.key}）`, detail: visibility };
   });
-  return [
-    "QQ 菜单权限",
-    "用 /允许指令 key 或 /禁用指令 key 调整非主人可见/可用项。",
-    "用 /允许指令 key QQ号 或 /禁用指令 key QQ号 调整某个人可见/可用项。",
-    `${ownerLabel}拥有绝对权限；Bot 管理员拥有完整菜单，但不能修改管理员名单，且仍受高风险文件保护。`,
-    ...rows
-  ].join("\n");
-}
-
-function getQqCommandMenuLines(command) {
-  const lines = Array.isArray(command.menuLines) ? command.menuLines : [command.menuLine];
-  return lines.map((line) => String(line || "").trim()).filter(Boolean);
-}
-
-function formatQqCommandMenuLabel(command) {
-  return getQqCommandMenuLines(command).join(" / ");
+  return formatQqCard({
+    icon: getQqCommand("permissions").icon,
+    title: "菜单权限",
+    notes: [`${ownerLabel}拥有绝对权限；Bot 管理员拥有完整菜单，但不能修改管理员名单，且仍受高风险文件保护。`],
+    sections: [
+      { icon: "📋", title: "指令", rows },
+      formatQqUsageSection(getQqCommand("permissions"))
+    ]
+  });
 }
 
 function buildQqOwnerStatus() {
   pruneExpiredQqBans();
-  return [
-    `QQ：${state.channels.qq ? "开启" : "关闭"}`,
-    `AI 引擎：${formatAgentEngineSummary(describeActiveAgent())}`,
-    `Codex 设置：${state.ai.model} / ${state.ai.reasoningEffort} / 摘要 ${state.ai.reasoningSummary} / 人格 ${state.ai.personality}`,
-    `白名单群：${state.qq.allowedGroups.length ? state.qq.allowedGroups.join(", ") : "无"}`,
-    `主人 QQ：${state.qq.ownerUserIds.length ? state.qq.ownerUserIds.join(", ") : "未设置"}`,
-    `Bot 管理员：${state.qq.adminUserIds.length ? state.qq.adminUserIds.join(", ") : "无"}`,
-    `ban 用户：${state.qq.bannedUserIds.length}`,
-    `短期记忆范围：${Object.keys(state.qq.memory.shortTermNotes).length}`,
-    `Codex 会话：默认${formatQqCodexSessionMode(state.qq.codexSession.settings.defaultMode)}，长期线程 ${Object.keys(state.qq.codexSession.store.threads || {}).length}`,
-    `长期知识标题：${state.qq.knowledgeBase.entries.length}`,
-    `联网查询：${state.qq.webLookup.enabled ? "开启" : "关闭"}`
-  ].join("\n");
+  return formatQqCard({
+    icon: getQqCommand("status").icon,
+    title: "运行状态",
+    fields: [
+      ["QQ 通道", formatQqSwitch(state.channels.qq)],
+      ["AI 引擎", formatAgentEngineSummary(describeActiveAgent())],
+      ["Codex 设置", `${state.ai.model} · ${state.ai.reasoningEffort} · 摘要 ${state.ai.reasoningSummary} · 人格 ${state.ai.personality}`],
+      ["白名单群", state.qq.allowedGroups],
+      ["主人 QQ", state.qq.ownerUserIds.length ? state.qq.ownerUserIds : "未设置"],
+      ["Bot 管理员", state.qq.adminUserIds],
+      ["封禁用户", `${state.qq.bannedUserIds.length} 人`],
+      ["短期记忆", `${Object.keys(state.qq.memory.shortTermNotes).length} 个范围`],
+      ["会话线程", `默认${formatQqCodexSessionMode(state.qq.codexSession.settings.defaultMode)} · 长期线程 ${Object.keys(state.qq.codexSession.store.threads || {}).length} 个`],
+      ["长期知识", `${state.qq.knowledgeBase.entries.length} 条`],
+      ["联网查询", formatQqSwitch(state.qq.webLookup.enabled)]
+    ],
+    hints: ["发送 /详细配置 查看完整配置。"]
+  });
 }
 
 function buildQqOwnerConfigDetail() {
@@ -6611,79 +6622,113 @@ function buildQqOwnerConfigDetail() {
   const timeoutPolicies = getCodexTaskTimeoutPolicyMap(codexTaskTimeouts, state.ai.reasoningEffort);
   const timeoutFor = (taskType) => formatCodexTaskTimeout(timeoutPolicies[taskType].timeoutMs);
   const timeoutMultiplier = timeoutPolicies[CODEX_TASK_TYPES.QQ_REPLY].multiplier;
-  return [
-    "QQ 详细配置",
-    `通道：${state.channels.qq ? "开启" : "关闭"}`,
-    `群模式：${state.qq.groupMode}`,
-    `AI 引擎：${formatAgentEngineSummary(describeActiveAgent())}`,
-    `Codex 模型：${state.ai.model}`,
-    `智能等级：${state.ai.reasoningEffort}`,
-    `推理摘要：${state.ai.reasoningSummary}`,
-    `Agent 人格：${state.ai.personality}`,
-    `服务档位：${state.ai.serviceTier || "默认"}`,
-    `Codex 会话：默认${formatQqCodexSessionMode(state.qq.codexSession.settings.defaultMode)}，范围覆盖 ${Object.keys(state.qq.codexSession.settings.scopes || {}).length} 个，长期线程 ${Object.keys(state.qq.codexSession.store.threads || {}).length} 个`,
-    `主人 QQ：${state.qq.ownerUserIds.length ? state.qq.ownerUserIds.join(", ") : "未设置"}`,
-    `Bot 管理员：${state.qq.adminUserIds.length ? state.qq.adminUserIds.join(", ") : "无"}`,
-    `白名单群：${state.qq.allowedGroups.length ? state.qq.allowedGroups.join(", ") : "无"}`,
-    `ban 用户：${state.qq.bannedUserIds.length ? state.qq.bannedUserIds.map((id) => formatQqBanListEntry(id)).join(", ") : "无"}`,
-    `QQ enhancer：${state.qq.enhancer.enabled ? "开启" : "关闭"}`,
-    `主动响应：${state.qq.proactive.enabled ? "开启" : "关闭"}，每 ${state.qq.proactive.judgeEveryMessages} 条${state.qq.proactive.judgeEveryMinutes > 0 ? `或有新消息满 ${state.qq.proactive.judgeEveryMinutes} 分钟` : "（分钟检查关闭）"}时交给模型判断，任一检查完成后两种周期一起重置，最终阈值 ${state.qq.proactive.judge.minInterest}`,
-    `主动判定模型：${state.qq.proactive.judge.provider}/${state.qq.proactive.judge.model}，Key：${state.qq.proactive.judge.apiKeyConfigured ? "已配置" : "未配置"}，Token 静默超时 ${state.qq.proactive.judge.timeoutMs}ms`,
-    `联网查询：${state.qq.webLookup.enabled ? "开启" : "关闭"}`,
-    `主人文件/图片任务：${qqOwnerFileImageTasksEnabled ? "开启" : "关闭"}`,
-    `附件大小：图片 ${qqImageMaxBytes} 字节；Bot 按需下载入站文件 ${qqFileMaxBytes} 字节`,
-    `任务时限（当前 ${state.ai.reasoningEffort}，基础时限 ×${timeoutMultiplier}）：普通回复 ${timeoutFor(CODEX_TASK_TYPES.QQ_REPLY)}，看图回复 ${timeoutFor(CODEX_TASK_TYPES.QQ_VISION_REPLY)}，总结 ${timeoutFor(CODEX_TASK_TYPES.QQ_CONTEXT_SUMMARY)}，人格刷新 ${timeoutFor(CODEX_TASK_TYPES.QQ_SELF_PERSONA)}，文件任务 ${timeoutFor(CODEX_TASK_TYPES.QQ_FILE_TASK)}，画图 ${timeoutFor(CODEX_TASK_TYPES.QQ_IMAGE_GENERATION)}`,
-    `长回复投递：每条最多 ${qqBubbleMaxChars} 字，单次回复最多 ${qqBubbleMaxCount} 条，超长正文自动按自然边界拆分`,
-    `短期记忆范围：${Object.keys(state.qq.memory.shortTermNotes).length}`,
-    `长期知识标题：${state.qq.knowledgeBase.entries.length}`,
-    `记忆群数：${Object.keys(state.qq.memory.entries).length}`,
-    `最近消息群数：${Object.keys(state.qq.memory.recentMessages).length}`,
-    `待看图请求：${Object.keys(state.qq.proactive.pendingImageRequests).length}`,
-    `最近事件：${state.qq.events.length}`
-  ].join("\n");
+  const proactive = state.qq.proactive;
+  return formatQqCard({
+    icon: getQqCommand("config").icon,
+    title: "详细配置",
+    sections: [
+      {
+        icon: "📡",
+        title: "通道与权限",
+        rows: [
+          `QQ 通道：${formatQqSwitch(state.channels.qq)}`,
+          `群模式：${state.qq.groupMode}`,
+          `主人 QQ：${state.qq.ownerUserIds.length ? state.qq.ownerUserIds.join("、") : "未设置"}`,
+          `Bot 管理员：${formatQqListValue(state.qq.adminUserIds)}`,
+          `白名单群：${formatQqListValue(state.qq.allowedGroups)}`,
+          `封禁用户：${formatQqListValue(state.qq.bannedUserIds.map((id) => formatQqBanListEntry(id)))}`
+        ]
+      },
+      {
+        icon: "🧠",
+        title: "模型",
+        rows: [
+          `AI 引擎：${formatAgentEngineSummary(describeActiveAgent())}`,
+          `Codex 模型：${state.ai.model}`,
+          `思考强度：${state.ai.reasoningEffort}`,
+          `推理摘要：${state.ai.reasoningSummary}`,
+          `Agent 人格：${state.ai.personality}`,
+          `服务档位：${state.ai.serviceTier || "默认"}`,
+          `会话线程：默认${formatQqCodexSessionMode(state.qq.codexSession.settings.defaultMode)} · 范围覆盖 ${Object.keys(state.qq.codexSession.settings.scopes || {}).length} 个 · 长期线程 ${Object.keys(state.qq.codexSession.store.threads || {}).length} 个`
+        ]
+      },
+      {
+        icon: "✨",
+        title: "主动与增强",
+        rows: [
+          `QQ 增强：${formatQqSwitch(state.qq.enhancer.enabled)}`,
+          `主动响应：${formatQqSwitch(proactive.enabled)} · 每 ${proactive.judgeEveryMessages} 条${proactive.judgeEveryMinutes > 0 ? `或有新消息满 ${proactive.judgeEveryMinutes} 分钟` : "（分钟检查关闭）"} · 阈值 ${proactive.judge.minInterest}`,
+          `兴趣判定模型：${proactive.judge.provider}/${proactive.judge.model} · Key ${proactive.judge.apiKeyConfigured ? "已配置" : "未配置"} · 静默超时 ${proactive.judge.timeoutMs}ms`,
+          `联网查询：${formatQqSwitch(state.qq.webLookup.enabled)}`,
+          `主人文件/图片任务：${formatQqSwitch(qqOwnerFileImageTasksEnabled)}`
+        ]
+      },
+      {
+        icon: "⏱️",
+        title: "限制与时限",
+        rows: [
+          `附件大小：图片 ${qqImageMaxBytes} 字节 · 入站文件 ${qqFileMaxBytes} 字节`,
+          `长回复：每条最多 ${qqBubbleMaxChars} 字 · 单次最多 ${qqBubbleMaxCount} 条`,
+          `任务时限（${state.ai.reasoningEffort}，基础时限 ×${timeoutMultiplier}）：`,
+          `  普通回复 ${timeoutFor(CODEX_TASK_TYPES.QQ_REPLY)} · 看图回复 ${timeoutFor(CODEX_TASK_TYPES.QQ_VISION_REPLY)} · 总结 ${timeoutFor(CODEX_TASK_TYPES.QQ_CONTEXT_SUMMARY)}`,
+          `  人格刷新 ${timeoutFor(CODEX_TASK_TYPES.QQ_SELF_PERSONA)} · 文件任务 ${timeoutFor(CODEX_TASK_TYPES.QQ_FILE_TASK)} · 画图 ${timeoutFor(CODEX_TASK_TYPES.QQ_IMAGE_GENERATION)}`
+        ]
+      },
+      {
+        icon: "🗃️",
+        title: "数据",
+        rows: [
+          `短期记忆：${Object.keys(state.qq.memory.shortTermNotes).length} 个范围`,
+          `长期知识：${state.qq.knowledgeBase.entries.length} 条`,
+          `记忆范围：${Object.keys(state.qq.memory.entries).length} 个`,
+          `最近消息范围：${Object.keys(state.qq.memory.recentMessages).length} 个`,
+          `待看图请求：${Object.keys(proactive.pendingImageRequests).length} 个`,
+          `最近事件：${state.qq.events.length} 条`
+        ]
+      }
+    ]
+  });
+}
+
+function formatQqListValue(items) {
+  return Array.isArray(items) && items.length > 0 ? items.join("、") : "无";
 }
 
 function buildQqInterestConfigDetail() {
   const counts = Object.entries(state.qq.proactive.messageCountByGroupId || {})
     .filter(([, count]) => Number(count) > 0)
-    .map(([groupId, count]) => `${groupId}:${count}`)
-    .join(", ");
-  return [
-    "主动兴趣配置",
-    `主动响应：${state.qq.proactive.enabled ? "开启" : "关闭"}`,
-    `判断间隔：每 ${state.qq.proactive.judgeEveryMessages} 条普通群消息`,
-    `分钟检查：${state.qq.proactive.judgeEveryMinutes > 0 ? `有新增消息时每 ${state.qq.proactive.judgeEveryMinutes} 分钟` : "关闭"}`,
-    "重置规则：任一种检查完成后，消息计数与分钟周期一起重新开始",
-    `模型厂商：${state.qq.proactive.judge.provider}`,
-    `判定模型：${state.qq.proactive.judge.model}`,
-    `当前厂商 Key：${state.qq.proactive.judge.apiKeyConfigured ? "已配置" : "未配置"}`,
-    `Token 静默超时：${state.qq.proactive.judge.timeoutMs}ms`,
-    `上下文：最近 ${state.qq.proactive.judge.maxRecentMessages} 条`,
-    `最终阈值：${state.qq.proactive.judge.minInterest}`,
-    `当前计数：${counts || "无"}`,
-    "",
-    buildQqInterestConfigHelp()
-  ].join("\n");
-}
-
-function buildQqInterestConfigHelp() {
-  return [
-    "可用命令：",
-    "/兴趣配置",
-    "/兴趣 开启 或 /兴趣 关闭",
-    `/兴趣间隔 ${state.qq.proactive.judgeEveryMessages}`,
-    `/兴趣分钟 ${state.qq.proactive.judgeEveryMinutes || "关闭"}`,
-    `/兴趣厂商 ${state.qq.proactive.judge.provider}（openrouter / deepseek / custom）`,
-    `/兴趣模型 ${state.qq.proactive.judge.model}`,
-    `/兴趣超时 ${state.qq.proactive.judge.timeoutMs}`,
-    `/兴趣最近 ${state.qq.proactive.judge.maxRecentMessages}`,
-    "/兴趣重置"
-  ].join("\n");
+    .map(([groupId, count]) => `${groupId}:${count}`);
+  const judge = state.qq.proactive.judge;
+  return formatQqCard({
+    icon: getQqCommand("interest").icon,
+    title: "主动兴趣配置",
+    fields: [
+      ["主动响应", formatQqSwitch(state.qq.proactive.enabled)],
+      ["判断间隔", `每 ${state.qq.proactive.judgeEveryMessages} 条普通群消息`],
+      ["分钟检查", state.qq.proactive.judgeEveryMinutes > 0 ? `有新增消息时每 ${state.qq.proactive.judgeEveryMinutes} 分钟` : "关闭"],
+      ["模型厂商", judge.provider],
+      ["判定模型", judge.model],
+      ["厂商 Key", judge.apiKeyConfigured ? "已配置" : "未配置"],
+      ["静默超时", `${judge.timeoutMs}ms`],
+      ["上下文", `最近 ${judge.maxRecentMessages} 条`],
+      ["最终阈值", judge.minInterest],
+      ["当前计数", counts]
+    ],
+    sections: [formatQqUsageSection(getQqCommand("interest"))],
+    hints: ["任一种检查完成后，消息计数与分钟周期一起重新开始。"]
+  });
 }
 
 function formatQqAllowedGroups() {
-  const groups = state.qq.allowedGroups.length ? state.qq.allowedGroups.join("\n") : "暂无白名单群。";
-  return `当前 QQ 群白名单：\n${groups}`;
+  return formatQqCard({
+    icon: getQqCommand("allowlist").icon,
+    title: "群白名单",
+    fields: [["数量", `${state.qq.allowedGroups.length} 个群`]],
+    sections: [
+      { rows: state.qq.allowedGroups, empty: "暂无白名单群。" },
+      formatQqUsageSection(getQqCommand("allowlist"))
+    ]
+  });
 }
 
 function collectQqRobotProfileCandidates(event) {
@@ -7249,7 +7294,7 @@ async function executeQqRequestCommand(command, event) {
     };
   }
   const match = body.match(/^(同意|通过|接受|拒绝|驳回)(?:\s+(#[a-f0-9]{10}|最新|latest|\S+))?(?:\s+([\s\S]+))?$/i);
-  if (!match) return { ok: false, command, reply: "用法：/申请 列表、/申请 同步、/申请 同意 最新 [备注]、/申请 拒绝 #申请ID [理由]。" };
+  if (!match) return { ok: false, command, reply: formatQqCommandUsage(getQqCommand("requests"), { notice: "未识别的申请动作。" }) };
   const approve = /^(同意|通过|接受)$/i.test(match[1]);
   const selector = match[2] || "最新";
   const entry = qqRequestStore.find(selector, { pendingOnly: true });
@@ -8952,63 +8997,6 @@ async function loadAssistantSkillBrief() {
     "部署者自定义 profile：",
     text
   ].join("\n").slice(0, 1800);
-}
-
-function pickActionBeat(event) {
-  const beats = getActionBeats(event);
-  const seed = `${event.raw?.message_id || ""}:${event.senderId || ""}:${event.text || ""}`;
-  const index = [...seed].reduce((sum, char) => sum + char.charCodeAt(0), 0) % beats.length;
-  return beats[index];
-}
-
-function getActionBeats(event) {
-  // Deployment customization: keep these neutral. Put character-specific
-  // gestures, appearance, or style rules in the assistant profile file instead.
-  const shared = [
-    "（眨了眨眼）",
-    "（稍微歪了下头）",
-    "（轻轻点了点头）",
-    "（视线认真移过去）",
-    "（抬手比了个很小的手势）",
-    "（指尖轻轻敲了敲掌心）",
-    "（抱着手臂想了半秒）",
-    "（往前凑近了一点）",
-    "（往后收了半步）",
-    "（小声清了清嗓子）",
-    "（脸上的表情亮了一下）",
-    "（忍不住轻轻鼓了鼓脸）",
-    "（眼神短暂飘开又转回来）",
-    "（像是刚反应过来一样抬起眼）",
-    "（手指在空中停了一下）",
-    "（肩膀轻轻放松下来）",
-    "（把注意力转了回来）",
-    "（停顿了一小会儿）",
-    "（语气放轻了一点）",
-    "（快速整理了一下思路）",
-    "（看起来已经进入工作状态）"
-  ];
-  const owner = [
-    "（眼睛一下子弯起来）",
-    "（有点得意地抬了抬下巴）",
-    "（悄悄比了个收到的手势）",
-    "（像被点名一样立刻坐直）",
-    "（认真地点了两下头）",
-    "（忍着笑轻轻咳了一声）",
-    "（手指在胸前轻轻并了一下）",
-    "（往旁边让出一点位置，像准备开工）",
-    "（表情软下来一点）",
-    "（眼神很快亮了一下）"
-  ];
-  const others = [
-    "（表情稍微警觉了一点）",
-    "（手指停在半空，像是在判断这句话）",
-    "（微微眯起眼看过去）",
-    "（往后收了半步，语气仍然轻快）",
-    "（抱着手臂歪头看了一眼）",
-    "（轻轻摆了摆手）",
-    "（眼神短暂变得认真）"
-  ];
-  return hasQqPrivilegedAccess(event) ? [...shared, ...owner] : [...shared, ...others];
 }
 
 function extractSection(text, startMarker, endMarker) {

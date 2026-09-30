@@ -1,3 +1,6 @@
+import { getQqCommand } from "../qq-command-catalog.js";
+import { formatQqCard, formatQqDone, formatQqUsageSection, formatQqWarning } from "../qq-command-reply.js";
+
 const commandPrefixPattern = /^(?:智能等级|智能|思考强度|qq智能等级|qq智能|qq思考强度|推理摘要|思考摘要|reasoning-summary|人格|agent人格|personality|服务档位|服务等级|service-tier)/i;
 const reasoningEffortChineseLabels = Object.freeze({
   low: "低",
@@ -17,27 +20,29 @@ export async function buildQqCodexRuntimeSettingAction({
   state,
   modelCatalog,
   findModel,
-  persist,
-  actionBeat = ""
+  persist
 } = {}) {
   const normalized = String(command || "").trim();
   if (!normalized || !state?.ai) return null;
-  const prefix = String(actionBeat || "");
+  const usage = formatQqUsageSection(getQqCommand("reasoning"));
+  const settingCard = (title, fields) => ({ reply: formatQqCard({ icon: "🧠", title, fields, sections: [usage] }) });
 
   if (/^(?:智能等级|智能|思考强度|qq智能等级|qq智能|qq思考强度)$/i.test(normalized)) {
     try {
       const models = await modelCatalog.list();
       const selected = findModel(models, state.ai.model);
       const efforts = selected?.supportedReasoningEfforts || [];
-      if (efforts.length === 0) return { reply: `当前模型 ${state.ai.model} 没有返回可选思考强度。` };
+      if (efforts.length === 0) return { reply: formatQqWarning(`当前模型 ${state.ai.model} 没有返回可选思考强度。`) };
       const effortLabels = efforts.map((effort) => reasoningEffortChineseLabels[effort]
         ? `${effort}（${reasoningEffortChineseLabels[effort]}）`
         : effort);
-      return {
-        reply: `当前模型：${selected.displayName}（${selected.model}）\n支持的思考强度：${effortLabels.join("、")}\n当前：${state.ai.reasoningEffort}\n发送 /思考强度 档位 进行切换。`
-      };
+      return settingCard("思考强度", [
+        ["模型", `${selected.displayName}（${selected.model}）`],
+        ["当前", state.ai.reasoningEffort],
+        ["可选", effortLabels]
+      ]);
     } catch (error) {
-      return { reply: `读取思考强度失败：${error.message}` };
+      return { reply: formatQqWarning(`读取思考强度失败：${error.message}`) };
     }
   }
 
@@ -47,36 +52,39 @@ export async function buildQqCodexRuntimeSettingAction({
     const models = await modelCatalog.list().catch(() => []);
     const selected = findModel(models, state.ai.model);
     if (selected && !selected.supportedReasoningEfforts.includes(effort)) {
-      return { reply: `${prefix}当前模型 ${selected.displayName} 不支持 ${effort}。可用：${selected.supportedReasoningEfforts.join("、")}` };
+      return { reply: formatQqWarning(`当前模型 ${selected.displayName} 不支持 ${effort}。`, [`可选：${selected.supportedReasoningEfforts.join("、")}`]) };
     }
     state.ai.reasoningEffort = effort;
-    return { reply: `${prefix}QQ 通道智能等级已切换：${effort}`, beforeSend: persist };
+    return { reply: formatQqDone(`思考强度已切换：${effort}`), beforeSend: persist };
   }
 
   if (/^(?:推理摘要|思考摘要|reasoning-summary)$/i.test(normalized)) {
-    return {
-      reply: `当前推理摘要：${state.ai.reasoningSummary}\n它控制 Codex 是否返回一段可展示的推理过程摘要及其详细度；不是完整内部思维，也不会改变思考强度。\n可选：auto（自动）、concise（简洁）、detailed（详细）、none（关闭）\n发送 /推理摘要 档位 进行切换。`
-    };
+    return settingCard("推理摘要", [
+      ["当前", state.ai.reasoningSummary],
+      ["可选", "auto（自动）、concise（简洁）、detailed（详细）、none（关闭）"],
+      ["说明", "控制 Codex 是否返回可展示的推理摘要；不改变思考强度"]
+    ]);
   }
   const summaryMatch = normalized.match(/^(?:推理摘要|思考摘要|reasoning-summary)\s+(auto|concise|detailed|none|自动|简洁|详细|关闭)$/i);
   if (summaryMatch) {
     state.ai.reasoningSummary = normalizeReasoningSummary(summaryMatch[1]);
     return {
-      reply: `${prefix}Codex 推理摘要已切换：${state.ai.reasoningSummary}（下一轮生效）`,
+      reply: formatQqDone(`推理摘要已切换：${state.ai.reasoningSummary}`, ["下一轮回复生效。"]),
       beforeSend: persist
     };
   }
 
   if (/^(?:人格|agent人格|personality)$/i.test(normalized)) {
-    return {
-      reply: `当前 Agent 人格：${state.ai.personality}\n可选：none（无）、friendly（友好）、pragmatic（务实）\n发送 /人格 档位 进行切换。`
-    };
+    return settingCard("Agent 人格", [
+      ["当前", state.ai.personality],
+      ["可选", "none（无）、friendly（友好）、pragmatic（务实）"]
+    ]);
   }
   const personalityMatch = normalized.match(/^(?:人格|agent人格|personality)\s+(none|friendly|pragmatic|无|友好|务实)$/i);
   if (personalityMatch) {
     state.ai.personality = normalizeCodexPersonality(personalityMatch[1]);
     return {
-      reply: `${prefix}Codex Agent 人格已切换：${state.ai.personality}（下一轮生效）`,
+      reply: formatQqDone(`Agent 人格已切换：${state.ai.personality}`, ["下一轮回复生效。"]),
       beforeSend: persist
     };
   }
@@ -85,15 +93,14 @@ export async function buildQqCodexRuntimeSettingAction({
     try {
       const models = await modelCatalog.list();
       const selected = findModel(models, state.ai.model);
-      const tiers = selected?.serviceTiers || [];
-      const lines = tiers.length
-        ? tiers.map((tier) => `${tier.id}${tier.name && tier.name !== tier.id ? `（${tier.name}）` : ""}`).join("、")
-        : "当前模型没有公布额外档位";
-      return {
-        reply: `当前服务档位：${state.ai.serviceTier || "默认"}\n可选：默认、${lines}\n发送 /服务档位 档位 进行切换。`
-      };
+      const tiers = (selected?.serviceTiers || [])
+        .map((tier) => `${tier.id}${tier.name && tier.name !== tier.id ? `（${tier.name}）` : ""}`);
+      return settingCard("服务档位", [
+        ["当前", state.ai.serviceTier || "默认"],
+        ["可选", ["默认", ...tiers]]
+      ]);
     } catch (error) {
-      return { reply: `读取服务档位失败：${error.message}` };
+      return { reply: formatQqWarning(`读取服务档位失败：${error.message}`) };
     }
   }
   const serviceTierMatch = normalized.match(/^(?:服务档位|服务等级|service-tier)\s+(默认|default|[a-z0-9][a-z0-9_-]{0,63})$/i);
@@ -105,13 +112,15 @@ export async function buildQqCodexRuntimeSettingAction({
       const supported = (selected?.serviceTiers || []).map((item) => item.id);
       if (!supported.includes(tier)) {
         return {
-          reply: `${prefix}当前模型 ${selected?.displayName || state.ai.model} 没有公布服务档位 ${tier}。可用：${supported.length ? supported.join("、") : "默认"}`
+          reply: formatQqWarning(`当前模型 ${selected?.displayName || state.ai.model} 没有公布服务档位 ${tier}。`, [
+            `可选：${["默认", ...supported].join("、")}`
+          ])
         };
       }
     }
     state.ai.serviceTier = tier;
     return {
-      reply: `${prefix}Codex 服务档位已切换：${state.ai.serviceTier || "默认"}（下一轮生效）`,
+      reply: formatQqDone(`服务档位已切换：${state.ai.serviceTier || "默认"}`, ["下一轮回复生效。"]),
       beforeSend: persist
     };
   }
