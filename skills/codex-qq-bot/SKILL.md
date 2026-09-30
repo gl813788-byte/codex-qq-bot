@@ -151,6 +151,10 @@ refactor with a behavior change.
   with the full prompt.
 - Delivery is receipt-bearing. Only confirmed bubbles enter sent-message memory;
   failures are retained separately for the next turn.
+- Every reply turn, including persistent resumes, must receive its current task
+  input/output paths. Ordinary file attachments must already exist under that
+  output directory; rejected paths produce a warning and failed receipt even
+  when the accompanying text was sent. Do not auto-import ordinary files.
 
 ### Proactive interest
 

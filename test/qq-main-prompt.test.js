@@ -3,8 +3,21 @@ import test from "node:test";
 import {
   formatQqApprovedProactivePrompt,
   formatQqMainModelInstructions,
-  formatQqMainToolGuide
+  formatQqMainToolGuide,
+  formatQqTaskWorkspaceContext
 } from "../src/qq-main-prompt.js";
+
+test("every QQ turn identifies its current output directory, including a resumed conversation", () => {
+  const workspace = (id) => ({ root: `/tasks/${id}`, inputDir: `/tasks/${id}/input`, outputDir: `/tasks/${id}/output` });
+  const first = formatQqTaskWorkspaceContext(workspace("first"));
+  const resumed = formatQqTaskWorkspaceContext(workspace("next"));
+  assert.match(first, /输出目录（task output）：\/tasks\/first\/output/);
+  assert.match(resumed, /输出目录（task output）：\/tasks\/next\/output/);
+  assert.doesNotMatch(resumed, /\/tasks\/first/);
+  assert.match(resumed, /工作区根目录和 input 目录中的文件不会发送/);
+  assert.match(resumed, /确认文件存在.*绝对路径填进 attachments/);
+  assert.throws(() => formatQqTaskWorkspaceContext({ root: "/tasks/next" }), TypeError);
+});
 
 test("main prompt delegates agent control to Codex native capabilities", () => {
   const prompt = formatQqMainModelInstructions({

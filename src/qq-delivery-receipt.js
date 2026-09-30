@@ -1,3 +1,25 @@
+export function combineOneBotSendResults(messageResult, fileResults) {
+  const results = [messageResult, ...(Array.isArray(fileResults) ? fileResults : [])].filter(Boolean);
+  const required = results.filter((result) => !result.skipped);
+  const ok = required.length === 0 ? true : required.every((result) => result.ok !== false);
+  const failed = required.find((result) => result.ok === false);
+  const error = failed
+    ? failed.error
+      || failed.body?.message
+      || failed.body?.wording
+      || failed.body?.error
+      || (failed.status ? `HTTP ${failed.status}` : "QQ 投递失败")
+    : null;
+  return {
+    ok,
+    status: messageResult?.status,
+    body: messageResult?.body,
+    error,
+    files: fileResults,
+    results
+  };
+}
+
 export function buildQqDeliveryReceipt(reply = "", send = {}, {
   at = new Date().toISOString()
 } = {}) {
