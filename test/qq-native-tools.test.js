@@ -190,6 +190,15 @@ test("native dispatcher binds the original event and deduplicates writes by call
   assert.equal(toolEvents[0].sourceEvent, event);
 });
 
+test("native runtime AI tasks always submit in the background without changing force", () => {
+  const owner = { event: { isOwner: true } };
+  const admin = { event: { isBotAdmin: true } };
+  assert.equal(mapQqNativeToolToCommand("qq_runtime", "configure", { command: "AI任务 强制 全部" }, owner), "/AI任务 强制 全部 后台");
+  assert.equal(mapQqNativeToolToCommand("qq_runtime", "configure", { command: "AI任务 聊天总结" }, admin), "/AI任务 聊天总结 后台");
+  assert.equal(mapQqNativeToolToCommand("qq_runtime", "configure", { command: "AI任务 强制 后台 全部" }, owner), "/AI任务 强制 后台 全部");
+  assert.equal(mapQqNativeToolToCommand("qq_runtime", "configure", { command: "AI任务 强制 全部" }, { event: {} }), "");
+});
+
 test("native tool observer receives safe failure metadata without changing the result", async () => {
   const toolEvents = [];
   const dispatch = createQqNativeToolDispatcher({

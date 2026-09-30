@@ -3,7 +3,9 @@ import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { createServer } from "node:http";
+import { promisify } from "node:util";
 import test from "node:test";
 
 const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -43,6 +45,29 @@ test("repository ncc saves the chosen agent engine in config/local.env", async (
     assert.equal(run("engine").trim(), "claude");
   } finally {
     await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("ncc sends the force and background parameters and distinguishes acceptance from completion", async () => {
+  let received;
+  const server = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    received = JSON.parse(raw);
+    res.writeHead(202, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, accepted: true, jobId: "job-test", taskId: "all", scopeId: "10001" }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const { stdout } = await promisify(execFile)("zsh", [commandPath, "ai-run", "all", "10001", "--force", "--background", "--full"], {
+      cwd: tmpdir(),
+      env: { ...process.env, GPT_QQ_BOT_HUB_URL: `http://127.0.0.1:${server.address().port}` }
+    });
+    assert.deepEqual(received, { taskId: "all", scopeId: "10001", force: true, fullHistory: true, background: true });
+    assert.match(stdout, /已提交后台，尚未完成/);
+    assert.match(stdout, /任务编号：job-test/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
   }
 });
 

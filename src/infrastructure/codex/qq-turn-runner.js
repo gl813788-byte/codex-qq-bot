@@ -6,6 +6,7 @@ import { runQqCodexTurnWithFusionRecovery } from "../../qq-codex-turn-recovery.j
 import { summarizeProcessDiagnostics } from "../../process-diagnostics.js";
 import { buildQqOperationLogDetails } from "../../qq-operation-log.js";
 import { AGENT_LOG_CATEGORY, getAgentEngine } from "../agent/agent-engines.js";
+import { assertAgentTurnNotNested, runAgentToolCall } from "../agent/agent-tool-context.js";
 
 // Every difference between the two engines lives in this table (display
 // facts and model selection come from agent-engines.js); the runner below
@@ -61,6 +62,11 @@ export function createQqCodexTurnRunner({
   const agent = selectQqAgentEngine(engine);
 
   return function runQqCodexTurn(input, options = {}) {
+    try {
+      assertAgentTurnNotNested();
+    } catch (error) {
+      return Promise.reject(error);
+    }
     const replyScope = options.qqEvent ? getReplyScope(options.qqEvent) : null;
     return limiter.run(async () => {
       if (replyScope?.cancelled) throw createStoppedError();
@@ -68,10 +74,10 @@ export function createQqCodexTurnRunner({
       const previousQuota = state.maintenance.codex.quota;
       let generationId = null;
       const generationIds = new WeakMap();
+      const engineSettings = { ai: state.ai, claudeModel, claudeReasoningEffort };
+      const model = agent.selectModel(engineSettings);
+      const reasoningEffort = agent.selectReasoningEffort(engineSettings);
       try {
-        const engineSettings = { ai: state.ai, claudeModel, claudeReasoningEffort };
-        const model = agent.selectModel(engineSettings);
-        const reasoningEffort = agent.selectReasoningEffort(engineSettings);
         const requestedThreadId = (threadId) => agent.canResume(threadId) ? threadId : null;
         const runAttempt = (attempt = {}) => agent.runTurn({
           codexPath,
@@ -102,7 +108,9 @@ export function createQqCodexTurnRunner({
           timeoutMs: options.timeout,
           replacementIdleTimeoutMs: options.replacementIdleTimeoutMs,
           signal: replyScope?.signal,
-          onDynamicToolCall: options.onDynamicToolCall,
+          onDynamicToolCall: typeof options.onDynamicToolCall === "function"
+            ? (...args) => runAgentToolCall(() => options.onDynamicToolCall(...args))
+            : undefined,
           onServerRequest: options.onServerRequest,
           onNotification: options.onNotification,
           onItem: options.onItem,

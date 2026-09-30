@@ -125,11 +125,16 @@ npm run ncc -- ai-run style-review GROUP_ID --force
 npm run ncc -- ai-run global-persona
 npm run ncc -- ai-run knowledge-review --force
 npm run ncc -- ai-run all GROUP_ID --full
+npm run ncc -- ai-run all GROUP_ID --force --background
 ```
 
 Tasks are `chat-summary` (chat summary plus knowledge extraction), `scope-summary` (scope persona-evidence/memory summary), `style-review` (group style review), `global-persona` (global persona refresh), `knowledge-review` (two-model review of a due low-frequency slang item), and `all`. In QQ, send `/AI任务 TASK`; `/AI任务 强制 TASK` explicitly selects force mode.
 
 A normal manual run bypasses the automatic schedule's due-time gate while retaining normal task data thresholds. `--force` additionally bypasses cooldown and normal sample thresholds. It never bypasses QQ owner/menu permissions, group allowlists, the loopback API restriction, concurrency locks, OneBot identity, or the requirement for actual data. A forced knowledge review only broadens candidate selection and still follows interest-model triage, main-model final review, and stale-change guards; it never deletes directly. These tasks use the current QQ model and existing task deadlines, and require a running Hub.
+
+The new `--background` option combines independently with `--force` and `--full`; QQ uses `/AI任务 强制 后台 全部`, and the local management API accepts `background: true`. Background submission immediately returns HTTP 202 and a job id: accepted does not mean completed. Inspect recent job states through `/AI任务`, `ncc ai-tasks`, or `jobs` in `/api/qq/ai-tasks`; actual results use the existing summary/memory and log paths. The current Hub process retains the latest 50 job records; restarting does not replay manual jobs.
+
+Agent calls to AI tasks through `qq_runtime.configure` automatically submit in the background, preventing a reply from holding the only model slot while synchronously waiting for a summary. Both engines reject synchronous nested model calls from tools with `CODEX_NESTED_TURN_BLOCKED`; background work still uses the original concurrency limiter, task locks, permissions, and deadlines.
 
 ## Restart catch-up for recurring behavior
 

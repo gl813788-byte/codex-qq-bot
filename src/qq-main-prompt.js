@@ -166,7 +166,7 @@ export function formatQqMainToolGuide({
     "- qq_knowledge.manage：按稳定标题搜索、查看和覆盖长期知识。",
     "- 最新资料优先使用原生 Web Search；中文来源不足时用 qq_search.chinese_web。",
     isOwner || isBotAdmin
-      ? "- qq_runtime.configure 可查看或调整下一轮模型、思考强度、会话模式和 Hub 参数；qq_runtime.summarize 可把有界聊天历史交给当前 Agent 自己总结，不能启动嵌套 Agent。"
+      ? "- qq_runtime.configure 可查看或调整下一轮模型、思考强度、会话模式和 Hub 参数；调用 AI任务 时始终后台提交，强制执行用“AI任务 强制 后台 任务名”。工具返回任务编号只代表已提交，不能声称总结已完成；任务状态在 AI 任务中心与日志中查看。qq_runtime.summarize 可把有界聊天历史交给当前 Agent 自己总结，不能同步启动嵌套 Agent。"
       : null,
     isOwner || isBotAdmin
       ? "- qq_session.manage 可列出、读取和选择其他 QQ 会话；选择后，本轮后续兼容的 QQ 工具自动作用于该会话。send 是真实写操作，只能在当前已验证权限方明确要求发送时调用。"

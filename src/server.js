@@ -38,6 +38,7 @@ import {
   qqManualAiTaskCatalog,
   validateQqManualAiTaskRequest
 } from "./qq-manual-ai-task.js";
+import { createQqManualAiTaskRunner } from "./qq-manual-ai-task-runner.js";
 import { formatQqVisualMenu } from "./qq-menu.js";
 import { createConcurrencyLimiter } from "./concurrency-limiter.js";
 import { createCodexModelCatalog, findCodexModel } from "./codex-model-catalog.js";
@@ -864,6 +865,30 @@ let qqPeriodicScheduler = null;
 let qqSelfPersonaRefreshPromise = null;
 let qqKnowledgeDeletionReviewPromise = null;
 const qqManualAiTaskPromises = new Map();
+const qqManualAiTaskRunner = createQqManualAiTaskRunner({
+  running: qqManualAiTaskPromises,
+  execute: ({ taskId, scopeId, ...options }) => executeQqManualAiTask(taskId, scopeId, options),
+  onTask: (task) => trackBackgroundTask(task, () => null),
+  onStarted: (job, request) => logger.info("QQ manual AI task started", {
+    source: request.source,
+    taskId: job.taskId,
+    scopeId: job.scopeId || null,
+    jobId: job.jobId,
+    background: job.background,
+    fullHistory: job.fullHistory,
+    force: job.force
+  }, "learning", request.originEvent ? qqLogContext(request.originEvent) : {}),
+  onCompleted: (result, request) => logger[result.ok ? "info" : "warn"]("QQ manual AI task completed", {
+    source: request.source,
+    taskId: result.taskId,
+    scopeId: result.scopeId || null,
+    jobId: result.jobId,
+    background: Boolean(request.background),
+    outcome: result.ok ? "completed" : result.busy ? "busy" : result.skipped ? "skipped" : "failed",
+    durationMs: result.durationMs,
+    reason: result.reason || null
+  }, "learning", request.originEvent ? qqLogContext(request.originEvent) : {})
+});
 let shuttingDown = false;
 
 function trackBackgroundTask(task, onError = null) {
@@ -5463,6 +5488,7 @@ function buildQqManualAiTaskStatus() {
       usage: task.usage
     })),
     running: [...qqManualAiTaskPromises.keys()],
+    jobs: qqManualAiTaskRunner.snapshot(),
     periodicPersonaRefreshRunning: Boolean(qqSelfPersonaRefreshPromise),
     periodicKnowledgeReviewRunning: Boolean(qqKnowledgeDeletionReviewPromise),
     engine: agentEngine,
@@ -5619,6 +5645,7 @@ async function runQqManualAiTaskRequest({
   originEvent = null,
   fullHistory = false,
   force = false,
+  background = false,
   source = "management-api"
 } = {}) {
   const validation = validateQqManualAiTaskRequest({
@@ -5629,64 +5656,20 @@ async function runQqManualAiTaskRequest({
     knownPrivateScopes: Object.keys(state.qq.memory.recentMessages).filter((id) => id.startsWith("private:"))
   });
   if (!validation.ok) return validation;
-  const lockKey = `${validation.taskId}:${validation.scopeId || "global"}`;
-  if (qqManualAiTaskPromises.has(lockKey)) {
-    return { ok: false, status: 409, busy: true, taskId: validation.taskId, scopeId: validation.scopeId, reason: "同一个 AI 手动任务正在运行。" };
-  }
-  const startedAt = Date.now();
-  const task = executeQqManualAiTask(validation.taskId, validation.scopeId, {
+  return qqManualAiTaskRunner.run({
+    taskId: validation.taskId,
+    scopeId: validation.scopeId,
     originEvent,
     fullHistory,
     force,
+    background,
     source
-  }).then((result) => ({
-    ...result,
-    taskId: result.taskId || validation.taskId,
-    scopeId: result.scopeId ?? validation.scopeId,
-    durationMs: Date.now() - startedAt
-  })).finally(() => {
-    if (qqManualAiTaskPromises.get(lockKey) === task) qqManualAiTaskPromises.delete(lockKey);
   });
-  qqManualAiTaskPromises.set(lockKey, task);
-  logger.info("QQ manual AI task started", {
-    source,
-    taskId: validation.taskId,
-    scopeId: validation.scopeId || null,
-    fullHistory,
-    force
-  }, "learning", originEvent ? qqLogContext(originEvent) : {});
-  try {
-    const result = await task;
-    logger[result.ok ? "info" : "warn"]("QQ manual AI task completed", {
-      source,
-      taskId: validation.taskId,
-      scopeId: validation.scopeId || null,
-      outcome: result.ok ? "completed" : result.busy ? "busy" : "skipped",
-      durationMs: result.durationMs,
-      reason: result.reason || null
-    }, "learning", originEvent ? qqLogContext(originEvent) : {});
-    return result;
-  } catch (error) {
-    logger.error("QQ manual AI task failed", {
-      source,
-      taskId: validation.taskId,
-      scopeId: validation.scopeId || null,
-      durationMs: Date.now() - startedAt,
-      error
-    }, "learning", originEvent ? qqLogContext(originEvent) : {});
-    return {
-      ok: false,
-      status: 500,
-      taskId: validation.taskId,
-      scopeId: validation.scopeId,
-      durationMs: Date.now() - startedAt,
-      reason: error.message
-    };
-  }
 }
 
 function formatQqManualAiTaskResult(result) {
   if (!result) return "AI 手动任务没有返回结果。";
+  if (result.accepted) return `AI 任务已提交后台，尚未完成。\n任务编号：${result.jobId}\n可用 NCC 的 ai-tasks 或任务中心日志查看执行状态。`;
   if (result.taskId === "all" && Array.isArray(result.results)) {
     const rows = result.results.map((item) => formatQqManualAiTaskResult(item).split("\n")[0]);
     const chatSummary = result.results.find((item) => item.taskId === "chat-summary" && item.summary)?.summary;
@@ -5755,6 +5738,7 @@ async function buildQqCommandAction(event) {
       return {
         reply: formatQqManualAiTaskCenter({
           running: [...qqManualAiTaskPromises.keys()].map((key) => key.split(":")[0]),
+          jobs: qqManualAiTaskRunner.snapshot(),
           includeNccHint: hasQqPrivilegedAccess(event)
         })
       };
@@ -5773,6 +5757,7 @@ async function buildQqCommandAction(event) {
       originEvent: event,
       fullHistory: manualAiTask.fullHistory,
       force: manualAiTask.force,
+      background: Boolean(manualAiTask.background),
       source: manualAiTask.force ? "qq-command-force" : "qq-command"
     });
     return { reply: formatQqManualAiTaskResult(result) };
@@ -13439,6 +13424,7 @@ async function handleApi(req, res) {
       scopeId: body.scopeId || body.scope,
       fullHistory: body.fullHistory === true,
       force: body.force === true,
+      background: body.background === true,
       source: body.force === true ? "management-api-force" : "management-api"
     });
     return sendJson(res, Number(result.status || (result.busy ? 409 : 200)), result);

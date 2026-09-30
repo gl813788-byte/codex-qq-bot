@@ -550,7 +550,10 @@ show_ai_tasks() {
         console.log(`   范围：${task.scope}`);
       }
       console.log("");
-      console.log("运行：ncc ai-run <任务> [群号|private:QQ号] [--force] [--full]");
+      for (const job of (data.jobs || []).slice(-10)) {
+        console.log(`任务 ${job.jobId}：${job.taskId} / ${job.state}${job.reason ? ` / ${job.reason}` : ""}`);
+      }
+      console.log("运行：ncc ai-run <任务> [群号|private:QQ号] [--force] [--full] [--background]");
       console.log("强制执行只跳过到期、冷却和常规样本门槛，不绕过权限、白名单、并发锁或数据安全。");
     });
   '
@@ -559,7 +562,7 @@ show_ai_tasks() {
 run_ai_task() {
   command -v curl >/dev/null 2>&1 || die "缺少 curl，无法连接 Hub AI 任务中心。"
   need_node
-  local task_id="${1:-}" scope_id="${2:-}" force="false" full_history="false" arg payload
+  local task_id="${1:-}" scope_id="${2:-}" force="false" full_history="false" background="false" arg payload
   [ -n "$task_id" ] || die "请指定任务。先运行 ncc ai-tasks 查看列表。"
   shift $(( $# > 0 ? 1 : 0 ))
   if [ -n "$scope_id" ] && [[ "$scope_id" != --* ]]; then
@@ -572,14 +575,16 @@ run_ai_task() {
       "") ;;
       --force|-f|强制) force="true" ;;
       --full|--all|完整|全部) full_history="true" ;;
+      --background|后台) background="true" ;;
       *) die "未知 AI 任务参数：$arg" ;;
     esac
   done
-  payload="$(TASK_ID="$task_id" SCOPE_ID="$scope_id" FORCE="$force" FULL_HISTORY="$full_history" node - <<'NODE'
+  payload="$(TASK_ID="$task_id" SCOPE_ID="$scope_id" FORCE="$force" FULL_HISTORY="$full_history" AI_TASK_BACKGROUND="$background" node - <<'NODE'
 const body = {
   taskId: process.env.TASK_ID,
   force: process.env.FORCE === "true",
-  fullHistory: process.env.FULL_HISTORY === "true"
+  fullHistory: process.env.FULL_HISTORY === "true",
+  background: process.env.AI_TASK_BACKGROUND === "true"
 };
 if (process.env.SCOPE_ID) body.scopeId = process.env.SCOPE_ID;
 process.stdout.write(JSON.stringify(body));
@@ -593,9 +598,10 @@ NODE
       process.stdin.on("data", (chunk) => raw += chunk);
       process.stdin.on("end", () => {
         const data = JSON.parse(raw);
-        const state = data.ok ? "完成" : data.busy ? "运行中" : "未执行";
+        const state = data.accepted ? "已提交后台，尚未完成" : data.ok ? "完成" : data.busy ? "运行中" : "未执行";
         console.log(`${data.taskId || "AI task"}：${state}`);
         if (data.scopeId) console.log(`范围：${data.scopeId}`);
+        if (data.jobId) console.log(`任务编号：${data.jobId}`);
         if (data.durationMs != null) console.log(`耗时：${data.durationMs}ms`);
         if (data.summary) console.log(`\n${data.summary}`);
         if (data.reason || data.error) console.log(`原因：${data.reason || data.error}`);
@@ -832,7 +838,7 @@ case "${1:-menu}" in
   logs) shift; print_logs "$@" ;;
   help|-h|--help)
     cat <<EOF
-用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full]|branding|search-config|start|open|logs]
+用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full] [--background]|branding|search-config|start|open|logs]
 首次直接运行 ncc：自动检测环境、安装依赖、验证并填写配置；完成后再运行为常规功能菜单。
 安装中断后重新运行同一个 ncc，会验证并复用已完成的源码、环境、npm 依赖阶段。
 日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
@@ -841,7 +847,7 @@ EOF
     ;;
   *)
     cat <<EOF
-用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full]|branding|search-config|start|open|logs]
+用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full] [--background]|branding|search-config|start|open|logs]
 日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
 项目目录：$PROJECT_DIR
 EOF

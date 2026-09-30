@@ -72,8 +72,10 @@ export function parseQqManualAiTaskCommand(value) {
   if (!tail || /^(?:列表|菜单|帮助|list|help)$/i.test(tail)) {
     return { action: "list", taskId: "", fullHistory: false, force: false };
   }
-  const force = /(?:^|\s)(?:强制|立即|force)(?:\s|$)/i.test(tail);
-  const withoutForce = tail
+  const background = /(?:^|\s)(?:后台|background|--background)(?:\s|$)/i.test(tail);
+  const optionsTail = tail.replace(/(?:^|\s)(?:后台|background|--background)(?=\s|$)/ig, " ").trim();
+  const force = /(?:^|\s)(?:强制|立即|force)(?:\s|$)/i.test(optionsTail);
+  const withoutForce = optionsTail
     .replace(/(?:^|\s)(?:强制|立即|force)(?=\s|$)/ig, " ")
     .trim();
   const fullHistory = /(?:^|\s)(?:全部记录|完整记录|全部历史|完整历史|full)(?:\s|$)/i.test(withoutForce)
@@ -84,8 +86,8 @@ export function parseQqManualAiTaskCommand(value) {
     .trim();
   const taskId = normalizeQqManualAiTaskId(taskText);
   return taskId
-    ? { action: "run", taskId, fullHistory, force }
-    : { action: "unknown", taskId: "", input: tail, fullHistory, force };
+    ? { action: "run", taskId, fullHistory, force, ...(background ? { background: true } : {}) }
+    : { action: "unknown", taskId: "", input: tail, fullHistory, force, ...(background ? { background: true } : {}) };
 }
 
 export function normalizeQqManualAiTaskScope(value, { currentScopeId = "" } = {}) {
@@ -128,6 +130,7 @@ export function validateQqManualAiTaskRequest({
 
 export function formatQqManualAiTaskCenter({
   running = [],
+  jobs = [],
   includeNccHint = false
 } = {}) {
   const runningSet = new Set((Array.isArray(running) ? running : []).map(String));
@@ -142,7 +145,9 @@ export function formatQqManualAiTaskCenter({
     "╰────────────────",
     "",
     ...rows.flatMap((row) => [row, ""]),
+    ...jobs.slice(-5).map((job) => `任务 ${job.jobId}：${job.taskId} · ${({ running: "运行中", completed: "已完成", failed: "失败", skipped: "已跳过", busy: "繁忙" })[job.state] || job.state}${job.reason ? ` · ${job.reason}` : ""}`),
     "强制格式：/AI任务 强制 任务名（跳过到期/冷却，但不绕过权限与数据安全）。",
+    "后台格式：/AI任务 强制 后台 任务名（立即返回任务编号；结果在任务中心和日志中查看）。",
     "提示：任务会真实调用当前配置的模型，并受并发与超时保护。",
     includeNccHint ? "NCC：ncc ai-tasks / ncc ai-run <任务> [范围]" : null
   ].filter((line) => line != null).join("\n").trim();
