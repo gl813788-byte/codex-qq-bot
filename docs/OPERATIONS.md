@@ -194,6 +194,8 @@ npm run ncc -- logs --operation agent.tool --slow 1000 --summary
 npm run ncc -- logs -f
 ```
 
+`npm run ncc -- logs --help` lists every option. The terminal viewer and the dashboard read field labels and value translations from the same table (`src/log-presentation.js`), so a field has one Chinese name everywhere. Each line is `time level category [engine] [trace] message` with the level and category columns aligned by display width, followed by `label：value` fields joined by ` · `; durations are always shown as `ms`/`s`/`m`, and truncation uses `…`. `--compact` keeps each category's key fields; the default `--verbose` shows those first and then every other field. An unknown option or value exits with code 2 and a Chinese error naming the valid choices.
+
 Use `ncc help` for filters supported by the machine-specific controller. API examples:
 
 ```bash

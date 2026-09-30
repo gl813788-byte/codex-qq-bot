@@ -198,6 +198,8 @@ npm run ncc -- logs --operation agent.tool --slow 1000 --summary
 npm run ncc -- logs -f
 ```
 
+`npm run ncc -- logs --help` 列出全部选项。终端查看器和 Dashboard 从同一张表（`src/log-presentation.js`）读取字段名和取值翻译，同一个字段在任何地方都是同一个中文名。每行格式为 `时间 级别 分类 [引擎] [链路] 消息`，级别和分类按显示宽度对齐，后接用 ` · ` 分隔的 `标签：值` 字段；耗时统一显示为 `ms`/`s`/`m`，截断统一用 `…`。`--compact` 只保留各分类的关键字段；默认的 `--verbose` 先显示关键字段，再显示其余全部字段。未知参数或取值会以退出码 2 结束，并给出列出可选值的中文错误。
+
 全局本机控制器支持哪些过滤参数以 `ncc help` 为准。也可读取 API：
 
 ```bash

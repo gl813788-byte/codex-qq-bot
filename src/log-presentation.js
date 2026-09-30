@@ -214,7 +214,30 @@ const detailTranslationsZh = Object.freeze({
   activity_low: "活跃度较低",
   learning_sample_low: "学习样本不足",
   "style reviewer did not return valid FINAL_JSON": "风格复盘模型未返回有效结构化结果",
-  "scope summarizer did not return valid FINAL_JSON": "范围总结模型未返回有效结构化结果"
+  "scope summarizer did not return valid FINAL_JSON": "范围总结模型未返回有效结构化结果",
+  private_long_candidate: "私聊长期未联系，进入主动候选",
+  private_short_candidate: "私聊短期未联系，进入主动候选",
+  private_too_soon: "距上次私聊联系太近",
+  reply_generation_active: "当前正在生成回复",
+  cold_group_time_due: "冷群检查时间已到",
+  "proactive-settings-enabled": "主动设置已开启",
+  no_controllable_generation: "没有可控制的生成任务",
+  startup: "启动时",
+  "model final decision declined proactive reply": "主模型最终决定不主动发言",
+  "model final decision": "主模型最终决定",
+  "two-model approval present": "已获得双模型批准",
+  "conversation advanced during proactive judge": "判定期间对话已推进",
+  "Explicit mention or reply to bot": "@ 或回复了机器人",
+  "Voice message ignored until transcription is available": "语音消息暂无转写，已忽略",
+  "Pending image request matched": "匹配到待看图请求",
+  "cold group interest time due": "冷群兴趣检查时间已到",
+  "private long interest candidate": "私聊长期未联系，进入兴趣候选",
+  "Poked bot": "戳了机器人",
+  knowledge_slang: "命中黑话知识",
+  minute_interval: "分钟间隔到期",
+  message_count: "消息数达到间隔",
+  persona_keyword: "命中人设关键词",
+  bot_conversation_follow_up: "Bot 对话的连续追问"
 });
 
 const detailLabelsZh = Object.freeze({
@@ -329,7 +352,7 @@ const detailLabelsZh = Object.freeze({
   range: "查询范围",
   scope: "知识范围",
   groups: "关联群",
-  messageId: "消息",
+  messageId: "消息 ID",
   messageType: "消息类型",
   entryId: "知识条目 ID",
   variantId: "范围内容 ID",
@@ -386,13 +409,89 @@ const detailLabelsZh = Object.freeze({
   decisionReason: "判断原因",
   durationMs: "耗时",
   totalDurationMs: "总耗时",
-  rememberDurationMs: "记忆用时",
-  decisionDurationMs: "路由用时",
-  generationDurationMs: "生成用时",
-  sendDurationMs: "发送用时",
-  memoryDurationMs: "落盘用时",
-  modelDurationMs: "模型用时",
+  rememberDurationMs: "记忆耗时",
+  decisionDurationMs: "路由耗时",
+  generationDurationMs: "生成耗时",
+  sendDurationMs: "发送耗时",
+  memoryDurationMs: "落盘耗时",
+  modelDurationMs: "模型耗时",
   modelTemperature: "模型温度",
+  replyChars: "回复字符数",
+  bubbleCount: "气泡数",
+  sendStatus: "发送状态",
+  providers: "搜索顺序",
+  preset: "搜索预设",
+  layer: "记忆层",
+  count: "数量",
+  proactive: "是否主动发言",
+  alreadyRemembered: "是否已记入记忆",
+  modelDeclinedReply: "模型是否选择沉默",
+  failedBubbleCount: "失败气泡数",
+  atMentions: "@ 提及",
+  fileCount: "文件数",
+  nextCheckAfterMs: "下次检查间隔",
+  eligible: "是否符合条件",
+  probability: "触发概率",
+  frequency: "联系频率",
+  adaptiveReason: "自适应原因",
+  lastCheckAt: "上次检查时间",
+  lastProactiveAt: "上次主动时间",
+  awaitingHuman: "是否等待真人回应",
+  socialHoursSource: "活跃时段来源",
+  relationshipScore: "关系分",
+  personaKeywordScore: "人设关键词分",
+  personaKeywordHits: "人设关键词命中",
+  personaNameMatched: "是否提到 Bot 名字",
+  recentContextKeywordHits: "近期上下文关键词命中",
+  relationshipMessagesSinceInteraction: "上次互动后消息数",
+  relationshipMinutesSinceInteraction: "上次互动后分钟数",
+  relationshipInterestBoost: "关系兴趣加成",
+  relationshipCadenceMessages: "关系节奏消息数",
+  relationshipCadenceMinutes: "关系节奏分钟数",
+  targetIsBot: "目标是否为 Bot",
+  cwd: "工作目录",
+  qqGenerationId: "QQ 生成编号",
+  impression: "印象记忆",
+  "short-term": "短期记忆",
+  knowledge: "长期知识",
+  "unified-person-profile": "统一人物档案",
+  "unified-person-session": "统一人物会话",
+  unified: "统一记忆",
+  errors: "错误列表",
+  expandLevel: "展开层级",
+  replacementIdleTimeoutMs: "替代回答空闲超时",
+  method: "请求方法",
+  mode: "模式",
+  version: "版本",
+  lastInteractionAt: "上次互动时间",
+  messagesSinceInteraction: "互动后消息数",
+  minutesSinceInteraction: "互动后分钟数",
+  progressType: "进度类型",
+  progressText: "进度内容",
+  targetSenderId: "目标发送者",
+  targetMessageId: "目标消息 ID",
+  invalidTarget: "无效目标",
+  revision: "版本号",
+  summarizedScopes: "已总结范围数",
+  interestKeywordCount: "兴趣关键词数",
+  interestCount: "兴趣数",
+  enhancerEnabled: "QQ 增强是否开启",
+  webLookupEnabled: "联网查询是否开启",
+  proactiveEnabled: "主动响应是否开启",
+  judgeTimeoutMs: "判定超时",
+  judgeMaxRecentMessages: "判定上下文条数",
+  addressingMode: "称呼方式",
+  addressingProbability: "称呼概率",
+  reviewId: "审核编号",
+  historyPages: "历史页数",
+  historyReason: "历史读取原因",
+  mergedMessageCount: "合并消息数",
+  reviewedMessageCount: "已审阅消息数",
+  signal: "信号",
+  preview: "内容预览",
+  activeCodexChildren: "运行中的 Agent 子进程",
+  activeQqGenerations: "进行中的 QQ 生成",
+  closeMode: "关闭方式",
   timeoutMs: "时限",
   deadlineRenewalCount: "截止时间续期次数",
   grantedMinutes: "批准增加分钟数",
@@ -453,7 +552,7 @@ const detailLabelsZh = Object.freeze({
   interestEvidenceConcerns: "兴趣模型证据疑点",
   interestModelOutput: "兴趣模型具体输出",
   mainModel: "主模型",
-  mainModelDurationMs: "主模型用时",
+  mainModelDurationMs: "主模型耗时",
   mainModelDecision: "主模型最终决定",
   mainModelOutput: "主模型具体输出",
   outputChars: "输出字符数",
@@ -483,13 +582,13 @@ const detailLabelsZh = Object.freeze({
   topicStartReason: "启动判定理由",
   topicStartJudgeProvider: "启动判定服务",
   topicStartJudgeModel: "启动判定模型",
-  topicStartJudgeDurationMs: "启动判定用时",
+  topicStartJudgeDurationMs: "启动判定耗时",
   privateStartShouldStart: "是否启动私聊联系",
   privateStartInterest: "私聊启动兴趣分",
   privateStartReason: "私聊启动判定理由",
   privateStartJudgeProvider: "私聊启动判定服务",
   privateStartJudgeModel: "私聊启动判定模型",
-  privateStartJudgeDurationMs: "私聊启动判定用时",
+  privateStartJudgeDurationMs: "私聊启动判定耗时",
   spontaneityRoll: "拟人波动值",
   messageCount: "待检查消息",
   judgeEveryMessages: "消息间隔",
@@ -672,7 +771,7 @@ const detailValuesZh = Object.freeze({
     "fusion-buffer": "进入追问融合缓冲", "fuse-and-steer": "融合后补充当前回答",
     "fuse-and-restart": "融合后截断并续答",
     "fuse-before-send": "发送前统一融合", "interest-batch": "连续对话兴趣合批",
-    "extend-quiet-window": "达到条数上限后重新等待静默"
+    "extend-quiet-window": "达到条数上限后重新等待静默", "semantic-search": "语义搜索"
   },
   operation: {
     list: "列出", search: "搜索", view: "查看", status: "查看状态", add: "添加", edit: "修改", delete: "删除", clear: "清空",
@@ -695,7 +794,32 @@ const detailValuesZh = Object.freeze({
     started: "已开始", stopped: "已暂停", success: "成功", denied: "已拒绝", timeout: "超时", unknown: "未知",
     superseded: "候选已变化", "kept_due_to_activity": "因新活动而保留", "candidate-selected": "已选出候选", "no-candidate": "没有候选",
     frozen: "已冻结并关闭入口", extended: "已延长静默等待", fallback: "已使用降级结果",
-    synchronized: "已同步", skipped: "已跳过", initialized: "已初始化"
+    synchronized: "已同步", skipped: "已跳过", initialized: "已初始化",
+    sent: "已发送", ignored: "已忽略", silent: "主动沉默", command: "指令已处理",
+    delivered: "已送达", busy: "繁忙"
+  },
+  layer: {
+    "short-term": "短期记忆", impression: "印象记忆", knowledge: "长期知识", unified: "统一记忆",
+    "unified-person-profile": "统一人物档案", "unified-person-session": "统一人物会话"
+  },
+  frequency: { high: "高", medium: "中", low: "低" },
+  modelFinishReason: { stop: "正常结束", length: "达到长度上限" },
+  socialHoursSource: { learned: "学习得出", fallback: "默认时段" },
+  mode: { quote: "引用回复", plain: "普通回复", mention: "@ 提及" },
+  addressingMode: { plain: "普通称呼" },
+  progressType: { commentary: "过程说明" },
+  closeMode: { closed: "正常关闭" },
+  status: {
+    found_results: "找到了结果", no_results: "没有解析到结果", skipped: "已跳过", failed: "失败"
+  },
+  messageType: {
+    group: "群消息", private: "私聊", group_message: "群消息", private_message: "私聊", group_at: "群里 @ 机器人",
+    group_poke: "群里戳一戳"
+  },
+  postType: { message: "消息", notice: "通知", request: "请求", meta_event: "元事件" },
+  noticeType: {
+    notify: "提醒通知", group_recall: "群消息撤回", friend_recall: "好友消息撤回",
+    group_increase: "群成员增加", group_decrease: "群成员减少"
   },
   actorRole: { owner: "主人", administrator: "Bot 管理员", user: "普通用户", system: "系统" },
   targetType: { group: "群聊", private: "私聊", user: "QQ 用户", all: "全部", unknown: "未知" },
@@ -709,7 +833,8 @@ const detailValuesZh = Object.freeze({
     "qq-conversation-follow-up": "QQ 连续对话", "style-review": "语言风格复盘",
     "qq-command": "QQ 手动任务", "qq-command-force": "QQ 强制任务",
     "management-api": "NCC 手动任务", "management-api-force": "NCC 强制任务",
-    "manual-scope-summary": "手动范围总结", manual: "手动执行", "manual-force": "强制执行"
+    "manual-scope-summary": "手动范围总结", manual: "手动执行", "manual-force": "强制执行",
+    initial: "初次加载", periodic: "周期任务", "fused-follow-up": "融合追问", "manual-chat-summary": "手动聊天总结"
   },
   kind: { slang: "黑话", note: "普通知识", unknown: "未知" },
   type: {
@@ -717,7 +842,10 @@ const detailValuesZh = Object.freeze({
     all: "全部", "scope-summary": "范围总结", unknown: "未知"
   },
   scopeType: { global: "全局", group: "群", member: "人物", "group-member": "群内人物", private: "私聊", all: "全部" },
-  phase: { collecting: "收集中", judging: "判定中", approved: "已批准", declined: "已拒绝", closed: "已关闭" },
+  phase: {
+    collecting: "收集中", judging: "判定中", approved: "已批准", declined: "已拒绝", closed: "已关闭",
+    short: "短期", middle: "中期", long: "长期"
+  },
   freezeReason: {
     quiet_window_pending: "正在等待 5 秒静默窗口",
     message_limit_reached_waiting_for_quiet: "已达消息上限，继续等待 5 秒静默"
@@ -757,6 +885,7 @@ const detailValuesZh = Object.freeze({
   },
   triggerMode: {
     message: "消息数", time: "分钟", explicit: "@ 或回复", message_count: "消息数", minute_interval: "分钟",
+    cold_time: "冷群定时", private_long: "私聊长期未联系",
     conversation_follow_up_batch_collecting: "连续对话静默合批中",
     conversation_follow_up_batch_capped: "连续对话已达条数上限",
     conversation_follow_up_batch_closed: "连续对话批次已关闭",
@@ -838,7 +967,8 @@ export function formatLogDetailText(value, locale = "zh") {
     .replace(/^activity_unknown$/i, "当前活跃度未知")
     .replace(/^model judge failed:\s*/i, "判定模型失败：")
     .replace(/OpenRouter judge did not return valid FINAL_JSON/gi, "OpenRouter 判定模型未返回有效结构化结果")
-    .replace(/OpenRouter judge produced no new token for (\d+)ms/gi, "OpenRouter 判定模型连续 $1ms 未返回新 token")
+    .replace(/(\w+) judge produced no new token for (\d+)ms/gi, "$1 判定模型连续 $2ms 未返回新 token")
+    .replace(/(\w+) judge did not return valid structured JSON/gi, "$1 判定模型未返回有效结构化结果")
     .replace(/attempt timed out after (\d+)ms/gi, "单次请求超过 $1ms")
     .replace(/search timed out/gi, "整次搜索超时")
     .replace(/returned HTTP (\d+)/gi, "返回 HTTP $1")
@@ -889,7 +1019,7 @@ export function formatLogDetailValue(value, key = "", locale = "zh") {
   const normalizedKey = String(key || "");
   const translated = detailValuesZh[normalizedKey]?.[value];
   if (translated) return translated;
-  if (["reason", "decisionReason", "triggerReason", "error", "modelError"].includes(normalizedKey)) {
+  if (/^(?:reason|error)$|(?:Reason|Error)$/.test(normalizedKey)) {
     return formatLogDetailText(value, locale);
   }
   if (normalizedKey === "source" && value.toLowerCase() === "onebot") return "OneBot";

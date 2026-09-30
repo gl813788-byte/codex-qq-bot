@@ -3,35 +3,27 @@ import { open, readdir, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
   compactLogDisplayText,
-  formatLogDetailValue as localizeLogDetailValue,
-  formatLogDetailText,
+  formatLogDetailValue,
   formatLogError,
   formatLogMessage,
-  getLogDetailLabel
+  getLogCategoryLabel,
+  getLogDetailLabel,
+  getLogLevelLabel
 } from "../src/log-presentation.js";
 import { summarizeProcessDiagnostics } from "../src/process-diagnostics.js";
 import {
+  AGENT_ENGINE_IDS,
   canonicalLogCategory,
   expandLogCategoryFilter,
   getAgentEngine,
   resolveLogEngine
 } from "../src/infrastructure/agent/agent-engines.js";
 
-const levelNames = { debug: "调试", info: "信息", success: "成功", warn: "警告", error: "错误" };
-const categoryNames = {
-  system: "系统",
-  qq: "QQ",
-  onebot: "OneBot",
-  agent: "智能体",
-  codex: "Codex",
-  web: "接口",
-  search: "搜索",
-  interest: "兴趣",
-  learning: "学习",
-  memory: "记忆",
-  command: "指令",
-  lifecycle: "流程"
-};
+// Every label and value comes from src/log-presentation.js, the table the
+// dashboard also uses, so the terminal and browser show the same words.
+const logLevels = ["debug", "info", "success", "warn", "error"];
+const logCategories = ["system", "qq", "onebot", "agent", "codex", "web", "search", "interest", "learning", "memory", "command", "lifecycle"];
+const categoryColumnWidth = 6;
 const colors = {
   reset: "\x1b[0m",
   dim: "\x1b[2m",
@@ -75,9 +67,49 @@ const categoryColors = {
 const engineColors = { codex: "brightGreen", claude: "brightYellow" };
 const traceColors = ["brightBlue", "brightCyan", "brightMagenta", "brightYellow", "green", "magenta"];
 
-const options = parseArgs(process.argv.slice(2));
+// --compact shows only these fields, in this order. --verbose (the default)
+// shows them first, then every other field in logged order.
+const keyFieldsByCategory = {
+  lifecycle: ["outcome", "messageType", "groupId", "triggerMode", "decisionReason", "totalDurationMs", "durationMs", "error"],
+  search: ["query", "reason", "provider", "providers", "durationMs", "resultCount", "error"],
+  interest: [
+    "shouldReply", "reason", "triggerMode", "messageCount", "judgeEveryMessages",
+    "activityAdvancedDuringJudge", "additionalActivityCount", "ruleScore", "labels", "blockers"
+  ]
+};
+const defaultKeyFields = [
+  "operation", "action", "outcome", "status", "code", "errorCode", "error", "reason", "source", "url",
+  "durationMs", "totalDurationMs", "modelDurationMs", "modelTemperature", "deadlineRenewalCount", "resultCount",
+  "scopeType", "scopeId", "sourceScopeId", "targetScopeId", "targetType", "actorRole", "actorUserId",
+  "toolNamespace", "toolName", "toolAction", "toolCallId", "toolRound",
+  "entryId", "variantId", "title", "titles", "matchedTerms",
+  "appliedCount", "rejectedCount", "removedCount", "entryCount", "scopeCount", "titleCount", "slangCount", "variantCount",
+  "matchedTitleCount", "recordedHitCount", "contextExtendedCount", "hitCount", "totalHits", "recentHits", "retainedOccurrenceCount",
+  "deleted", "modelDecision", "modelOutput", "outputChars", "outputTruncated",
+  "reviewPipeline", "reviewStage", "interestRecommendation", "interestComplexity", "interestEvidenceConcerns", "interestModelOutput",
+  "mainModel", "mainModelDurationMs", "mainModelDecision", "mainModelOutput",
+  "contentMode", "researchRounds", "researchToolCalls", "researchToolKinds", "researchQueries", "failedToolCalls",
+  "proactiveKind", "interestGateRequired", "interestGateApproved", "interestGateProvider", "interestGateModel", "interestGateTask", "mainContentRequired",
+  "topicStartShouldStart", "topicStartMode", "topicStartInterest", "topicStartReason", "topicStartJudgeProvider", "topicStartJudgeModel", "topicStartJudgeDurationMs",
+  "privateStartShouldStart", "privateStartInterest", "privateStartReason", "privateStartJudgeProvider", "privateStartJudgeModel", "privateStartJudgeDurationMs", "spontaneityRoll"
+];
+
+class CliError extends Error {}
+
+let options;
+try {
+  options = parseArgs(process.argv.slice(2));
+} catch (error) {
+  if (!(error instanceof CliError)) throw error;
+  process.stderr.write(`错误：${error.message}\n发送 --help 查看全部选项。\n`);
+  process.exit(2);
+}
+if (options.help) {
+  process.stdout.write(usage());
+  process.exit(0);
+}
 if (!options.file) {
-  usage();
+  process.stderr.write(usage());
   process.exit(2);
 }
 
@@ -87,6 +119,7 @@ if (options.follow) await followFile(options);
 function parseArgs(args) {
   const output = {
     file: "",
+    help: false,
     tail: 80,
     follow: false,
     level: "",
@@ -107,20 +140,33 @@ function parseArgs(args) {
     summary: false,
     json: false
   };
+  const valueOf = (index, flag) => {
+    const value = args[index];
+    if (value == null || value === "" || (value.startsWith("-") && !/^-\d/.test(value))) {
+      throw new CliError(`${flag} 需要一个值`);
+    }
+    return value;
+  };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (!output.file && !arg.startsWith("-")) {
       output.file = arg;
+    } else if (arg === "-h" || arg === "--help") {
+      output.help = true;
     } else if (arg === "-n" || arg === "--tail") {
-      output.tail = Math.max(1, Math.min(1000, Number(args[++index] || 80) || 80));
+      const tail = Number(valueOf(++index, arg));
+      if (!Number.isInteger(tail) || tail < 1) throw new CliError(`${arg} 需要正整数`);
+      output.tail = Math.min(1000, tail);
     } else if (arg === "-f" || arg === "--follow") {
       output.follow = true;
     } else if (arg === "--level") {
-      output.level = String(args[++index] || "").toLowerCase();
+      output.level = validateChoices(valueOf(++index, arg), logLevels, arg);
+    } else if (arg === "--errors") {
+      output.level = "warn,error";
     } else if (arg === "--category") {
-      output.category = String(args[++index] || "").toLowerCase();
+      output.category = validateChoices(valueOf(++index, arg), logCategories, arg);
     } else if (arg === "--engine") {
-      output.engine = String(args[++index] || "").toLowerCase();
+      output.engine = validateChoices(valueOf(++index, arg), AGENT_ENGINE_IDS, arg);
     } else if (arg === "--plain") {
       output.plain = true;
     } else if (arg === "--color" || arg === "--colour") {
@@ -132,38 +178,49 @@ function parseArgs(args) {
     } else if (arg === "--compact" || arg === "--no-verbose") {
       output.verbose = false;
     } else if (arg === "--trace") {
-      output.traceId = String(args[++index] || "").toLowerCase();
+      output.traceId = valueOf(++index, arg).toLowerCase();
     } else if (arg === "--search" || arg === "--query" || arg === "-q") {
-      output.query = String(args[++index] || "").toLowerCase();
+      output.query = valueOf(++index, arg).toLowerCase();
     } else if (arg === "--group") {
-      output.groupId = String(args[++index] || "");
+      output.groupId = valueOf(++index, arg);
     } else if (arg === "--sender") {
-      output.senderId = String(args[++index] || "");
+      output.senderId = valueOf(++index, arg);
     } else if (arg === "--scope") {
-      output.scopeId = String(args[++index] || "").toLowerCase();
+      output.scopeId = valueOf(++index, arg).toLowerCase();
     } else if (arg === "--operation" || arg === "--op") {
-      output.operation = String(args[++index] || "").toLowerCase();
+      output.operation = valueOf(++index, arg).toLowerCase();
     } else if (arg === "--since") {
-      output.sinceMs = parseTimeFilter(args[++index], { relativeFromNow: true });
+      output.sinceMs = parseTimeFilter(valueOf(++index, arg), { relativeFromNow: true });
     } else if (arg === "--until") {
-      output.untilMs = parseTimeFilter(args[++index]);
+      output.untilMs = parseTimeFilter(valueOf(++index, arg));
     } else if (arg === "--slow") {
       const next = args[index + 1];
-      output.minDurationMs = next && !next.startsWith("-")
-        ? Math.max(1, Number(args[++index]) || 1000)
-        : 1000;
-    } else if (arg === "--errors") {
-      output.level = "warn,error";
+      if (next && !next.startsWith("-")) {
+        const threshold = Number(args[++index]);
+        if (!Number.isFinite(threshold) || threshold <= 0) throw new CliError("--slow 的阈值需要是正数毫秒");
+        output.minDurationMs = threshold;
+      } else {
+        output.minDurationMs = 1000;
+      }
     } else if (arg === "--summary") {
       output.summary = true;
     } else if (arg === "--json") {
       output.json = true;
       output.plain = true;
     } else {
-      throw new Error(`Unknown argument: ${arg}`);
+      throw new CliError(`未知参数 ${arg}`);
     }
   }
   return output;
+}
+
+function validateChoices(value, allowed, flag) {
+  const requested = [...splitFilter(value)];
+  const unknown = requested.filter((item) => !allowed.includes(item));
+  if (requested.length === 0 || unknown.length > 0) {
+    throw new CliError(`${flag} 不支持 ${unknown.join(",") || value}；可选：${allowed.join(",")}`);
+  }
+  return requested.join(",");
 }
 
 async function printExisting(options) {
@@ -218,7 +275,7 @@ async function followFile(options) {
   let offset = initial?.size || 0;
   let fileIdentity = initial ? getFileIdentity(initial) : "";
   let reading = false;
-  process.stdout.write(color(`正在跟随日志: ${options.file}\n`, "dim", options));
+  process.stdout.write(color(`正在跟随日志：${options.file}（Ctrl+C 退出）\n`, "dim", options));
   setInterval(async () => {
     if (reading) return;
     reading = true;
@@ -253,7 +310,7 @@ async function followFile(options) {
       }
     } catch (error) {
       if (error?.code !== "ENOENT") {
-        process.stderr.write(`日志跟随读取失败: ${error.message}\n`);
+        process.stderr.write(`日志跟随读取失败：${error.message}\n`);
       }
     } finally {
       reading = false;
@@ -364,20 +421,19 @@ function renderEntry(entry, options) {
   const level = String(entry.level || "info").toLowerCase();
   const category = canonicalLogCategory(entry.category) || "system";
   const engine = resolveLogEngine(entry);
-  const ts = formatLocalTimestamp(entry.ts);
-  const levelColor = colorForLevel(level);
+  const levelColor = levelColors[level] || "white";
   const categoryColor = colorForCategory(entry, category);
-  const messageColor = colorForMessage(entry, level, category);
+  const messageColor = ["error", "warn", "success"].includes(level) ? levelColor : categoryColor;
   const header = [
-    color(ts.padEnd(19, " "), "dim", options),
-    color((levelNames[level] || level).padEnd(2, " "), levelColor, options),
-    color((categoryNames[category] || category).padEnd(7, " "), categoryColor, options),
-    engine ? color(getAgentEngine(engine).name, engineColors[engine] || "white", options) : null
+    color(formatLocalTimestamp(entry.ts), "dim", options),
+    color(padDisplay(getLogLevelLabel(level), 4), levelColor, options),
+    color(padDisplay(getLogCategoryLabel(category), categoryColumnWidth), categoryColor, options),
+    engine ? color(getAgentEngine(engine).name, engineColors[engine] || "white", options) : null,
+    entry.traceId ? color(`[${shortTraceId(entry.traceId)}]`, colorForTrace(entry.traceId), options) : null,
+    color(formatLogMessage(entry.message || "", "zh"), messageColor, options)
   ].filter(Boolean).join(" ");
-  const message = color(humanMessage(entry.message || ""), messageColor, options);
-  const trace = entry.traceId ? color(`[${shortTraceId(entry.traceId)}]`, colorForTrace(entry.traceId), options) : "";
-  const details = formatDetails(entry, options);
-  return `${header}${trace ? ` ${trace}` : ""} ${message}${details ? ` ${colorDetails(details, entry, options)}` : ""}`;
+  const fields = collectFields(entry, options);
+  return fields.length > 0 ? `${header} ${renderFields(fields, entry, options)}` : header;
 }
 
 function isDefaultVisible(entry, level) {
@@ -385,18 +441,9 @@ function isDefaultVisible(entry, level) {
     || ["Codex QQ Bot hub started", "QQ web lookup started"].includes(String(entry.message || ""));
 }
 
-function colorForLevel(level) {
-  return levelColors[level] || "white";
-}
-
 function colorForCategory(entry, category) {
   if (isAtBotEntry(entry)) return "brightYellow";
   return categoryColors[category] || "white";
-}
-
-function colorForMessage(entry, level, category) {
-  if (["error", "warn", "success"].includes(level)) return colorForLevel(level);
-  return colorForCategory(entry, category);
 }
 
 function colorForTrace(traceId) {
@@ -413,304 +460,125 @@ function isAtBotEntry(entry) {
     || details.hasSelfAtSegment === true;
 }
 
-function humanMessage(message) {
-  return formatLogMessage(message, "zh");
-}
-
-function formatDetails(entry, options) {
-  const details = entry.details || {};
-  if (!details || Object.keys(details).length === 0) return "";
-  if (entry.category === "search") return formatSearchDetails(details, options);
-  if (entry.category === "interest") return formatInterestDetails(details, options);
-  if (entry.category === "lifecycle") return formatLifecycleDetails(details, options);
-  return formatGenericDetails(details, options);
-}
-
-function formatLifecycleDetails(details, options) {
-  const parts = [];
-  pushPart(parts, "结果", humanOutcome(details.outcome || details.status));
-  pushPart(parts, "场景", humanDetailValue("messageType", details.messageType));
-  pushPart(parts, "群", details.groupId);
-  if (options.verbose) pushPart(parts, "发送者", details.senderId);
-  pushPart(parts, "触发", humanTriggerMode(details.triggerMode) || formatLogDetailText(details.decisionReason, "zh"));
-  pushPart(parts, "总用时", formatMs(details.totalDurationMs || details.durationMs));
-  if (options.verbose) {
-    pushPart(parts, "记忆", formatMs(details.rememberDurationMs));
-    pushPart(parts, "路由", formatMs(details.decisionDurationMs));
-    pushPart(parts, "生成", formatMs(details.generationDurationMs));
-    pushPart(parts, "发送", formatMs(details.sendDurationMs));
-    pushPart(parts, "落盘", formatMs(details.memoryDurationMs));
-    pushPart(parts, "回复字符", details.replyChars);
-    pushPart(parts, "气泡", details.bubbleCount);
-    pushPart(parts, "排队", details.queuedCount);
-    pushPart(parts, "发送状态", details.sendStatus);
-    pushPart(parts, "错误", humanError(details.error));
-  }
-  return parts.join(" · ");
-}
-
-function formatSearchDetails(details, options) {
-  const parts = [];
-  pushPart(parts, "查询", options.verbose ? details.query : compactText(details.query, 80));
-  pushPart(parts, "触发原因", formatLogDetailText(details.reason, "zh"));
-  pushPart(parts, "厂商", details.provider);
-  if (options.verbose && details.rawProvider) pushPart(parts, "厂商代码", details.rawProvider);
-  if ((options.verbose || !details.provider) && Array.isArray(details.providers) && details.providers.length > 0) {
-    pushPart(parts, "搜索顺序", details.providers.join(" -> "));
-  }
-  if (options.verbose) pushPart(parts, "预设", details.preset);
-  if (options.verbose && details.status) pushPart(parts, "状态", humanStatus(details.status));
-  pushPart(parts, "用时", formatMs(details.durationMs));
-  if (options.verbose) {
-    pushPart(parts, "总超时", formatMs(details.timeoutMs));
-    pushPart(parts, "单次超时", formatMs(details.attemptTimeoutMs));
-  }
-  if (details.resultCount != null) pushPart(parts, "结果", `${details.resultCount} 条`);
-  if (options.verbose && Array.isArray(details.results) && details.results.length > 0) {
-    pushPart(parts, "结果详情", details.results.map(formatSearchResult).join("；"));
-  }
-  pushPart(parts, "错误", humanError(details.error));
-  if (options.verbose && Array.isArray(details.providerErrors) && details.providerErrors.length > 0) {
-    pushPart(parts, "厂商错误", details.providerErrors.map(humanError).join("；"));
-  }
-  return parts.join(" · ");
-}
-
-function formatInterestDetails(details, options) {
-  const parts = [];
-  pushPart(parts, "是否回复", formatDetailValue(details.shouldReply));
-  pushPart(parts, "触发原因", formatLogDetailText(details.reason, "zh"));
-  pushPart(parts, "触发方式", humanTriggerMode(details.triggerMode));
-  if (details.messageCount != null) {
-    pushPart(parts, "待检查消息", `${details.messageCount}${details.judgeEveryMessages ? ` / ${details.judgeEveryMessages}` : ""}`);
-  }
-  if (options.verbose && details.judgeEveryMinutes != null) pushPart(parts, "分钟间隔", `${details.judgeEveryMinutes} 分钟`);
-  if (options.verbose && details.messageCountRemaining != null) pushPart(parts, "下轮剩余", details.messageCountRemaining);
-  if (details.activityAdvancedDuringJudge) {
-    pushPart(parts, "判定期新增活动", `${details.additionalActivityCount || 0} 条（已纳入上下文）`);
-  }
-  pushPart(parts, "规则分", details.ruleScore);
-  if (options.verbose) {
-    pushPart(parts, "直呼", details.directness);
-    pushPart(parts, "偏好", details.likedTopicScore);
-    pushPart(parts, "上下文", details.contextScore);
-    pushPart(parts, "惩罚", details.penalty);
-  }
-  if (Array.isArray(details.labels) && details.labels.length > 0) pushPart(parts, "命中", details.labels.map((item) => formatLogDetailText(item, "zh")).join(", "));
-  if (Array.isArray(details.blockers) && details.blockers.length > 0) pushPart(parts, "阻断", details.blockers.map((item) => formatLogDetailText(item, "zh")).join(", "));
-  if (options.verbose) {
-    pushPart(parts, "消息", details.text);
-    pushPart(parts, "模型", details.judgeModel);
-    pushPart(parts, "模型可用", formatDetailValue(details.judgeApiKeyConfigured));
-    pushPart(parts, "模型判断", details.modelShouldReply == null ? "" : formatDetailValue(details.modelShouldReply));
-    pushPart(parts, "模型兴趣", details.modelInterest);
-    pushPart(parts, "语义判断", details.modelSemanticIntent);
-    pushPart(parts, "模型理由", details.modelReason);
-    pushPart(parts, "回复风格", details.modelReplyStyle);
-    pushPart(parts, "模型用时", formatMs(details.modelDurationMs));
-    pushPart(parts, "结束原因", details.modelFinishReason);
-    pushPart(parts, "流式片段", details.modelStreamedTokenChunks);
-    pushPart(parts, "推理字符", details.modelReasoningLength);
-    pushPart(parts, "请求次数", details.modelAttemptCount);
-    pushPart(parts, "格式重试", details.modelFormatRetryCount);
-    pushPart(parts, "结构化输出", details.modelStructuredOutput == null ? "" : formatDetailValue(details.modelStructuredOutput));
-    pushPart(parts, "模型错误", humanError(details.modelError));
-  }
-  return parts.join(" · ");
-}
-
-function formatGenericDetails(details, options) {
-  const compactKeys = new Set([
-    "durationMs", "totalDurationMs", "modelDurationMs", "modelTemperature", "deadlineRenewalCount", "resultCount", "status", "outcome", "code", "error", "reason", "url",
-    "source", "action", "operation", "scopeType", "scopeId", "sourceScopeId", "targetScopeId", "targetType",
-    "actorRole", "actorUserId", "toolNamespace", "toolName", "toolAction", "toolCallId", "toolRound", "errorCode",
-    "entryId", "variantId", "title", "titles", "matchedTerms",
-    "appliedCount", "rejectedCount", "removedCount", "entryCount", "scopeCount", "titleCount", "slangCount", "variantCount",
-    "matchedTitleCount", "recordedHitCount", "contextExtendedCount", "hitCount", "totalHits", "recentHits", "retainedOccurrenceCount",
-    "deleted", "modelDecision", "modelOutput", "outputChars", "outputTruncated",
-    "reviewPipeline", "reviewStage", "interestRecommendation", "interestComplexity", "interestEvidenceConcerns", "interestModelOutput",
-    "mainModel", "mainModelDurationMs", "mainModelDecision", "mainModelOutput",
-    "contentMode", "researchRounds", "researchToolCalls", "researchToolKinds", "researchQueries", "failedToolCalls",
-    "proactiveKind", "interestGateRequired", "interestGateApproved", "interestGateProvider", "interestGateModel", "interestGateTask", "mainContentRequired",
-    "topicStartShouldStart", "topicStartMode", "topicStartInterest", "topicStartReason", "topicStartJudgeProvider", "topicStartJudgeModel", "topicStartJudgeDurationMs",
-    "privateStartShouldStart", "privateStartInterest", "privateStartReason", "privateStartJudgeProvider", "privateStartJudgeModel", "privateStartJudgeDurationMs", "spontaneityRoll"
-  ]);
-  const parts = [];
-  for (const [key, value] of Object.entries(details)) {
-    if (value == null || value === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (!options.verbose && !compactKeys.has(key)) continue;
+// One field list for every category: key fields first, then (verbose) the
+// rest. Each field is { key, label, value, text } so coloring uses the key.
+function collectFields(entry, options) {
+  const details = entry.details && typeof entry.details === "object" ? entry.details : {};
+  const keyFields = keyFieldsByCategory[canonicalLogCategory(entry.category)] || defaultKeyFields;
+  const ordered = [
+    ...keyFields.filter((key) => Object.hasOwn(details, key)),
+    ...(options.verbose ? Object.keys(details).filter((key) => !keyFields.includes(key)) : [])
+  ];
+  const maxLength = options.verbose ? 900 : 120;
+  const fields = [];
+  for (const key of ordered) {
+    const value = details[key];
+    if (value == null || value === "" || (Array.isArray(value) && value.length === 0)) continue;
     if (key === "stderr" || key === "stdout") {
-      const diagnostics = summarizeProcessDiagnostics(key === "stderr" ? { stderr: value } : { stdout: value });
-      if (diagnostics.lines.length > 0) parts.push(`${detailLabel("diagnosticLines")}: ${compactLogDisplayText(diagnostics.lines.join("；"), 900)}`);
+      const diagnostics = summarizeProcessDiagnostics({ [key]: value });
+      if (diagnostics.lines.length === 0) continue;
+      fields.push({ key, label: getLogDetailLabel("diagnosticLines", "zh"), value, text: compactLogDisplayText(diagnostics.lines.join("；"), maxLength) });
       continue;
     }
-    parts.push(`${detailLabel(key)}: ${compactLogDisplayText(formatDetailValue(value, key), 900)}`);
+    const text = formatFieldValue(value, key);
+    if (text === "") continue;
+    fields.push({ key, label: getLogDetailLabel(key, "zh"), value, text: compactLogDisplayText(text, maxLength) });
   }
-  return parts.join(" · ");
+  return fields;
 }
 
-function colorDetails(details, entry, options) {
-  if (options.plain) return details;
-  const separator = color(" · ", "dim", options);
-  return String(details).split(" · ").map((part) => {
-    const separatorIndex = part.indexOf(": ");
-    if (separatorIndex < 0) return color(part, "gray", options);
-    const label = part.slice(0, separatorIndex);
-    const value = part.slice(separatorIndex + 2);
-    return `${color(`${label}:`, "dim", options)} ${color(value, colorForDetailValue(label, value, entry), options)}`;
-  }).join(separator);
+function formatFieldValue(value, key) {
+  if (value == null) return "";
+  if (/error/i.test(key) && !Array.isArray(value)) return formatLogError(value, "zh");
+  if (isDurationKey(key) && Number.isFinite(Number(value)) && typeof value !== "boolean") return formatMs(value);
+  if (key === "providers" && Array.isArray(value)) return value.join(" → ");
+  if (key === "results" && Array.isArray(value)) return value.map(formatSearchResult).join("；");
+  if (typeof value === "boolean") return value ? "是" : "否";
+  if (Array.isArray(value)) return value.map((item) => formatFieldValue(item, key)).filter(Boolean).join("、");
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .filter(([, item]) => item != null && item !== "")
+      .map(([itemKey, item]) => `${getLogDetailLabel(itemKey, "zh")} ${formatFieldValue(item, itemKey)}`)
+      .join("，");
+  }
+  if (typeof value === "string") return String(formatLogDetailValue(value, key, "zh"));
+  return String(value);
 }
 
-function colorForDetailValue(label, value, entry) {
-  const normalized = String(value || "").toLowerCase();
-  if (/错误|厂商错误|阻断/.test(label) || /失败|error|timeout|超时/.test(normalized)) return "brightRed";
-  if (/惩罚|触发原因|模型理由/.test(label)) return "yellow";
-  if (/用时|间隔|^(记忆|路由|生成|发送|落盘)$/.test(label)) return colorForDuration(value);
-  if (/链接|地址/.test(label)) return "brightBlue";
-  if (/结果|状态|是否|开启|可用/.test(label)) return colorForStateValue(normalized);
-  if (/厂商|模型|预设/.test(label)) return "brightMagenta";
-  if (/群|发送者|消息$|机器人 QQ|去重标识|链路/.test(label)) return "brightCyan";
-  if (/查询|消息内容|标题|摘要|回复风格/.test(label)) return "brightWhite";
-  if (/触发|场景|来源|通道|消息类型|事件类型|通知类型/.test(label)) return "brightYellow";
-  if (/数|长度|字符|气泡|排队|规则分|直呼|偏好|上下文|推理/.test(label)) return "cyan";
+function isDurationKey(key) {
+  return /(?:^d|D)urationMs$|(?:^t|T)imeoutMs$/.test(String(key || ""));
+}
+
+function formatSearchResult(result, index) {
+  if (!result || typeof result !== "object") return formatFieldValue(result, "");
+  const parts = [
+    result.title ? `${index + 1}. ${result.title}` : `${index + 1}.`,
+    result.url,
+    result.snippet ? String(result.snippet).slice(0, 180) : "",
+    result.source || result.provider
+  ];
+  return parts.filter(Boolean).join("，");
+}
+
+function renderFields(fields, entry, options) {
+  if (options.plain) return fields.map((field) => `${field.label}：${field.text}`).join(" · ");
+  return fields
+    .map((field) => `${color(`${field.label}：`, "dim", options)}${color(field.text, colorForField(field, entry), options)}`)
+    .join(color(" · ", "dim", options));
+}
+
+function colorForField({ key, value, text }, entry) {
+  const normalized = String(text || "").toLowerCase();
+  if (/error|blockers/i.test(key) || /失败|错误|超时|error|timeout/.test(normalized)) return "brightRed";
+  if (isDurationKey(key)) return colorForDuration(Number(value));
+  if (/^(reason|decisionReason|modelReason|penalty)$/.test(key) || /Reason$/.test(key)) return "yellow";
+  if (/url$/i.test(key)) return "brightBlue";
+  if (/^(outcome|status|sendStatus|shouldReply|enabled|eligible)$/.test(key) || typeof value === "boolean") return colorForStateValue(normalized);
+  if (/provider|preset|model$|Model$/i.test(key)) return "brightMagenta";
+  if (/(?:Id|Ids)$/.test(key)) return "brightCyan";
+  if (/^(query|text|title|titles|summary|modelReplyStyle|modelOutput)$/.test(key)) return "brightWhite";
+  if (/^(triggerMode|messageType|source|channel|postType|noticeType|operation|action)$/.test(key)) return "brightYellow";
+  if (typeof value === "number") return "cyan";
   if (entry?.level === "error") return "brightRed";
   return "gray";
 }
 
 function colorForStateValue(value) {
-  if (/失败|错误|不可用|未开启/.test(value)) return "brightRed";
-  if (/已发送|成功|找到了结果|命令已处理|^是$|开启|正常/.test(value)) return "brightGreen";
-  if (/已排队|处理中|运行中/.test(value)) return "brightBlue";
-  if (/警告|跳过/.test(value)) return "brightYellow";
+  if (/失败|错误|不可用|未开启|^否$/.test(value)) return "brightRed";
+  if (/已发送|成功|找到了结果|已处理|已完成|已保存|^是$|开启|正常/.test(value)) return "brightGreen";
+  if (/已排队|等待|处理中|运行中/.test(value)) return "brightBlue";
+  if (/警告|跳过|忽略|沉默/.test(value)) return "brightYellow";
   return "gray";
 }
 
-function colorForDuration(value) {
-  const milliseconds = parseFormattedDurationMs(value);
-  if (milliseconds == null) return "cyan";
+function colorForDuration(milliseconds) {
+  if (!Number.isFinite(milliseconds)) return "cyan";
   if (milliseconds >= 10_000) return "brightRed";
   if (milliseconds >= 2_000) return "brightYellow";
   return "cyan";
 }
 
-function parseFormattedDurationMs(value) {
-  const match = String(value || "").trim().match(/^(\d+(?:\.\d+)?)(ms|s|m)$/i);
-  if (!match) return null;
-  const multiplier = { ms: 1, s: 1000, m: 60_000 }[match[2].toLowerCase()];
-  return Number(match[1]) * multiplier;
-}
-
-function compactText(value, maxLength) {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;
-}
-
-function detailLabel(key) {
-  return getLogDetailLabel(key, "zh");
-}
-
-function formatSearchResult(result, index) {
-  if (!result || typeof result !== "object") return formatDetailValue(result);
-  const parts = [];
-  const prefix = index == null ? "" : `${index + 1}. `;
-  if (result.title) parts.push(`${prefix}标题: ${result.title}`);
-  if (result.url) parts.push(`链接: ${result.url}`);
-  if (result.snippet) parts.push(`摘要: ${String(result.snippet).slice(0, 180)}`);
-  if (result.source || result.provider) parts.push(`来源: ${result.source || result.provider}`);
-  return parts.join("，");
-}
-
-function humanStatus(status) {
-  return {
-    found_results: "找到了结果",
-    no_results: "没有解析到结果",
-    skipped: "已跳过",
-    failed: "失败"
-  }[String(status || "")] || humanError(String(status || ""));
-}
-
-function humanOutcome(outcome) {
-  return {
-    sent: "已发送",
-    queued: "已排队",
-    ignored: "已忽略",
-    silent: "主动沉默",
-    command: "命令已处理",
-    skipped: "已跳过发送",
-    failed: "失败"
-  }[String(outcome || "")] || String(outcome || "");
-}
-
-function humanTriggerMode(mode) {
-  return {
-    message: "消息数",
-    time: "分钟",
-    explicit: "@或回复",
-    message_count: "消息数",
-    minute_interval: "分钟"
-  }[String(mode || "")] || String(mode || "");
-}
-
-function formatDetailValue(value, key = "") {
-  if (value == null) return "";
-  if (/error/i.test(key)) return formatLogError(value, "zh");
-  if (Array.isArray(value)) return value.map((item) => formatDetailValue(item, key)).join(", ");
-  if (value && typeof value === "object") {
-    return Object.entries(value)
-      .map(([itemKey, item]) => `${detailLabel(itemKey)}: ${formatDetailValue(item, itemKey)}`)
-      .join("，");
-  }
-  if (typeof value === "string") return humanDetailValue(key, value);
-  if (typeof value === "boolean") return value ? "是" : "否";
-  return String(value);
-}
-
-function humanDetailValue(key, value) {
-  const text = humanError(value);
-  const localized = localizeLogDetailValue(text, key, "zh");
-  if (localized !== text) return localized;
-  if (key === "messageType") {
-    return {
-      group: "群消息",
-      private: "私聊",
-      group_message: "群消息",
-      private_message: "私聊",
-      group_at: "群里 @ 机器人"
-    }[text] || text;
-  }
-  if (key === "postType") {
-    return {
-      message: "消息",
-      notice: "通知",
-      request: "请求",
-      meta_event: "元事件"
-    }[text] || text;
-  }
-  if (key === "noticeType") {
-    return {
-      notify: "提醒通知",
-      group_recall: "群消息撤回",
-      friend_recall: "好友消息撤回",
-      group_increase: "群成员增加",
-      group_decrease: "群成员减少"
-    }[text] || text;
-  }
-  if (key === "source" && text.toLowerCase() === "onebot") return "OneBot";
-  return text;
-}
-
-function humanError(error) {
-  return formatLogDetailText(error, "zh");
-}
-
 function formatMs(value) {
-  if (value == null || value === "") return "";
   const number = Number(value);
   if (!Number.isFinite(number)) return String(value);
   if (number >= 60_000) return `${(number / 60_000).toFixed(number >= 600_000 ? 1 : 2)}m`;
   if (number >= 1000) return `${(number / 1000).toFixed(number >= 10_000 ? 1 : 2)}s`;
   return `${number}ms`;
+}
+
+// CJK characters take two terminal columns; pad by columns so the level and
+// category columns line up.
+function padDisplay(text, width) {
+  const value = String(text || "");
+  return value + " ".repeat(Math.max(0, width - displayWidth(value)));
+}
+
+function displayWidth(text) {
+  let width = 0;
+  for (const character of String(text || "")) {
+    width += /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(character) ? 2 : 1;
+  }
+  return width;
 }
 
 function formatLocalTimestamp(value) {
@@ -745,7 +613,7 @@ function parseTimeFilter(value, { relativeFromNow = false } = {}) {
     return Date.now() - Number(relative[1]) * unitMs;
   }
   const parsed = Date.parse(text);
-  if (!Number.isFinite(parsed)) throw new Error(`Invalid time filter: ${text}`);
+  if (!Number.isFinite(parsed)) throw new CliError(`无法识别的时间 ${text}；示例：30m、2h、2026-10-01T08:00`);
   return parsed;
 }
 
@@ -773,35 +641,26 @@ function renderSummary(entries, options) {
   }
   durations.sort((left, right) => left - right);
   const p95 = durations.length ? durations[Math.max(0, Math.ceil(durations.length * 0.95) - 1)] : 0;
-  const levels = Object.entries(byLevel).map(([key, count]) => `${levelNames[key] || key} ${count}`).join(" / ") || "无";
-  const categories = Object.entries(byCategory).map(([key, count]) => `${categoryNames[key] || key} ${count}`).join(" / ") || "无";
-  const operations = Object.entries(byOperation).map(([key, count]) => `${key} ${count}`).join(" / ");
-  const engines = Object.entries(byEngine).map(([key, count]) => `${getAgentEngine(key).name} ${count}`).join(" / ");
-  const engineText = engines ? `；引擎 ${engines}` : "";
-  const durationText = durations.length ? `；耗时样本 ${durations.length}，P95 ${formatMs(p95)}，最慢 ${formatMs(durations.at(-1))}` : "";
-  const operationText = operations ? `；操作 ${operations}` : "";
-  const summary = `日志摘要：${entries.length} 条，${traces.size} 条链路；级别 ${levels}；分类 ${categories}${engineText}${operationText}${durationText}`;
-  if (options.json) return JSON.stringify({ summary, total: entries.length, traces: traces.size, byLevel, byCategory, byEngine, byOperation, byOutcome, p95Ms: p95 || null });
-  if (options.plain) return summary;
-  const coloredLevels = Object.entries(byLevel)
-    .map(([key, count]) => color(`${levelNames[key] || key} ${count}`, colorForLevel(key), options))
-    .join(color(" / ", "dim", options)) || color("无", "gray", options);
-  const coloredCategories = Object.entries(byCategory)
-    .map(([key, count]) => color(`${categoryNames[key] || key} ${count}`, categoryColors[key] || "white", options))
-    .join(color(" / ", "dim", options)) || color("无", "gray", options);
-  const coloredDuration = durations.length
-    ? `；${color(`耗时样本 ${durations.length}`, "cyan", options)}，P95 ${color(formatMs(p95), colorForDuration(formatMs(p95)), options)}，最慢 ${color(formatMs(durations.at(-1)), colorForDuration(formatMs(durations.at(-1))), options)}`
-    : "";
-  const coloredOperations = operations ? `；操作 ${color(operations, "cyan", options)}` : "";
-  const coloredEngines = engines
-    ? `；引擎 ${Object.entries(byEngine).map(([key, count]) => color(`${getAgentEngine(key).name} ${count}`, engineColors[key] || "white", options)).join(color(" / ", "dim", options))}`
-    : "";
-  return `${color("日志摘要", "brightWhite", options)}：${color(`${entries.length} 条`, "brightCyan", options)}，${color(`${traces.size} 条链路`, "brightMagenta", options)}；级别 ${coloredLevels}；分类 ${coloredCategories}${coloredEngines}${coloredOperations}${coloredDuration}`;
-}
-
-function pushPart(parts, label, value) {
-  if (value == null || value === "") return;
-  parts.push(`${label}: ${compactLogDisplayText(value, 900)}`);
+  const counts = (record, label, colorFor) => {
+    const parts = Object.entries(record).map(([key, count]) => color(`${label(key)} ${count}`, colorFor(key), options));
+    return parts.length ? parts.join(color(" / ", "dim", options)) : color("无", "gray", options);
+  };
+  const sections = [
+    `${color(`${entries.length} 条`, "brightCyan", options)}，${color(`${traces.size} 条链路`, "brightMagenta", options)}`,
+    `级别 ${counts(byLevel, (key) => getLogLevelLabel(key), (key) => levelColors[key] || "white")}`,
+    `分类 ${counts(byCategory, (key) => getLogCategoryLabel(key), (key) => categoryColors[key] || "white")}`,
+    Object.keys(byEngine).length ? `引擎 ${counts(byEngine, (key) => getAgentEngine(key).name, (key) => engineColors[key] || "white")}` : null,
+    Object.keys(byOperation).length ? `操作 ${counts(byOperation, (key) => formatLogDetailValue(key, "operation", "zh"), () => "cyan")}` : null,
+    Object.keys(byOutcome).length ? `结果 ${counts(byOutcome, (key) => formatLogDetailValue(key, "outcome", "zh"), () => "cyan")}` : null,
+    durations.length
+      ? `耗时样本 ${color(String(durations.length), "cyan", options)}，P95 ${color(formatMs(p95), colorForDuration(p95), options)}，最慢 ${color(formatMs(durations.at(-1)), colorForDuration(durations.at(-1)), options)}`
+      : null
+  ].filter(Boolean);
+  const summary = `${color("日志摘要", "brightWhite", options)}：${sections.join("；")}`;
+  if (options.json) {
+    return JSON.stringify({ summary, total: entries.length, traces: traces.size, byLevel, byCategory, byEngine, byOperation, byOutcome, p95Ms: p95 || null });
+  }
+  return summary;
 }
 
 function color(text, colorName, options) {
@@ -810,5 +669,35 @@ function color(text, colorName, options) {
 }
 
 function usage() {
-  process.stderr.write("用法: ncc-log-viewer.mjs LOG_FILE [--tail N] [-f] [--level LEVELS|--errors] [--category CATEGORIES] [--engine codex|claude] [--trace ID] [--scope ID] [--operation NAME] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--plain|--color] [--verbose|--compact]\n");
+  return `用法：ncc logs [选项]
+      node scripts/ncc-log-viewer.mjs <日志文件> [选项]
+
+范围
+  -n, --tail N            显示最后 N 条（默认 80，最多 1000）
+  -f, --follow            显示后继续跟随新日志（Ctrl+C 退出）
+  --since 30m|ISO         只看此时间之后；相对时间支持 ms、s、m、h、d
+  --until ISO             只看此时间之前
+
+过滤
+  --level LEVELS          级别，逗号分隔：${logLevels.join(",")}
+  --errors                等同 --level warn,error
+  --category NAMES        分类，逗号分隔：${logCategories.filter((item) => item !== "codex").join(",")}
+  --engine NAME           只看某个引擎的智能体日志：${AGENT_ENGINE_IDS.join(",")}
+  --trace ID              按链路 ID 前缀过滤
+  --scope ID              按范围过滤：群号、group:群号 或 private:QQ号
+  --group ID              按群号过滤
+  --sender ID             按发送者 QQ 过滤
+  --operation NAME        按操作名或前缀过滤，例如 agent.tool
+  -q, --search TEXT       在整条日志里搜索关键字
+  --slow [MS]             只看耗时不少于 MS 毫秒的记录（默认 1000）
+
+显示
+  --verbose               显示全部字段（默认）
+  --compact               只显示关键字段，并隐藏调试和普通信息日志
+  --all                   配合 --compact 时也显示普通信息日志
+  --summary               末尾追加统计摘要
+  --json                  输出原始 JSON 行
+  --plain | --color       关闭或强制彩色输出
+  -h, --help              显示此帮助
+`;
 }

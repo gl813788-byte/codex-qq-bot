@@ -1,11 +1,5 @@
-const categoryOrder = ["conversation", "intelligence", "operations", "authority"];
-
-const categoryMeta = {
-  conversation: { icon: "💬", label: "会话与上下文" },
-  intelligence: { icon: "🧠", label: "AI 与学习" },
-  operations: { icon: "🛠️", label: "运行与群管理" },
-  authority: { icon: "🔐", label: "权限" }
-};
+import { qqCommandCategories } from "./qq-command-catalog.js";
+import { formatQqCard } from "./qq-command-reply.js";
 
 export function formatQqVisualMenu({
   owner = false,
@@ -18,38 +12,29 @@ export function formatQqVisualMenu({
 } = {}) {
   const privileged = owner || administrator;
   const visible = (Array.isArray(commands) ? commands : []).filter((command) => command?.menuLine);
-  const sections = categoryOrder
-    .map((category) => ({
-      category,
-      commands: visible.filter((command) => (command.category || "operations") === category)
-    }))
-    .filter((section) => section.commands.length > 0);
-  const lines = [
-    `╭─ ${owner ? "👑" : administrator ? "🛡️" : "✨"} ${compact(assistantName, 24)} · QQ 控制台`,
-    administrator ? "│ 身份：Bot 管理员" : null,
-    privileged && model ? `│ 🤖 ${compact(model, 40)} · ${compact(reasoningEffort || "default", 12)}` : null,
-    privileged ? `│ 👥 白名单 ${allowedGroups.length} 个${allowedGroups.length ? ` · ${allowedGroups.join("、")}` : ""}` : null,
-    "╰────────────────",
-    ""
-  ].filter((line) => line != null);
-
-  for (const [sectionIndex, section] of sections.entries()) {
-    const meta = categoryMeta[section.category];
-    lines.push(`${meta.icon} ${meta.label}`);
-    for (const command of section.commands) {
-      const publicTag = privileged && command.public ? "  ◦ 公开" : "";
-      lines.push(`  ${command.menuLine}${publicTag}`);
-      if (command.description) lines.push(`    ${command.description}`);
-    }
-    if (sectionIndex < sections.length - 1) lines.push("");
-  }
-  lines.push(
-    "",
-    privileged
-      ? "💡 发送 /菜单权限 调整“公开”项目；发送 /AI任务 查看全部模型任务。"
-      : "💡 直接发送上面的命令即可使用。"
-  );
-  return lines.join("\n");
+  const sections = qqCommandCategories.map((category) => ({
+    icon: category.icon,
+    title: category.label,
+    rows: visible
+      .filter((command) => (command.category || "operations") === category.id)
+      .map((command) => ({
+        text: `${command.menuLine}${privileged && command.public ? "  ◦ 公开" : ""}`,
+        detail: command.description || ""
+      }))
+  }));
+  return formatQqCard({
+    icon: owner ? "👑" : administrator ? "🛡️" : "✨",
+    title: `${compact(assistantName, 24)} · 指令菜单`,
+    fields: [
+      ["身份", owner ? "主人" : administrator ? "Bot 管理员" : "群友"],
+      privileged && model ? ["模型", `${compact(model, 40)} · ${compact(reasoningEffort || "default", 12)}`] : null,
+      privileged ? ["白名单", allowedGroups.length ? `${allowedGroups.length} 个群 · ${allowedGroups.join("、")}` : "无"] : null
+    ],
+    sections,
+    hints: privileged
+      ? ["单独发送一个指令可查看它的状态和用法；/菜单权限 调整“公开”项目。"]
+      : ["直接发送上面的指令即可使用。"]
+  });
 }
 
 function compact(value, limit) {

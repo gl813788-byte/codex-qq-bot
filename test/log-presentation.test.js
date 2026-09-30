@@ -386,3 +386,32 @@ test("stop-preservation and outgoing mention logs use Chinese detail fields", ()
     "未解析 @ 文本": []
   });
 });
+
+test("terminal and dashboard share one vocabulary for lifecycle, search and duration fields", () => {
+  const localized = localizeLogDetails({
+    outcome: "sent",
+    messageType: "group_at",
+    status: "found_results",
+    replyChars: 20,
+    bubbleCount: 2,
+    providers: ["tavily", "bing"],
+    generationDurationMs: 1200,
+    adaptiveReason: "group_not_cold",
+    modelFinishReason: "stop"
+  });
+  assert.deepEqual(localized, {
+    结果: "已发送",
+    消息类型: "群里 @ 机器人",
+    状态: "找到了结果",
+    回复字符数: 20,
+    气泡数: 2,
+    搜索顺序: ["tavily", "bing"],
+    生成耗时: 1200,
+    自适应原因: "群聊尚未达到冷群时长",
+    模型结束原因: "正常结束"
+  });
+  const source = readFileSync(fileURLToPath(new URL("../src/log-presentation.js", import.meta.url)), "utf8");
+  const labels = source.slice(source.indexOf("const detailLabelsZh"), source.indexOf("const detailValuesZh"));
+  assert.doesNotMatch(labels, /用时"/, "duration labels use 耗时");
+  assert.equal(getLogDetailLabel("messageId"), "消息 ID");
+});
