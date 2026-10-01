@@ -1,3 +1,5 @@
+import { formatQqTaskWorkspaceContext } from "../qq-main-prompt.js";
+
 export function buildQqFileAgentTurn({
   isOwner,
   isAdministrator = false,
@@ -40,9 +42,7 @@ export function buildQqFileAgentTurn({
     "最终只提交输出 Schema 要求的 JSON 对象。"
   ].join("\n");
   const prompt = [
-    `本轮 task workspace：${taskWorkspace.root}`,
-    `输入目录：${taskWorkspace.inputDir}`,
-    `输出目录：${taskWorkspace.outputDir}`,
+    formatQqTaskWorkspaceContext(taskWorkspace),
     privileged ? `当前项目：${projectDir}` : null,
     quotedContext || null,
     imagePaths.length ? `收到的 QQ 图片：\n${imagePaths.join("\n")}` : null,

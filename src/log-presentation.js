@@ -118,6 +118,7 @@ const messageTranslationsZh = Object.freeze({
   "QQ proactive interest decision": "QQ 主动兴趣判定",
   "QQ autonomous proactive two-model contract verified": "QQ 主动聊天双模型链路校验通过",
   "QQ autonomous proactive reply blocked by two-model contract": "QQ 主动聊天因缺少双模型链路被阻止",
+  "QQ file attachment was rejected": "QQ 文件附件未通过投递校验",
   "QQ cold-group interest decision": "QQ 冷群兴趣判定",
   "QQ cold-group topic-start judge completed": "QQ 冷群新话题启动判定完成",
   "QQ cold-group topic-start judge failed": "QQ 冷群新话题启动判定失败",

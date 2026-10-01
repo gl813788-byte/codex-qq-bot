@@ -97,6 +97,20 @@ export function formatQqMainModelInstructions({
   ].filter((line) => line != null).join("\n");
 }
 
+export function formatQqTaskWorkspaceContext(taskWorkspace) {
+  if (!taskWorkspace?.root || !taskWorkspace?.inputDir || !taskWorkspace?.outputDir) {
+    throw new TypeError("taskWorkspace root/inputDir/outputDir are required");
+  }
+  return [
+    "【本轮文件工作区】",
+    `本轮 task workspace：${taskWorkspace.root}`,
+    `输入目录：${taskWorkspace.inputDir}`,
+    `输出目录（task output）：${taskWorkspace.outputDir}`,
+    "需要回传文件或图片时，先用原生文件能力将成品写入上述输出目录，确认文件存在，再把其绝对路径填进 attachments；工作区根目录和 input 目录中的文件不会发送。",
+    "这些路径只适用于本轮；长期会话也必须使用这里的新路径，不得沿用历史附件路径。可见正文不要暴露本机路径，也不要在实际创建文件前声称已经完成。"
+  ].join("\n");
+}
+
 export function formatQqApprovedProactivePrompt({
   kind = "ordinary",
   activityAdvancedDuringJudge = false,

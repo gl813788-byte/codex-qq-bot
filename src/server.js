@@ -65,6 +65,7 @@ import {
   shouldUseQqFileImageTask
 } from "./qq-file-image-task-intent.js";
 import { resolveAllowedQqMarkerPath, resolveQqMarkerPath } from "./qq-output-policy.js";
+import { resolveQqReplyFileAttachments } from "./qq-reply-files.js";
 import { parseQqAgentOutputWithAttachmentImport } from "./infrastructure/codex/qq-agent-attachments.js";
 import { createQqZoneClient } from "./qq-qzone.js";
 import {
@@ -167,6 +168,7 @@ import {
   formatQqApprovedProactivePrompt,
   formatQqMainModelInstructions,
   formatQqMainToolGuide,
+  formatQqTaskWorkspaceContext,
   formatQqPromptDate
 } from "./qq-main-prompt.js";
 import {
@@ -266,6 +268,7 @@ import {
 } from "./qq-reply-targeting.js";
 import {
   buildQqDeliveryReceipt,
+  combineOneBotSendResults,
   createQqDeliveryFailureMemoryEntry,
   formatQqDeliveryFailureContext
 } from "./qq-delivery-receipt.js";
@@ -9297,6 +9300,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       persistentResume
         ? "你正在继续同一个 QQ 长期会话。沿用线程中已经建立的身份、关系、稳定规则和前文，不要要求重新介绍背景。"
         : "下面是本轮由 Hub 归一化并按权限裁剪后的 QQ 上下文。",
+      formatQqTaskWorkspaceContext(taskWorkspace),
       persistentResume
         ? "本轮仍使用与临时会话完全相同的融合式追问规则：所有触发 Bot 回复的新消息作为一个批次处理，最终只输出一份统一回复。"
         : null,
@@ -12230,9 +12234,9 @@ async function sendOneBotGroupMessage(event, reply, options = {}) {
   if (!event.groupId) return { ok: false, reason: "Missing group id" };
   assertQqReplyScopeActive(options.replyScope);
   const mediaPaths = await resolveQqReplyMedia(reply, { stickerDir: qqStickerDir, event });
-  const fileAttachments = await resolveQqReplyFiles(reply, event);
+  const { attachments: fileAttachments, failures: fileFailures } = await resolveQqReplyFiles(reply, event);
   assertQqReplyScopeActive(options.replyScope);
-  const message = await buildOneBotReplyMessage(event, reply, options, mediaPaths, { fileAttachments });
+  const message = await buildOneBotReplyMessage(event, reply, options, mediaPaths, { fileAttachments, fileFailures });
   let messageResult = { ok: true, skipped: true };
 
   if (hasSendableOneBotMessage(message)) {
@@ -12255,7 +12259,7 @@ async function sendOneBotGroupMessage(event, reply, options = {}) {
     };
   }
 
-  const fileResults = [];
+  const fileResults = [...fileFailures];
   for (const attachment of fileAttachments) {
     assertQqReplyScopeActive(options.replyScope);
     fileResults.push(await uploadOneBotGroupFile(event.groupId, attachment, { signal: options.replyScope?.signal }));
@@ -12306,9 +12310,9 @@ async function sendOneBotPrivateMessage(event, reply, options = {}) {
   if (!event.senderId) return { ok: false, reason: "Missing user id" };
   assertQqReplyScopeActive(options.replyScope);
   const mediaPaths = await resolveQqReplyMedia(reply, { stickerDir: qqStickerDir, event });
-  const fileAttachments = await resolveQqReplyFiles(reply, event);
+  const { attachments: fileAttachments, failures: fileFailures } = await resolveQqReplyFiles(reply, event);
   assertQqReplyScopeActive(options.replyScope);
-  const message = await buildOneBotPrivateReplyMessage(reply, mediaPaths, { event, fileAttachments });
+  const message = await buildOneBotPrivateReplyMessage(reply, mediaPaths, { event, fileAttachments, fileFailures });
   let messageResult = { ok: true, skipped: true };
 
   if (hasSendableOneBotMessage(message)) {
@@ -12331,7 +12335,7 @@ async function sendOneBotPrivateMessage(event, reply, options = {}) {
     };
   }
 
-  const fileResults = [];
+  const fileResults = [...fileFailures];
   for (const attachment of fileAttachments) {
     assertQqReplyScopeActive(options.replyScope);
     fileResults.push(await uploadOneBotPrivateFile(event.senderId, attachment, { signal: options.replyScope?.signal }));
@@ -12340,12 +12344,12 @@ async function sendOneBotPrivateMessage(event, reply, options = {}) {
   return combineOneBotSendResults(messageResult, fileResults);
 }
 
-async function buildOneBotPrivateReplyMessage(reply, resolvedImagePaths = null, { event, fileAttachments = [] } = {}) {
+async function buildOneBotPrivateReplyMessage(reply, resolvedImagePaths = null, { event, fileAttachments = [], fileFailures = [] } = {}) {
   const message = [];
   const imagePaths = resolvedImagePaths || await resolveQqReplyMedia(reply, { stickerDir: qqStickerDir, event });
   const text = stripQqImageAttachmentMarkers(reply);
   const hasMissingImageMarker = extractQqImageMarkers(reply).length > 0 && imagePaths.length === 0;
-  const hasBlockedFileMarker = extractQqFileMarkers(reply).length > fileAttachments.length;
+  const hasBlockedFileMarker = fileFailures.length > 0;
   if (text) {
     message.push({
       type: "text",
@@ -12376,7 +12380,7 @@ async function buildOneBotPrivateReplyMessage(reply, resolvedImagePaths = null, 
   return message;
 }
 
-async function buildOneBotReplyMessage(event, reply, options = {}, resolvedImagePaths = null, { fileAttachments = [] } = {}) {
+async function buildOneBotReplyMessage(event, reply, options = {}, resolvedImagePaths = null, { fileAttachments = [], fileFailures = [] } = {}) {
   const message = [];
   const sourceMessageId = options.quoteMessageId ?? event.raw?.message_id;
   if (options.quoteSource !== false && sourceMessageId != null) {
@@ -12402,7 +12406,7 @@ async function buildOneBotReplyMessage(event, reply, options = {}, resolvedImage
     message.push({ type: "text", data: { text: " " } });
   }
   const hasMissingImageMarker = extractQqImageMarkers(reply).length > 0 && imagePaths.length === 0;
-  const hasBlockedFileMarker = extractQqFileMarkers(reply).length > fileAttachments.length;
+  const hasBlockedFileMarker = fileFailures.length > 0;
   if (text) {
     message.push(...outgoingMentions.segments);
   }
@@ -12814,18 +12818,6 @@ function extractQqImageMarkers(text) {
     .filter(Boolean);
 }
 
-function extractQqFileMarkers(text) {
-  return [...String(text || "").matchAll(/\[\[qq_file:([^\]\n]+)\]\]/g)]
-    .map((match) => {
-      const [rawPath, ...nameParts] = match[1].split("|");
-      return {
-        path: String(rawPath || "").trim(),
-        name: sanitizeQqUploadFileName(nameParts.join("|").trim())
-      };
-    })
-    .filter((item) => item.path);
-}
-
 function resolveLocalQqMediaPath(filePath) {
   return resolveQqMarkerPath(filePath, { projectDir });
 }
@@ -13051,30 +13043,17 @@ function uniqueQqMediaRefs(paths) {
 }
 
 async function resolveQqReplyFiles(reply, event) {
-  const markers = extractQqFileMarkers(reply);
-  const attachments = [];
-  const seen = new Set();
-  for (const marker of markers) {
-    const filePath = await resolveAllowedQqMarkerPath(marker.path, {
-      kind: "file",
-      event,
-      projectDir,
-      qqOutputImagesDir,
-      qqStickerDir
-    });
-    if (!filePath || seen.has(filePath)) continue;
-    seen.add(filePath);
-    attachments.push({
-      path: filePath,
-      name: marker.name || basename(filePath)
-    });
+  const result = await resolveQqReplyFileAttachments(reply, { event, projectDir });
+  if (result.failures.length) {
+    logger.warn("QQ file attachment was rejected", {
+      groupId: event.groupId || null,
+      senderId: event.senderId || null,
+      fileCount: result.failures.length,
+      errorCode: result.failures[0].errorCode,
+      error: result.failures[0].error
+    }, "qq", qqLogContext(event));
   }
-  return attachments;
-}
-
-function sanitizeQqUploadFileName(name) {
-  const cleaned = String(name || "").trim().replace(/[\\/:*?"<>|\r\n]+/g, "_");
-  return cleaned.slice(0, 180);
+  return result;
 }
 
 function hasSendableOneBotMessage(message) {
@@ -13154,27 +13133,6 @@ function formatOneBotActionFailure(action, result) {
   return `${action}失败：${detail}`;
 }
 
-function combineOneBotSendResults(messageResult, fileResults) {
-  const results = [messageResult, ...(Array.isArray(fileResults) ? fileResults : [])].filter(Boolean);
-  const required = results.filter((result) => !result.skipped);
-  const ok = required.length === 0 ? true : required.every((result) => result.ok !== false);
-  const failed = required.find((result) => result.ok === false);
-  const error = failed
-    ? failed.error
-      || failed.body?.message
-      || failed.body?.wording
-      || failed.body?.error
-      || (failed.status ? `HTTP ${failed.status}` : "QQ 投递失败")
-    : null;
-  return {
-    ok,
-    status: messageResult?.status,
-    body: messageResult?.body,
-    error,
-    files: fileResults,
-    results
-  };
-}
 
 async function fileExists(filePath) {
   try {
