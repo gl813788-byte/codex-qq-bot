@@ -187,6 +187,16 @@ export function buildQqNativeToolSpecs({
         name: "summarize",
         description: "Load bounded QQ history so this same native Agent turn can summarize it. This does not start a nested model process.",
         inputSchema: objectSchema({ range: string("最近, 全部, a count, a range, or a keyword.") })
+      }, {
+        type: "function",
+        name: "host_command",
+        description: "Request elevated host access for exactly one shell command and execute it if the Hub verifies the original sender is the owner. Use for explicit owner tasks that exceed the native workspace, need network or program startup, or cannot run in the native sandbox. Administrators and ordinary users cannot gain host access. Decide whether to ask the human first from the actual request and risk; permission alone is not task authorization. Check exit status and actual results before claiming success. No persistent grant or automatic retry.",
+        inputSchema: objectSchema({
+          command: string("Exact Bash command for the owner's current task. Never print secrets or full sensitive configuration."),
+          reason: string("Why this specific operation needs host access, grounded in the owner's actual request."),
+          cwd: string("Absolute working directory; omit to use the project directory."),
+          timeoutMs: { type: "integer", minimum: 1, maximum: 120000, description: "Command deadline; defaults to 30000 ms. Use the machine's existing session manager for an explicitly requested persistent interactive program." }
+        }, ["command", "reason"])
       }]
     }] : [])
   ];
@@ -228,11 +238,13 @@ export function createQqNativeToolDispatcher({
     callCount += 1;
     const toolRound = callCount;
     if (event && typeof event === "object") event.qqCurrentToolRound = toolRound;
-    const boundEvent = focusedEvent || event;
+    const hostCommandTool = call.namespace === "qq_runtime" && call.tool === "host_command";
+    const boundEvent = hostCommandTool ? event : focusedEvent || event;
     const sessionTool = call.namespace === "qq_session" && call.tool === "manage";
     const inboundFileTool = call.namespace === "qq_context" && call.tool === "download_file";
     const structured = sessionTool
       || inboundFileTool
+      || hostCommandTool
       || (call.namespace === "qq_memory" && ["impression", "robot_profile"].includes(call.tool));
     const command = structured ? "" : mapQqNativeToolToCommand(call.namespace, call.tool, call.arguments, { event: boundEvent });
     const startedAt = Date.now();

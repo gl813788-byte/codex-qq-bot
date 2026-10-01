@@ -44,6 +44,16 @@ test("aborts an active process through its signal", async () => {
   );
 });
 
+test("host command deadlines terminate shell descendants that ignore SIGTERM", { skip: process.platform === "win32", timeout: 5000 }, async () => {
+  const startedAt = Date.now();
+  await assert.rejects(runProcess("/bin/bash", ["--noprofile", "--norc", "-c", "trap '' TERM; sleep 30 & wait"], {
+    timeoutMs: 200,
+    killGraceMs: 100,
+    killProcessGroup: true
+  }), { code: "PROCESS_TIMEOUT" });
+  assert.ok(Date.now() - startedAt < 3000);
+});
+
 test("reports non-zero exits and invalid JSON", async () => {
   await assert.rejects(
     runProcess(process.execPath, ["-e", "process.stderr.write('bad'); process.exit(3)"]),

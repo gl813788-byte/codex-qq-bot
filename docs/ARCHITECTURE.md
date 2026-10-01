@@ -30,6 +30,7 @@ environment + runtime paths
 | `src/app/` | Application state and startup composition | changing global state shape or startup lifecycle |
 | `src/app/qq-codex-runtime-settings.js` | Native Codex turn-setting command policy | changing reasoning summary/personality/service-tier validation or persistence actions |
 | `src/app/qq-file-agent-turn.js` | Owner/administrator/public file-Agent capability policy | changing file-task roots, sandboxing, administrator destructive-operation refusal, or task instructions |
+| `src/app/qq-host-command.js` | Host permission requests per command | original sender authorization, isolated command environment, deadlines and results, shared by both engines |
 | `src/channels/http/hub-http-server.js` | HTTP request dispatch and safe error boundary | changing API/asset routing or OneBot webhook limiting |
 | `src/channels/qq/` | Single QQ and OneBot message transport boundary | parsing or validating incoming QQ events |
 | `src/config/` | Environment normalization and runtime defaults | adding an environment variable or changing a deployment default |

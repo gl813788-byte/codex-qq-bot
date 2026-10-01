@@ -113,6 +113,14 @@ Only the owner manages administrators:
 
 Administrators receive the full menu and Agent but cannot change the administrator list. Their file requests are judged and refused when they delete important files, overwrite critical source/config/data/credentials, damage `.git`, dependencies or runtime state, or request another ambiguous unrecoverable destructive action.
 
+### Requesting host access for a command
+
+Ordinary replies and file tasks retain their native workspace restrictions. When the owner directly requests program startup (for example, “start my cc”), network execution, or changes outside the project, the Bot can call `qq_runtime.host_command` to request host execution for that specific command. Codex and Claude Code use the same Hub entry point; this does not depend on keyword routing into a file task or permanently unlock the conversation sandbox.
+
+The Hub authorizes only the original verified sender of the turn: owners may execute; Bot administrators retain project capabilities but cannot obtain host access; ordinary users cannot use this entry point. Changing QQ focus, claiming an identity in tool arguments, and proactive chat cannot grant access. The Bot decides whether to ask the human first from the risk, target clarity, and existing authorization. It must wait for a necessary answer, while clearly authorized tasks need no repeated confirmation.
+
+Commands run in Bash without shell profiles or inherited Hub/provider credentials. The deadline defaults to 30 seconds and is capped at 120 seconds, with a 64 KiB output limit; cancellation or timeout terminates the command's process group. Each call id executes once, with no automatic retry after failure. Exit code 0 still requires checking the actual task result. Use the machine's existing session manager for a requested persistent interactive program and verify startup; starting in the background does not mean a window appeared on the user's screen. Logs contain actor, tool, and outcome metadata, not command text, reasons, or output. Attachments must still enter the current output directory.
+
 ## Manual AI task center
 
 QQ `/AI任务` and both NCC surfaces read the same task catalog and execute through a loopback-only management API:
