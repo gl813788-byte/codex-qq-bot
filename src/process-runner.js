@@ -11,6 +11,7 @@ export function runProcess(command, args = [], {
   signal: optionsSignal,
   cwd,
   env,
+  killProcessGroup = false,
   spawnProcess = spawn
 } = {}) {
   return new Promise((resolve, reject) => {
@@ -26,6 +27,7 @@ export function runProcess(command, args = [], {
       child = spawnProcess(command, args, {
         cwd,
         env,
+        ...(killProcessGroup && process.platform !== "win32" ? { detached: true } : {}),
         stdio: ["ignore", "pipe", "pipe"]
       });
     } catch (error) {
@@ -40,17 +42,25 @@ export function runProcess(command, args = [], {
     let terminalError = null;
     let forceKillTimer = null;
 
+    const kill = (signal) => {
+      if (killProcessGroup && process.platform !== "win32" && child.pid) {
+        process.kill(-child.pid, signal);
+      } else {
+        child.kill(signal);
+      }
+    };
+
     const terminate = (error) => {
       if (!terminalError) terminalError = error;
       try {
-        child.kill("SIGTERM");
+        kill("SIGTERM");
       } catch {
         // The process may already have exited.
       }
       if (!forceKillTimer) {
         forceKillTimer = setTimeout(() => {
           try {
-            child.kill("SIGKILL");
+            kill("SIGKILL");
           } catch {
             // The process exited during the grace window.
           }
@@ -92,6 +102,9 @@ export function runProcess(command, args = [], {
       settled = true;
       clearTimeout(timeoutTimer);
       if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (terminalError && killProcessGroup) {
+        try { kill("SIGKILL"); } catch { /* The process group already exited. */ }
+      }
       optionsSignal?.removeEventListener("abort", abortProcess);
       if (error || terminalError) {
         reject(error || terminalError);

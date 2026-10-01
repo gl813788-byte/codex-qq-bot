@@ -92,6 +92,7 @@ subsystems belong in focused modules.
 | HTTP dispatch and security boundary | `src/channels/http/` |
 | Proactive interest and media enhancement | `src/qq-enhancer/` |
 | Main model contract and tool guide | `src/qq-main-prompt.js` |
+| Per-command host permission requests | `src/app/qq-host-command.js` |
 | Two-model proactive approval | `src/qq-proactive-pipeline.js` |
 | Ordinary interest cycle state | `src/qq-proactive-cycle-state.js` |
 | Follow-up fusion | `src/qq-reply-steering.js` |
@@ -117,6 +118,16 @@ refactor with a behavior change.
   separate from verified owner and administrator authority.
 - Owner authority is absolute. Administrators are privileged but are not owners
   and cannot grant administrators or perform ambiguous critical destruction.
+- Both engines expose `qq_runtime.host_command` for on-demand host execution.
+  Only the original verified owner of an active, non-proactive reply may use it;
+  each invocation authorizes one command, never a permanent sandbox change.
+  The model decides whether human confirmation is needed from risk, target
+  clarity and existing authorization, and must wait when an answer is necessary.
+  Administrators retain project access; focus changes, model arguments and other
+  participants cannot grant host authority. Keep call-id deduplication, isolated
+  command env, deadlines, output limits and cancellation of the command group.
+  Do not log command bodies, reasons or output. Native Claude restrictions below
+  remain in place; this separate Hub tool is the owner-only host boundary.
 - Keep the Hub loopback-only by default. Remote access requires explicit intent,
   an API token, safe CORS, and the existing network controls.
 - Secrets stay in untracked environment/profile files. Never log or commit

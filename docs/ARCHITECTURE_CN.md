@@ -30,6 +30,7 @@
 | `src/app/` | 应用状态和启动组合 | 全局状态结构、启动生命周期 |
 | `src/app/qq-codex-runtime-settings.js` | Codex 原生轮次参数指令策略 | 推理摘要、人格、服务档位校验或持久化动作 |
 | `src/app/qq-file-agent-turn.js` | 主人/管理员/公开文件 Agent 能力策略 | 文件任务根目录、沙箱、管理员破坏性操作拒绝策略或文件任务指令 |
+| `src/app/qq-host-command.js` | 按命令申请本机权限 | 原始发送者身份校验、隔离命令环境、执行时限和结果；两个引擎共用 |
 | `src/channels/http/hub-http-server.js` | HTTP 请求分发与安全错误边界 | API/资源路由或 OneBot webhook 限流 |
 | `src/channels/qq/` | 唯一的 QQ / OneBot 消息传输边界 | 解析、校验和归一化 QQ 事件 |
 | `src/config/` | 环境变量与运行默认值 | 新环境变量、默认值、范围约束 |

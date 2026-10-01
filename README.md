@@ -90,6 +90,8 @@ With Claude Code every reply starts its own `claude -p` process, so replies take
 - WebFetch is off so the model cannot call the local OneBot or Hub APIs; web search is offered only when web lookup is enabled;
 - your personal Claude Code settings, hooks and MCP connectors are not loaded, so connectors such as Gmail or Drive are never exposed to QQ users.
 
+Both engines support [host access requests per command](docs/OPERATIONS.md#requesting-host-access-for-a-command). For an owner's local task, the Bot can ask the Hub to execute a specific command; the Hub verifies the original sender. The Bot decides whether human confirmation is needed from the risk and existing authorization. Administrators and ordinary users cannot gain owner access this way.
+
 ## What you need
 
 | Item | Notes |

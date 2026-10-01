@@ -19,6 +19,7 @@ import { createEnvironmentConfig } from "./config/environment.js";
 import { createInitialState } from "./app/create-initial-state.js";
 import { createSettingsSnapshot } from "./app/settings-snapshot.js";
 import { buildQqFileAgentTurn } from "./app/qq-file-agent-turn.js";
+import { executeQqHostCommand } from "./app/qq-host-command.js";
 import { createSettingsRepository } from "./infrastructure/storage/settings-repository.js";
 import {
   buildQqCodexRuntimeSettingAction,
@@ -6811,6 +6812,18 @@ function formatQqBotInternalToolContext(event) {
 }
 
 async function executeQqStructuredNativeTool(call, event, context = {}) {
+  if (call?.namespace === "qq_runtime" && call?.tool === "host_command") {
+    const rootEvent = context.rootEvent || event;
+    const replyScope = context.replyScope;
+    if (!replyScope || replyScope.cancelled || replyScope !== getActiveQqReplyScopeForEvent(rootEvent)) {
+      return { ok: false, error: "本轮任务已结束或取消，不能执行本机命令。" };
+    }
+    return executeQqHostCommand(call.arguments, {
+      event: rootEvent,
+      projectDir,
+      signal: replyScope.signal
+    });
+  }
   if (call?.namespace === "qq_context" && call?.tool === "download_file") {
     return executeQqInboundFileNativeTool(call, context.rootEvent || event);
   }
@@ -9196,7 +9209,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       recordQqColdProactiveToolAttempt(toolEvent, command, result);
       return result;
     },
-    executeStructured: executeQqStructuredNativeTool,
+    executeStructured: (call, toolEvent, context) => executeQqStructuredNativeTool(call, toolEvent, { ...context, replyScope }),
     event,
     onToolEvent: logQqNativeToolEvent
   });
@@ -9863,7 +9876,7 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
   const dispatchNativeTool = createQqNativeToolDispatcher({
     event,
     onToolEvent: logQqNativeToolEvent,
-    executeStructured: executeQqStructuredNativeTool,
+    executeStructured: (call, toolEvent, context) => executeQqStructuredNativeTool(call, toolEvent, { ...context, replyScope }),
     executeCommand: async (command, toolEvent) => {
       const toolResult = await executeQqBotInternalCommand(command, toolEvent);
       recordQqColdProactiveToolAttempt(toolEvent, command, toolResult);
