@@ -178,7 +178,7 @@ test("remote and npm installers expose a Chinese no-GitHub-web entry", async () 
 
   const packageMetadata = JSON.parse(await readFile(packagePath, "utf8"));
   assert.equal(packageMetadata.name, "codex-qq-bot");
-  assert.equal(packageMetadata.version, "1.1.9");
+  assert.equal(packageMetadata.version, "1.2.0");
   const installerSource = await readFile(remoteInstallerPath, "utf8");
   const npmInstallerSource = await readFile(npmInstallerPath, "utf8");
   assert.match(installerSource, /\/root\/Codex-QQ-Bot/);
