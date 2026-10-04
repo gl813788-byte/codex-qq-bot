@@ -15,7 +15,9 @@ resolve_script_path() {
 
 SCRIPT_DIR="$(resolve_script_path "$0")"
 PROJECT_DIR="${CODEX_QQ_BOT_PROJECT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+source "$SCRIPT_DIR/../install.sh"
 DISTRO="${CODEX_QQ_BOT_TERMUX_DISTRO:-debian}"
+GUEST_IMAGE="${CODEX_QQ_BOT_TERMUX_IMAGE:-}"
 GUEST_PROJECT_DIR="${CODEX_QQ_BOT_TERMUX_GUEST_PROJECT_DIR:-/opt/codex-qq-bot}"
 STATE_DIR="${CODEX_QQ_BOT_TERMUX_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/codex-qq-bot}"
 STATE_FILE="$STATE_DIR/termux-proot-${DISTRO}.state"
@@ -83,17 +85,13 @@ esac
 [ -d "$PROJECT_DIR" ] || die "项目目录不存在：$PROJECT_DIR"
 case "$PROJECT_DIR" in
   *:*) die "Termux 项目目录不能包含冒号：$PROJECT_DIR" ;;
+  /sdcard|/sdcard/*|/storage/*|*/storage/shared|*/storage/shared/*)
+    die "请将项目放在 Termux 私有 HOME 下；共享存储/SD 卡不支持安装所需的执行权限和符号链接。" ;;
 esac
 
 ensure_native_termux() {
-  case "${PREFIX:-}" in
-    /data/data/*com.termux*/files/usr|/data/user/*/*com.termux*/files/usr) return ;;
-  esac
-  [ -n "${TERMUX_VERSION:-}" ] && return
-  [ -n "${TERMUX_APP__APP_VERSION_NAME:-}" ] && return
-  if [ "${CODEX_QQ_BOT_BOOTSTRAP_PLATFORM:-}" = "termux" ] || [ "${CODEX_QQ_BOT_TERMUX_TEST_MODE:-0}" = "1" ]; then
-    return
-  fi
+  [ "${CODEX_QQ_BOT_TERMUX_TEST_MODE:-0}" = 1 ] && return
+  [ "$(bash "$SCRIPT_DIR/install-environment.sh" --platform)" = termux ] && return
   die "该入口只能从原生 Termux 运行；已经位于 PRoot Linux 时请直接运行仓库 ncc。"
 }
 
@@ -115,7 +113,7 @@ ensure_proot_distro() {
   fi
   command -v pkg >/dev/null 2>&1 || die "没有找到 Termux pkg，无法安装 proot-distro。"
   log "正在安装 proot-distro；已下载的发行版层会由它缓存，重新运行可复用。"
-  pkg install -y proot-distro
+  ncc_termux_install proot-distro
   command -v proot-distro >/dev/null 2>&1 || die "proot-distro 安装后仍不可用。"
 }
 
@@ -134,7 +132,19 @@ ensure_guest() {
     return
   fi
   log "没有找到可用的 $DISTRO，开始安装；下载缓存与已完成层可在中断后复用。"
-  if ! proot-distro install "$DISTRO"; then
+  local -a install_command=(proot-distro install)
+  # OCI-based proot-distro uses an image source and a separate local name.
+  # Older releases still accept distro aliases; preserve both interfaces.
+  local install_help
+  install_help="$(proot-distro install --help 2>&1 || true)"
+  if [[ "$install_help" == *--name* ]]; then
+    install_command+=(--name "$DISTRO" "${GUEST_IMAGE:-$DISTRO}")
+  elif [ -n "$GUEST_IMAGE" ]; then
+    die "当前 proot-distro 不支持自定义 OCI/本地镜像，请用 pkg 更新 proot-distro 后重试；现有容器已保留。"
+  else
+    install_command+=("$DISTRO")
+  fi
+  if ! "${install_command[@]}"; then
     die "PRoot 发行版安装未完成。请保留现有缓存并重新运行同一个 ncc；若反复失败，再运行 proot-distro login $DISTRO 检查具体错误。"
   fi
   guest_is_usable || die "PRoot 发行版安装结束，但 $DISTRO 无法启动。未自动删除任何现有容器。"
@@ -165,14 +175,30 @@ run_guest() {
     --env "CODEX_QQ_BOT_UNDER_TERMUX=1"
     --env "CODEX_QQ_BOT_TERMUX_GUEST_ACTIVE=1"
     --env "CODEX_QQ_BOT_INSTALL_NAPCAT=skip"
-    -- "$command_path" "$@"
   )
   if [ "$DRY_RUN" = "1" ]; then
     printf '[Termux 安装方案] 计划进入 PRoot：'
-    printf '%q ' "${command[@]}"
+    printf '%q ' "${command[@]}" -- "$command_path" "$@"
     printf '\n'
     return
   fi
+  local key value target
+  for key in http_proxy https_proxy all_proxy no_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY \
+    CODEX_QQ_BOT_NPM_REGISTRY npm_config_registry NPM_CONFIG_REGISTRY \
+    CODEX_QQ_BOT_NODE_DIST_URL CODEX_QQ_BOT_NODE_MAJOR CODEX_QQ_BOT_DOWNLOAD_TIMEOUT \
+    CODEX_QQ_BOT_METADATA_TIMEOUT CODEX_QQ_BOT_CONNECT_TIMEOUT CODEX_QQ_BOT_DOWNLOAD_ATTEMPTS; do
+    value="${!key:-}"
+    [ -z "$value" ] || command+=(--env "$key=$value")
+  done
+  for key in SSL_CERT_FILE CURL_CA_BUNDLE NODE_EXTRA_CA_CERTS REQUESTS_CA_BUNDLE npm_config_cafile NPM_CONFIG_CAFILE; do
+    value="${!key:-}"
+    [ -n "$value" ] || continue
+    [ -f "$value" ] || die "$key 指向不可读取的证书文件，请修正后重试。"
+    case "$value" in *:*) die "$key 文件路径不能包含冒号。" ;; esac
+    target="/tmp/codex-qq-bot-${key}.pem"
+    command+=(--bind "$value:$target" --env "$key=$target")
+  done
+  command+=(-- "$command_path" "$@")
   "${command[@]}"
 }
 
@@ -190,4 +216,4 @@ if [ "$MODE" = "prepare" ]; then
 fi
 
 log "进入 $DISTRO PRoot；项目映射到 $GUEST_PROJECT_DIR。"
-run_guest /usr/bin/env zsh "$GUEST_PROJECT_DIR/scripts/ncc.command" "${NCC_ARGS[@]}"
+run_guest /usr/bin/env bash "$GUEST_PROJECT_DIR/一键部署.command" "${NCC_ARGS[@]}"

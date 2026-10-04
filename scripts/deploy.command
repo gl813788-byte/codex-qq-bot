@@ -199,7 +199,7 @@ calculate_sha256() {
 dependency_fingerprint() {
   local files=("$PROJECT_DIR/package.json")
   [ -f "$PROJECT_DIR/package-lock.json" ] && files+=("$PROJECT_DIR/package-lock.json")
-  calculate_sha256 "${files[@]}"
+  { calculate_sha256 "${files[@]}"; node -p '[process.platform, process.arch, process.versions.modules].join(":")'; } | calculate_sha256
 }
 
 current_source_id() {
@@ -241,21 +241,22 @@ ensure_npm_ready() {
   fingerprint="$(dependency_fingerprint)"
   if [ -f "$dependency_marker" ] &&
     [ "$(sed -n '1p' "$dependency_marker")" = "$fingerprint" ] &&
-    (cd "$PROJECT_DIR" && npm ls --depth=0 --silent >/dev/null 2>&1); then
+    (cd "$PROJECT_DIR" && npm ls --global=false --include=dev --include=optional --depth=0 --silent >/dev/null 2>&1); then
     log "npm 依赖阶段已完成且校验有效，断点续装将跳过重复安装。"
   else
     log "安装 npm 项目依赖；npm 下载缓存会在中断后继续复用。"
     if [ -f "$PROJECT_DIR/package-lock.json" ]; then
-      (cd "$PROJECT_DIR" && npm ci --no-audit --no-fund)
+      (cd "$PROJECT_DIR" && bash "$PROJECT_DIR/scripts/install-npm.sh" ci --global=false)
     else
-      (cd "$PROJECT_DIR" && npm install --no-audit --no-fund --no-package-lock)
+      (cd "$PROJECT_DIR" && bash "$PROJECT_DIR/scripts/install-npm.sh" install --global=false --no-package-lock)
     fi
     mkdir -p "$PROJECT_DIR/node_modules"
+    (cd "$PROJECT_DIR" && npm ls --global=false --include=dev --include=optional --depth=0 --silent) || die "npm 安装后依赖仍不完整，请检查 npm 配置后重试。"
     printf '%s\n' "$fingerprint" > "${dependency_marker}.tmp.$$"
     mv "${dependency_marker}.tmp.$$" "$dependency_marker"
   fi
   log "运行完整项目验证；若这里中断，下次只重跑验证阶段。"
-  (cd "$PROJECT_DIR" && npm run verify)
+  (cd "$PROJECT_DIR" && npm --global=false run verify)
   set_local_env_value "$ENVIRONMENT_PREPARED_KEY" "1"
   set_local_env_value "$ENVIRONMENT_SOURCE_KEY" "$(current_source_id)"
 }
@@ -307,7 +308,7 @@ main() {
   [ -f "$BOOTSTRAP_SCRIPT" ] || die "找不到环境自举器：$BOOTSTRAP_SCRIPT"
   log "自动补齐基础工具、Node.js 20+、Codex CLI，以及受支持平台上的 NapCat/OneBot 运行环境。"
   bash "$BOOTSTRAP_SCRIPT" --all
-  export PATH="$HOME/.local/share/codex-qq-bot/node/bin:$HOME/.local/bin:$PATH"
+  export PATH="${CODEX_QQ_BOT_MANAGED_NODE_HOME:-${CODEX_QQ_BOT_USER_PREFIX:-$HOME/.local}/share/codex-qq-bot/node}/bin:${CODEX_QQ_BOT_USER_PREFIX:-$HOME/.local}/bin:$PATH"
   ensure_project_files
   write_local_env_defaults
   ensure_npm_ready

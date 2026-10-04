@@ -15,11 +15,17 @@ ncc_env_detect_arch() {
     printf '%s\n' "$CODEX_QQ_BOT_BOOTSTRAP_ARCH"
     return
   fi
-  case "$(uname -m 2>/dev/null || true)" in
+  local machine=""
+  # The guest's userland may be 32-bit even on a 64-bit Android kernel.
+  if [ "$(uname -s 2>/dev/null || true)" = Darwin ]; then machine="$(uname -m)"
+  elif command -v dpkg >/dev/null 2>&1; then machine="$(dpkg --print-architecture 2>/dev/null || true)"
+  elif command -v apk >/dev/null 2>&1; then machine="$(apk --print-arch 2>/dev/null || true)"; fi
+  [ -n "$machine" ] || machine="$(uname -m 2>/dev/null || true)"
+  case "$machine" in
     x86_64|amd64) printf 'x64\n' ;;
     arm64|aarch64) printf 'arm64\n' ;;
-    armv7l|armv8l) printf 'armv7\n' ;;
-    i386|i486|i586|i686) printf 'x86\n' ;;
+    armv7l|armv8l|armhf|armel|arm) printf 'armv7\n' ;;
+    i386|i486|i586|i686|x86) printf 'x86\n' ;;
     riscv64) printf 'riscv64\n' ;;
     *) printf 'unknown\n' ;;
   esac
@@ -33,6 +39,9 @@ ncc_env_is_native_termux() {
   case "${CODEX_QQ_BOT_BOOTSTRAP_OS:-}" in
     termux|android-termux) return 0 ;;
   esac
+  [ "${CODEX_QQ_BOT_UNDER_TERMUX:-0}" != 1 ] || return 1
+  # A Linux guest can inherit Termux variables; its own root filesystem wins.
+  { [ -r /etc/os-release ] && [ -x /bin/sh ]; } && return 1
   [ -n "${TERMUX_VERSION:-}" ] && return 0
   [ -n "${TERMUX_APP__APP_VERSION_NAME:-}" ] && return 0
   case "${PREFIX:-}" in
@@ -71,6 +80,11 @@ ncc_env_is_termux_proot() {
   esac
   [ "${CODEX_QQ_BOT_UNDER_TERMUX:-0}" = "1" ] && return 0
   ncc_env_is_native_termux && return 1
+  if [ -r /etc/os-release ] && [ -x /bin/sh ]; then
+    [ -n "${TERMUX_VERSION:-}" ] && return 0
+    [ -n "${TERMUX_APP__APP_VERSION_NAME:-}" ] && return 0
+    case "${PREFIX:-}" in /data/*com.termux*/files/usr) return 0 ;; esac
+  fi
   if [ -d /data/data/com.termux/files/usr ] || [ -d /data/user/0/com.termux/files/usr ]; then
     [ -r /etc/os-release ] && return 0
   fi
@@ -218,7 +232,7 @@ ncc_env_detect_libc() {
   esac
   if getconf GNU_LIBC_VERSION >/dev/null 2>&1; then
     printf 'glibc\n'
-  elif ldd --version 2>&1 | head -n 1 | grep -qi musl; then
+  elif { ldd --version 2>&1 || true; } | sed -n '1p' | grep -qi musl; then
     printf 'musl\n'
   else
     printf 'unknown\n'

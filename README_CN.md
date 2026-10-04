@@ -50,12 +50,15 @@ pnpm dlx "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"
 没有 Node.js 就用引导脚本，它会自己补齐：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
-# 只有 wget：
-wget -qO- https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
+installer="$(mktemp "${TMPDIR:-$HOME}/codex-qq-bot-install.XXXXXX")" &&
+curl --disable -fSL --retry 3 --connect-timeout 15 --max-time 180 \
+  https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh -o "$installer" &&
+bash "$installer" --prepare
 ```
 
 安装器会下载或升级源码，装好 Node.js 20+ 和 Codex CLI，装依赖，然后跑一遍 `npm run verify`。中途断了就重新运行同一条命令，已经完成的步骤会跳过。已有的 Git 工作区、本地改动、`data/`、`config/local.env` 和机器上别的 `ncc` 都不会被覆盖。
+
+引导脚本完整下载成功后才会执行，避免网络中断时运行半截脚本。只有 wget 时，可用 `wget -T 15 -t 3 -O "$installer" <同一下载地址>` 替换 curl 命令。Termux 会自动进入受管 PRoot；网络重试、代理/证书传递和兼容性限制见安装说明。
 
 各平台的处理方式不一样：原生 Linux（apt-get / dnf，glibc）会自动装 NapCat；Termux、PRoot、WSL 和容器需要你自己准备 OneBot。细节见[安装说明](docs/INSTALLATION_CN.md)。
 

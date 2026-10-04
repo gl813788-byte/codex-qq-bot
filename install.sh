@@ -1,5 +1,87 @@
 #!/usr/bin/env bash
 
+# Sourceable transport helpers live here so curl | bash remains self-contained.
+# Sourcing this file defines helpers only; it never installs or changes shell options.
+ncc_download() {
+  local url="$1" destination="$2" resume="${3:-0}"
+  local limit="${4:-${CODEX_QQ_BOT_DOWNLOAD_TIMEOUT:-600}}"
+  local attempts="${CODEX_QQ_BOT_DOWNLOAD_ATTEMPTS:-3}"
+  local connect="${CODEX_QQ_BOT_CONNECT_TIMEOUT:-15}" attempt status=1 ipv4=0 value identity
+  for value in "$limit" "$attempts" "$connect"; do
+    case "$value" in ''|*[!0-9]*|0) printf '下载超时/重试次数必须是正整数。\n' >&2; return 2 ;; esac
+    [ "${#value}" -le 5 ] && [ "$value" -le 86400 ] && [ "$value" -gt 0 ] || return 2
+  done
+  attempts=$((10#$attempts))
+  connect=$((10#$connect))
+  limit=$((10#$limit))
+  [ "$attempts" -le 5 ] || { printf '下载尝试次数不能超过 5。\n' >&2; return 2; }
+  identity="$(printf '%s' "$url" | cksum | awk '{print $1 "-" $2}')"
+  if [ "$resume" = 1 ] && [ -f "$destination.source" ] &&
+    [ "$(cat "$destination.source")" != "$identity" ]; then resume=0; fi
+  printf '%s\n' "$identity" > "$destination.source" || return
+  local -a options=()
+  for ((attempt=1; attempt<=attempts; attempt++)); do
+    options=()
+    if command -v curl >/dev/null 2>&1; then
+      [ "$resume" = 1 ] && options+=(--continue-at -)
+      [ "$ipv4" = 1 ] && options+=(-4)
+      case "$url" in https:*) options+=(--proto-redir '=https') ;; *) options+=(--proto-redir '=https,http') ;; esac
+      # Ignore user .curlrc (output/proxy/HEAD options can corrupt an installer),
+      # while preserving standard proxy and CA environment variables and TLS checks.
+      if curl --disable --fail --location --silent --show-error \
+        --connect-timeout "$connect" --max-time "$limit" \
+        --speed-limit 1024 --speed-time 30 \
+        "${options[@]}" "$url" -o "$destination"; then return 0; else status=$?; fi
+      case "$status" in
+        33|36) resume=0 ;; # Server cannot resume: next request truncates the fragment.
+        5|6|7|28|35|52|56) ipv4=1 ;;
+        18|22) ;; # Partial body or HTTP error; bounded retry also handles 429/5xx.
+        *) return "$status" ;; # Includes TLS trust failures; never bypass verification.
+      esac
+    elif command -v wget >/dev/null 2>&1; then
+      [ "$resume" = 1 ] && options+=(-c)
+      if WGETRC=/dev/null wget -q -T "$connect" -t 1 ${options[@]+"${options[@]}"} -O "$destination" "$url"; then
+        return 0
+      else status=$?; fi
+    else
+      printf '缺少 curl/wget。\n' >&2; return 127
+    fi
+    [ "$attempt" -ge "$attempts" ] || sleep "$attempt"
+  done
+  printf '下载失败（退出码 %s）。已保留缓存；请检查代理、DNS、证书和系统时间后重跑。\n' "$status" >&2
+  return "$status"
+}
+
+ncc_termux_install() {
+  local backend="${TERMUX_APP_PACKAGE_MANAGER:-}"
+  if [ -z "$backend" ]; then
+    if command -v apt >/dev/null 2>&1; then backend=apt; else backend=pacman; fi
+  fi
+  if [ "$backend" = pacman ]; then
+    pkg install --noconfirm "$@"
+  else
+    if pkg install -y -o Acquire::Retries=3 "$@"; then return 0; fi
+    printf 'Termux 包安装未完成，重新检查已配置镜像并重试一次。\n' >&2
+    pkg --check-mirror install -y -o Acquire::Retries=3 "$@"
+  fi
+}
+
+ncc_npm() {
+  local cache="${CODEX_QQ_BOT_NPM_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/codex-qq-bot/npm}"
+  local -a options=(--cache "$cache" --fetch-retries=3 --fetch-retry-mintimeout=1000
+    --fetch-retry-maxtimeout=15000 --fetch-timeout=120000 --no-audit --no-fund
+    --include=optional --include=dev --ignore-scripts=false)
+  [ -z "${CODEX_QQ_BOT_NPM_REGISTRY:-}" ] || options+=(--registry "$CODEX_QQ_BOT_NPM_REGISTRY")
+  mkdir -p "$cache" || return
+  # CLI options override omit=optional/production/cache in old npmrc files.
+  # Registry authentication, proxies, custom CAs and strict TLS remain intact.
+  npm "$@" "${options[@]}"
+}
+
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  return 0
+fi
+
 set -Eeuo pipefail
 
 INSTALLER_DIR=""
@@ -124,6 +206,12 @@ detect_installer_platform() {
     bash "$ENVIRONMENT_DETECTOR" --platform
     return
   fi
+  if [ "${CODEX_QQ_BOT_UNDER_TERMUX:-0}" = 1 ] ||
+    { [ -r /etc/os-release ] && [ -x /bin/sh ] &&
+      { [ -n "${TERMUX_VERSION:-}" ] || [ -n "${TERMUX_APP__APP_VERSION_NAME:-}" ] || [[ "${PREFIX:-}" == /data/*com.termux*/files/usr ]]; }; }; then
+    printf 'termux-proot\n'
+    return
+  fi
   if [ -n "${TERMUX_VERSION:-}" ] || [ -n "${TERMUX_APP__APP_VERSION_NAME:-}" ]; then
     printf 'termux\n'
     return
@@ -176,6 +264,13 @@ case "$INSTALL_DIR" in
   *) INSTALL_DIR="$(pwd)/$INSTALL_DIR" ;;
 esac
 
+if [ "$INSTALL_PLATFORM" = termux ]; then
+  case "$INSTALL_DIR" in
+    /sdcard|/sdcard/*|/storage/*|*/storage/shared|*/storage/shared/*)
+      die "Termux 项目需要可执行文件和符号链接，请把 --install-dir 设在 Termux 私有 HOME 下，不能使用共享存储/SD 卡。" ;;
+  esac
+fi
+
 if [ -z "$STATE_ROOT" ]; then
   STATE_ROOT="${INSTALL_DIR}.install-cache"
 fi
@@ -199,11 +294,12 @@ run_privileged() {
 install_system_package() {
   local package="$1"
   if [ "$INSTALL_PLATFORM" = "termux" ] && command -v pkg >/dev/null 2>&1; then
-    pkg install -y "$package"
+    ncc_termux_install "$package"
   elif command -v brew >/dev/null 2>&1; then
     brew install "$package"
   elif command -v apt-get >/dev/null 2>&1; then
-    run_privileged apt-get update && run_privileged apt-get install -y "$package"
+    run_privileged env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o DPkg::Lock::Timeout=60 update &&
+      run_privileged env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o DPkg::Lock::Timeout=60 install -y "$package"
   elif command -v dnf >/dev/null 2>&1; then
     run_privileged dnf install -y "$package"
   elif command -v yum >/dev/null 2>&1; then
@@ -220,47 +316,38 @@ install_system_package() {
 }
 
 ensure_downloader() {
-  if command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; then
-    return 0
+  if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    log "缺少下载工具，正在尝试自动安装 curl。"
+    install_system_package curl || die "系统既没有 curl/wget，也无法通过包管理器安装 curl。"
+    command -v curl >/dev/null 2>&1 || die "curl 安装后仍不在 PATH 中。"
   fi
-  log "缺少下载工具，正在尝试自动安装 curl。"
-  install_system_package curl || die "系统既没有 curl/wget，也无法通过包管理器安装 curl。"
-  command -v curl >/dev/null 2>&1 || die "curl 安装后仍不在 PATH 中。"
+  # Minimal Linux guests sometimes ship curl without the recommended CA bundle.
+  # Repair this before the first HTTPS request, not only after source extraction.
+  if [ "$INSTALL_PLATFORM" != macos ] &&
+    [ -z "${CURL_CA_BUNDLE:-}${SSL_CERT_FILE:-}${SSL_CERT_DIR:-}" ] &&
+    [ ! -s /etc/ssl/certs/ca-certificates.crt ] && [ ! -s /etc/pki/tls/certs/ca-bundle.crt ] &&
+    [ ! -s /etc/ssl/cert.pem ] && [ ! -s "${PREFIX:-/nonexistent}/etc/tls/cert.pem" ]; then
+    log "缺少系统 CA 证书包，先补齐 HTTPS 校验所需证书。"
+    install_system_package ca-certificates || die "无法安装 CA 证书包，请配置可用的软件源或自定义 CA 后重试。"
+  fi
 }
 
 download_file() {
-  local url="$1"
-  local destination="$2"
-  local resume="${3:-0}"
   ensure_downloader
-  if command -v curl >/dev/null 2>&1; then
-    if [ "$resume" = "1" ]; then
-      curl -fL --retry 3 --retry-delay 1 --continue-at - "$url" -o "$destination"
-    else
-      curl -fL --retry 3 --retry-delay 1 "$url" -o "$destination"
-    fi
-  elif [ "$resume" = "1" ]; then
-    wget -c --tries=3 -O "$destination" "$url"
+  if ncc_download "$@"; then return 0; fi
+  if [ -z "${CODEX_QQ_BOT_ARCHIVE_BASE_URL:-}" ] && [ -n "$SOURCE_REVISION" ] && [ "$1" = "$ASSET_URL" ]; then
+    warn "GitHub archive 下载未完成，尝试同一提交的官方 codeload 地址。"
+    # Different endpoints need not have byte-identical ZIPs: restart, never append.
+    [ ! -f "$2" ] || quarantine_cached_file "$2" "切换下载端点，保存旧片段"
+    ncc_download "https://codeload.github.com/${REPOSITORY}/zip/${SOURCE_REVISION}" "$2" 0
   else
-    wget --tries=3 -O "$destination" "$url"
+    return 1
   fi
 }
 
 download_json() {
-  local url="$1"
-  local destination="$2"
   ensure_downloader
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL \
-      -H "Accept: application/vnd.github+json" \
-      -H "X-GitHub-Api-Version: 2022-11-28" \
-      "$url" -o "$destination"
-  else
-    wget -q \
-      --header="Accept: application/vnd.github+json" \
-      --header="X-GitHub-Api-Version: 2022-11-28" \
-      -O "$destination" "$url"
-  fi
+  ncc_download "$1" "$2" 0 "${CODEX_QQ_BOT_METADATA_TIMEOUT:-60}"
 }
 
 ensure_command() {
@@ -286,31 +373,12 @@ ASSET_URL=""
 EXPECTED_SHA256=""
 
 read_default_branch() {
-  local repository_file="$1"
-  if command -v node >/dev/null 2>&1; then
-    node - "$repository_file" <<'NODE'
-const fs = require("node:fs");
-const repository = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-if (typeof repository.default_branch !== "string" || !repository.default_branch) process.exit(2);
-process.stdout.write(repository.default_branch);
-NODE
-  else
-    sed -n 's/^[[:space:]]*"default_branch":[[:space:]]*"\([^"]*\)".*/\1/p' "$repository_file" | head -n 1
-  fi
+  sed -n 's/.*"default_branch":[[:space:]]*"\([A-Za-z0-9._/-]*\)".*/\1/p' "$1" | sed -n '1p'
 }
 
 read_commit_revision() {
-  local commit_file="$1"
-  if command -v node >/dev/null 2>&1; then
-    node - "$commit_file" <<'NODE'
-const fs = require("node:fs");
-const commit = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-if (typeof commit.sha !== "string" || !/^[0-9a-f]{40}$/i.test(commit.sha)) process.exit(2);
-process.stdout.write(commit.sha.toLowerCase());
-NODE
-  else
-    sed -n 's/^[[:space:]]*"sha":[[:space:]]*"\([0-9a-fA-F]\{40\}\)".*/\1/p' "$commit_file" | head -n 1 | tr '[:upper:]' '[:lower:]'
-  fi
+  # Stop at the first sha (the commit, before nested tree/parent entries).
+  tr '\n' ' ' < "$1" | sed -n 's/^[^"]*"sha":[[:space:]]*"\([0-9a-fA-F]\{40\}\)".*/\1/p' | tr '[:upper:]' '[:lower:]'
 }
 
 parse_source_metadata() {
@@ -341,65 +409,71 @@ parse_source_metadata() {
   [ -n "$SOURCE_LABEL" ] && [ -n "$ASSET_NAME" ] && [ -n "$ASSET_URL" ]
 }
 
-resolve_latest_source() {
-  local metadata_dir="$1"
-  local repository_file="$metadata_dir/repository.json"
-  local commit_file="$metadata_dir/commit.json"
-  local configured_branch="$SOURCE_BRANCH"
-  local cached_source_available=0
-  mkdir -p "$metadata_dir"
-  ensure_downloader
-
-  if [ -f "$repository_file" ] && [ -f "$commit_file" ] && parse_source_metadata "$repository_file" "$commit_file" "$configured_branch"; then
-    cached_source_available=1
-    log "发现上次解析的源码信息：$SOURCE_LABEL；仍会联网检查默认分支是否已有更新。"
-  fi
-
-  local repository_tmp="${repository_file}.part"
-  local commit_tmp="${commit_file}.part"
+resolve_source_api() {
+  local repository_tmp="$1" commit_tmp="$2" configured_branch="$3"
   if [ -z "$configured_branch" ]; then
     log "正在查询仓库默认分支……"
-    if ! download_json "$REPOSITORY_API_URL" "$repository_tmp"; then
-      if [ "$cached_source_available" = "1" ] && parse_source_metadata "$repository_file" "$commit_file" "$configured_branch"; then
-        warn "无法刷新仓库信息，将使用已缓存且已验证的源码进度：$SOURCE_LABEL"
-        return 0
-      fi
-      die "无法读取仓库信息，请检查网络后重试。"
-    fi
-    if ! SOURCE_BRANCH="$(read_default_branch "$repository_tmp")"; then
-      if [ "$cached_source_available" = "1" ] && parse_source_metadata "$repository_file" "$commit_file" "$configured_branch"; then
-        warn "新仓库信息无效，将使用已缓存且已验证的源码进度：$SOURCE_LABEL"
-        return 0
-      fi
-      die "仓库信息中没有有效的默认分支。"
-    fi
+    download_json "$REPOSITORY_API_URL" "$repository_tmp" || return 1
+    SOURCE_BRANCH="$(read_default_branch "$repository_tmp")" || return 1
   else
     SOURCE_BRANCH="$configured_branch"
     printf '{"default_branch":"%s"}\n' "$SOURCE_BRANCH" > "$repository_tmp"
   fi
-  case "$SOURCE_BRANCH" in
-    ""|*[!A-Za-z0-9._/-]*) die "源码分支名称无效。" ;;
-  esac
-
-  local effective_commit_api="$COMMIT_API_URL"
-  [ -n "$effective_commit_api" ] || effective_commit_api="${REPOSITORY_API_URL%/}/commits/${SOURCE_BRANCH}"
+  case "$SOURCE_BRANCH" in ''|*[!A-Za-z0-9._/-]*) return 1 ;; esac
+  local endpoint="${COMMIT_API_URL:-${REPOSITORY_API_URL%/}/commits/${SOURCE_BRANCH}}"
   log "正在解析 ${SOURCE_BRANCH} 分支的最新提交……"
-  if ! download_json "$effective_commit_api" "$commit_tmp"; then
-    if [ "$cached_source_available" = "1" ] && parse_source_metadata "$repository_file" "$commit_file" "$configured_branch"; then
-      warn "无法刷新最新提交，将使用已缓存且已验证的源码进度：$SOURCE_LABEL"
-      return 0
-    fi
-    die "无法读取最新提交信息，请检查网络后重试。"
+  download_json "$endpoint" "$commit_tmp" || return 1
+  parse_source_metadata "$repository_tmp" "$commit_tmp" "$configured_branch"
+}
+
+resolve_source_git() {
+  local repository_tmp="$1" commit_tmp="$2" branch="$3" refs revision
+  local git_url="${CODEX_QQ_BOT_GIT_URL:-https://github.com/${REPOSITORY}.git}"
+  command -v git >/dev/null 2>&1 || return 1
+  # A custom API must not silently switch to a different repository.
+  if [ -n "${CODEX_QQ_BOT_REPOSITORY_API_URL:-}${COMMIT_API_URL}" ] && [ -z "${CODEX_QQ_BOT_GIT_URL:-}" ]; then return 1; fi
+  case "$branch" in *[!A-Za-z0-9._/-]*) return 1 ;; esac
+  local -a deadline=(env)
+  command -v timeout >/dev/null 2>&1 && deadline=(timeout 60)
+  log "API 暂不可用，尝试 Git 协议解析同一仓库的提交。"
+  refs="$(GIT_TERMINAL_PROMPT=0 "${deadline[@]}" git -c http.lowSpeedLimit=1024 -c http.lowSpeedTime=15 \
+    ls-remote --symref "$git_url" "${branch:+refs/heads/}${branch:-HEAD}")" || return 1
+  if [ -z "$branch" ]; then
+    branch="$(printf '%s\n' "$refs" | sed -n 's,^ref: refs/heads/\([^[:space:]]*\)[[:space:]].*,\1,p')"
   fi
-  if ! parse_source_metadata "$repository_tmp" "$commit_tmp" "$configured_branch"; then
-    if [ "$cached_source_available" = "1" ] && parse_source_metadata "$repository_file" "$commit_file" "$configured_branch"; then
-      warn "最新提交信息无效，将使用已缓存且已验证的源码进度：$SOURCE_LABEL"
-      return 0
-    fi
-    die "最新提交信息无效。"
+  revision="$(printf '%s\n' "$refs" | awk '$1 ~ /^[0-9a-fA-F]+$/ && length($1)==40 {print $1}')"
+  case "$branch" in ''|*[!A-Za-z0-9._/-]*) return 1 ;; esac
+  printf '{"default_branch":"%s"}\n' "$branch" > "$repository_tmp"
+  printf '{"sha":"%s"}\n' "$revision" > "$commit_tmp"
+  parse_source_metadata "$repository_tmp" "$commit_tmp" "$branch"
+}
+
+resolve_latest_source() {
+  local metadata_dir="$1" configured_branch="$SOURCE_BRANCH" identity
+  mkdir -p "$metadata_dir"
+  ensure_downloader
+  identity="$(printf '%s\n' "$REPOSITORY_API_URL" "$COMMIT_API_URL" "$configured_branch" "${CODEX_QQ_BOT_GIT_URL:-}" | cksum | awk '{print $1 "-" $2}')"
+  # Namespace metadata so changing repository or branch never reuses another source.
+  metadata_dir="$metadata_dir/$identity"
+  mkdir -p "$metadata_dir"
+  local repository_file="$metadata_dir/repository.json" commit_file="$metadata_dir/commit.json"
+  local repository_tmp="$metadata_dir/repository.json.part" commit_tmp="$metadata_dir/commit.json.part"
+  if [ -f "$repository_file" ] && [ -f "$commit_file" ] &&
+    parse_source_metadata "$repository_file" "$commit_file" "$configured_branch"; then
+    log "发现上次解析的源码信息：$SOURCE_LABEL；仍会联网检查默认分支是否已有更新。"
   fi
-  mv "$repository_tmp" "$repository_file"
-  mv "$commit_tmp" "$commit_file"
+  if resolve_source_api "$repository_tmp" "$commit_tmp" "$configured_branch" ||
+    resolve_source_git "$repository_tmp" "$commit_tmp" "$configured_branch"; then
+    mv "$repository_tmp" "$repository_file"
+    mv "$commit_tmp" "$commit_file"
+    return 0
+  fi
+  if [ -f "$repository_file" ] && [ -f "$commit_file" ] &&
+    parse_source_metadata "$repository_file" "$commit_file" "$configured_branch"; then
+    warn "无法刷新最新提交，将使用已缓存且已验证的源码进度：$SOURCE_LABEL"
+    return 0
+  fi
+  die "无法读取最新提交。请检查网络/代理/证书，或用 --archive <ZIP> 安装已下载源码。"
 }
 
 calculate_sha256() {
@@ -421,7 +495,7 @@ ensure_sha256_tool() {
   fi
   log "缺少 SHA-256 校验工具，正在尝试自动安装 coreutils。"
   install_system_package coreutils || die "无法安装 SHA-256 校验工具。"
-  calculate_sha256 "$0" >/dev/null 2>&1 || die "coreutils 安装后仍没有可用的 SHA-256 工具。"
+  calculate_sha256 /dev/null >/dev/null 2>&1 || die "coreutils 安装后仍没有可用的 SHA-256 工具。"
 }
 
 archive_is_verified() {
@@ -504,6 +578,9 @@ ensure_source_launcher() {
     printf '#!/usr/bin/env bash\n'
     printf 'set -Eeuo pipefail\n'
     printf 'PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"\n'
+    printf 'if [ -f "$PROJECT_DIR/scripts/install-environment.sh" ] && [ "$(bash "$PROJECT_DIR/scripts/install-environment.sh" --platform)" = termux ]; then\n'
+    printf '  exec bash "$PROJECT_DIR/scripts/termux-proot.command" "$@"\n'
+    printf 'fi\n'
     printf 'if [ -f "$PROJECT_DIR/scripts/bootstrap-environment.sh" ]; then\n'
     printf '  bash "$PROJECT_DIR/scripts/bootstrap-environment.sh" --base-only\n'
     printf 'elif ! command -v zsh >/dev/null 2>&1; then\n'
@@ -845,6 +922,15 @@ if [ -f "$downloaded_archive" ] && ! archive_is_verified "$downloaded_archive" "
   rm -f "$verified_marker" "$extracted_marker"
 fi
 
+if [ -n "$ARCHIVE_FILE" ]; then
+  ensure_sha256_tool
+  local_source_hash="$(calculate_sha256 "$ARCHIVE_FILE")"
+  if [ -f "$downloaded_archive" ] && [ "$(calculate_sha256 "$downloaded_archive")" != "$local_source_hash" ]; then
+    quarantine_cached_file "$downloaded_archive" "同名本地 ZIP 内容已变化，重新校验和安装"
+    rm -f "$verified_marker" "$extracted_marker"
+  fi
+fi
+
 if [ -f "$downloaded_archive" ]; then
   log "发现已下载的安装包，跳过下载并继续下一阶段：$downloaded_archive"
 elif [ -n "$ARCHIVE_FILE" ]; then
@@ -910,7 +996,7 @@ if [ "$EXISTING_INSTALL" = "1" ] && installed_source_matches "$archive_sha256"; 
   exit 0
 fi
 
-archive_root="$(unzip -Z1 "$downloaded_archive" | awk -F/ 'NF && $1 != "" { print $1; exit }')"
+archive_root="$(unzip -Z1 "$downloaded_archive" | awk -F/ 'NF && $1 != "" && !found { print $1; found=1 }')"
 [ -n "$archive_root" ] || die "ZIP 没有可安装内容。"
 source_dir="$extract_dir/$archive_root"
 if [ -f "$extracted_marker" ] && [ "$(sed -n '1p' "$extracted_marker")" = "$archive_sha256" ] && [ -d "$source_dir" ]; then

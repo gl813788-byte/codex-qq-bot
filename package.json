@@ -14,6 +14,7 @@
     "scripts/bootstrap-environment.sh",
     "scripts/deploy.command",
     "scripts/install-environment.sh",
+    "scripts/install-npm.sh",
     "scripts/ncc.command",
     "scripts/prepare-environment.sh",
     "scripts/termux-proot.command"

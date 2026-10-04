@@ -420,6 +420,14 @@ its platform matrix here. Preserve these invariants:
   another global `ncc`.
 - Native Termux uses its managed PRoot path; WSL, containers, macOS, musl, and
   unsupported hosts use an external OneBot according to the installer policy.
+- Preserve source-bound download caches, proxy/CA settings, and existing PRoot
+  guests. Diagnose failures by stage; never delete a guest or disable TLS as a
+  recovery shortcut. Validate staged Node/npm before replacing the runtime.
+- Installer network helpers live in sourceable `install.sh`; sourcing it must
+  not initialize installation or change shell options. The npm package must
+  include `scripts/install-npm.sh` and its shared helper dependency.
+- Test transport outages, unsupported ranges, stale npm configuration, inherited
+  Termux variables, and failed Node activation with local fixtures before release.
 - `package.json` is the version authority. Before publishing, run narrow
   installer tests, `npm run verify`, and `npm pack --dry-run`, then inspect the
   packed file list.

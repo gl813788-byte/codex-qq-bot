@@ -137,6 +137,15 @@ npm run ncc -- setup
 | `CODEX_QQ_BOT_TERMUX_GUEST_PROJECT_DIR` | `/opt/codex-qq-bot` | 项目在受管 PRoot 中的绑定路径，真实文件仍保存在 Termux 用户目录 |
 | `CODEX_QQ_BOT_TERMUX_STATE_DIR` | `~/.local/state/codex-qq-bot` | 受管 PRoot 准备状态 |
 | `CODEX_QQ_BOT_PREPARE_AFTER_INSTALL` | npm 入口为 `1`，raw `install.sh` 为 `0` | 源码就位后是否继续完成平台依赖、Codex、npm 依赖与 `verify`；命令行 `--prepare` / `--download-only` 可覆盖 |
+| `CODEX_QQ_BOT_CONNECT_TIMEOUT` | `15` | curl 连接超时秒数；wget 连接/读取超时 |
+| `CODEX_QQ_BOT_DOWNLOAD_TIMEOUT` | `600` | 每次 curl 文件下载最长秒数 |
+| `CODEX_QQ_BOT_METADATA_TIMEOUT` | `60` | 每次源码/Node 清单下载最长秒数 |
+| `CODEX_QQ_BOT_DOWNLOAD_ATTEMPTS` | `3` | 单次下载最多尝试次数，范围 1–5 |
+| `CODEX_QQ_BOT_NODE_DIST_URL` | `https://nodejs.org/dist` | Node 官方格式发行根地址，包含版本目录和校验清单 |
+| `CODEX_QQ_BOT_NPM_REGISTRY` | `npm 配置` | 显式覆盖安装用 registry；不会自动切换到第三方源 |
+| `CODEX_QQ_BOT_NPM_CACHE` | `~/.cache/codex-qq-bot/npm` | 独立 npm 缓存，默认遵循 XDG_CACHE_HOME |
+| `CODEX_QQ_BOT_GIT_URL` | `https://github.com/<repository>.git` | API 失败时使用的 Git 远端；自定义 API 需要显式设置 |
+| `CODEX_QQ_BOT_TERMUX_IMAGE` | `空` | 新 OCI proot-distro 的镜像/本地归档来源；已有容器仍优先复用 |
 
 具体行为与决策矩阵见[一键安装与环境方案](INSTALLATION_CN.md)。测试专用的 `CODEX_QQ_BOT_BOOTSTRAP_FORCE_*` 变量不属于用户配置接口。
 

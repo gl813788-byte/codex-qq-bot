@@ -27,7 +27,7 @@ if [ -z "${CODEX_QQ_BOT_TERMUX_GUEST_ACTIVE:-}" ] &&
   exec bash "$TERMUX_PROOT_SCRIPT" "$@"
 fi
 
-export PATH="$HOME/.local/share/codex-qq-bot/node/bin:$HOME/.local/bin:$PATH"
+export PATH="${CODEX_QQ_BOT_MANAGED_NODE_HOME:-${CODEX_QQ_BOT_USER_PREFIX:-$HOME/.local}/share/codex-qq-bot/node}/bin:${CODEX_QQ_BOT_USER_PREFIX:-$HOME/.local}/bin:$PATH"
 SETTINGS_FILE="$PROJECT_DIR/data/settings.json"
 LOCAL_ENV_FILE="$PROJECT_DIR/config/local.env"
 DEPLOY_SCRIPT="$PROJECT_DIR/scripts/deploy.command"
@@ -145,7 +145,7 @@ calculate_sha256() {
 dependency_fingerprint() {
   local files=("$PROJECT_DIR/package.json")
   [ -f "$PROJECT_DIR/package-lock.json" ] && files+=("$PROJECT_DIR/package-lock.json")
-  calculate_sha256 "${files[@]}"
+  { calculate_sha256 "${files[@]}"; node -p '[process.platform, process.arch, process.versions.modules].join(":")'; } | calculate_sha256
 }
 
 current_source_id() {
@@ -181,7 +181,7 @@ environment_is_prepared() {
   command -v codex >/dev/null 2>&1 || return 1
   [ "$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf '0')" -ge 20 ] || return 1
   [ -d "$PROJECT_DIR/node_modules" ] || return 1
-  (cd "$PROJECT_DIR" && npm ls --depth=0 --silent >/dev/null 2>&1) || return 1
+  (cd "$PROJECT_DIR" && npm ls --global=false --include=dev --include=optional --depth=0 --silent >/dev/null 2>&1) || return 1
 }
 
 setup_is_complete() {

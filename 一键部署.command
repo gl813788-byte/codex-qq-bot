@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-set -u
-set -o pipefail
+set -Eeuo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NCC_SCRIPT="$PROJECT_DIR/scripts/ncc.command"

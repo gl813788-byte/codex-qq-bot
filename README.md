@@ -50,12 +50,15 @@ pnpm dlx "codex-qq-bot@$(npm view codex-qq-bot@latest version --prefer-online)"
 Without Node.js, use the bootstrap script. It installs what is missing:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
-# wget only:
-wget -qO- https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh | bash
+installer="$(mktemp "${TMPDIR:-$HOME}/codex-qq-bot-install.XXXXXX")" &&
+curl --disable -fSL --retry 3 --connect-timeout 15 --max-time 180 \
+  https://raw.githubusercontent.com/gl813788-byte/codex-qq-bot/main/install.sh -o "$installer" &&
+bash "$installer" --prepare
 ```
 
 The installer downloads or upgrades the source, installs Node.js 20+ and the Codex CLI, installs dependencies, and runs `npm run verify`. If it stops halfway, run the same command again and finished steps are skipped. Existing Git worktrees, local changes, `data/`, `config/local.env` and any other `ncc` on the machine are left alone.
+
+The bootstrap runs only after the script downloads completely, avoiding execution of a truncated script. With wget only, replace curl with `wget -T 15 -t 3 -O "$installer" <same URL>`. Termux enters managed PRoot automatically; see the installation guide for retries, proxy/CA forwarding, and compatibility limits.
 
 Platforms are handled differently: native Linux (apt-get / dnf, glibc) gets NapCat installed automatically; on Termux, PRoot, WSL and containers you bring your own OneBot. Details are in the [installation guide](docs/INSTALLATION.md).
 
