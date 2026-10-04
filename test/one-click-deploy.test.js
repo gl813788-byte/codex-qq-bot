@@ -243,6 +243,8 @@ test("dependency preparation resumes after the npm stage and reruns verification
       { mode: 0o755 }
     );
     await writeFile(join(fixture, "scripts", "deploy.command"), await readFile(deployPath), { mode: 0o755 });
+    await writeFile(join(fixture, "install.sh"), await readFile(remoteInstallerPath));
+    await writeFile(join(fixture, "scripts", "install-npm.sh"), await readFile(join(projectDir, "scripts/install-npm.sh")));
 
     const first = spawnSync("zsh", [join(fixture, "scripts", "deploy.command"), "--prepare-only"], {
       cwd: fixture,
@@ -661,7 +663,7 @@ test("one-click launcher delegates first-run and later daily behavior to ncc", a
   assert.match(nccSource, /群白名单/);
   assert.match(nccSource, /OneBot/);
   assert.match(deploySource, /npm install/);
-  assert.match(deploySource, /npm run verify/);
+  assert.match(deploySource, /npm --global=false run verify/);
 
   const help = spawnSync("bash", [launcherPath, "--help"], {
     cwd: projectDir,

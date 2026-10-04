@@ -24,6 +24,7 @@ TERMUX_PROOT_SCRIPT="$PROJECT_DIR/scripts/termux-proot.command"
 }
 # shellcheck source=install-environment.sh
 source "$ENVIRONMENT_DETECTOR"
+source "$PROJECT_DIR/install.sh"
 
 export PATH="$MANAGED_NODE_HOME/bin:$USER_PREFIX/bin:$PATH"
 
@@ -102,10 +103,10 @@ install_packages() {
   fi
   case "$manager" in
     brew) brew install "$@" ;;
-    pkg) pkg install -y "$@" ;;
+    pkg) ncc_termux_install "$@" ;;
     apt-get)
-      run_privileged apt-get update
-      run_privileged apt-get install -y "$@"
+      run_privileged env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o DPkg::Lock::Timeout=60 update
+      run_privileged env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o DPkg::Lock::Timeout=60 install -y "$@"
       ;;
     dnf) run_privileged dnf install -y "$@" ;;
     yum) run_privileged yum install -y "$@" ;;
@@ -166,6 +167,11 @@ ensure_base_tools() {
       has_command sha256sum || MISSING_PACKAGES+=(coreutils)
       ;;
   esac
+  if [ "$manager" != brew ] && [ "$manager" != none ] &&
+    [ ! -s /etc/ssl/certs/ca-certificates.crt ] && [ ! -s /etc/pki/tls/certs/ca-bundle.crt ] &&
+    [ ! -s "${PREFIX:-/nonexistent}/etc/tls/cert.pem" ]; then
+    MISSING_PACKAGES+=(ca-certificates)
+  fi
   if [ "${#MISSING_PACKAGES[@]}" -gt 0 ]; then
     log "检测到缺失的基础工具，开始自动补齐。"
     install_packages "$manager" "${MISSING_PACKAGES[@]}"
@@ -176,7 +182,11 @@ ensure_base_tools() {
 
 node_is_usable() {
   [ "$FORCE_NODE_INSTALL" != "1" ] || return 1
-  has_command node && has_command npm && [ "$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf '0')" -ge 20 ]
+  local expected_platform="${OS_NAME:-linux}"
+  [ "$expected_platform" != macos ] || expected_platform=darwin
+  has_command node && has_command npm &&
+    node -e 'if (Number(process.versions.node.split(".")[0]) < 20 || process.platform !== process.argv[1]) process.exit(1)' "$expected_platform" >/dev/null 2>&1 &&
+    npm --version >/dev/null 2>&1
 }
 
 install_node_from_packages() {
@@ -228,20 +238,35 @@ install_managed_node() {
     *) die "当前平台没有可用的 Node.js 官方二进制：$os/$arch" ;;
   esac
 
-  local dist_url="https://nodejs.org/dist/latest-v${NODE_MAJOR}.x"
+  case "$NODE_MAJOR" in ''|*[!0-9]*) die "Node.js 主版本必须是数字。" ;; esac
+  local dist_base="${CODEX_QQ_BOT_NODE_DIST_URL:-https://nodejs.org/dist}"
+  local dist_url="${dist_base%/}/latest-v${NODE_MAJOR}.x"
   if [ "$DRY_RUN" = "1" ]; then
     log "计划从 Node.js 官方发行页安装 v${NODE_MAJOR}.x（$platform），并校验 SHA-256。"
     return 0
   fi
 
-  mkdir -p "$CACHE_DIR" "$USER_PREFIX/share/codex-qq-bot"
-  local sums_file="$CACHE_DIR/node-v${NODE_MAJOR}-SHASUMS256.txt"
-  curl -fL --retry 3 "$dist_url/SHASUMS256.txt" -o "$sums_file"
+  mkdir -p "$CACHE_DIR" "$(dirname "$MANAGED_NODE_HOME")"
+  local source_key="$(printf '%s' "$dist_base" | cksum | awk '{print $1}')"
+  local sums_file="$CACHE_DIR/node-v${NODE_MAJOR}-${source_key}-SHASUMS256.txt"
+  local manifest_pattern="^[0-9a-fA-F]{64}  node-v${NODE_MAJOR}\.[0-9]+\.[0-9]+-${platform}\.tar\.xz$"
+  if ncc_download "$dist_url/SHASUMS256.txt" "$sums_file.part" 0 "${CODEX_QQ_BOT_METADATA_TIMEOUT:-60}" &&
+    grep -Eq "$manifest_pattern" "$sums_file.part"; then
+    mv "$sums_file.part" "$sums_file"
+  elif [ -f "$sums_file" ] && grep -Eq "$manifest_pattern" "$sums_file"; then
+    warn "无法刷新 Node.js 校验清单，复用同一安装源的已验证清单。"
+  else
+    die "无法取得有效的 Node.js 校验清单。缓存已保留；检查网络或设置 CODEX_QQ_BOT_NODE_DIST_URL 后重试。"
+  fi
   local archive_name=""
-  archive_name="$(awk -v suffix="-$platform.tar.xz" '$2 ~ suffix "$" { print $2; exit }' "$sums_file")"
+  archive_name="$(grep -E "$manifest_pattern" "$sums_file" | awk -v suffix="-$platform.tar.xz" '$2 ~ suffix "$" { print $2 }' | sed -n '1p')"
   [ -n "$archive_name" ] || die "Node.js 校验清单里没有 $platform 安装包。"
   local expected=""
   expected="$(awk -v name="$archive_name" '$2 == name { print $1; exit }' "$sums_file")"
+  local node_version="${archive_name#node-}"
+  node_version="${node_version%-$platform.tar.xz}"
+  # Pin the archive to the manifest version: latest-vXX.x may change mid-download.
+  dist_url="${dist_base%/}/$node_version"
   local archive_file="$CACHE_DIR/$archive_name"
   local partial_file="${archive_file}.part"
   if [ ! -f "$archive_file" ] || [ "$(sha256_file "$archive_file" 2>/dev/null || true)" != "$expected" ]; then
@@ -250,23 +275,23 @@ install_managed_node() {
         log "Node.js 下载片段已经完整，直接复用。"
       else
         log "发现未完成的 Node.js 下载，正在从断点续传。"
-        if ! curl -fL --retry 3 --continue-at - "$dist_url/$archive_name" -o "$partial_file"; then
+        if ! ncc_download "$dist_url/$archive_name" "$partial_file" 1; then
           if [ "$(sha256_file "$partial_file" 2>/dev/null || true)" = "$expected" ]; then
             log "服务端结束了续传请求，但本地文件校验完整，继续使用。"
           else
             warn "Node.js 断点续传失败，隔离旧片段并改为一次完整重下。"
             mv "$partial_file" "${partial_file}.invalid-$(date +%Y%m%d%H%M%S)-$$"
-            curl -fL --retry 3 "$dist_url/$archive_name" -o "$partial_file"
+            ncc_download "$dist_url/$archive_name" "$partial_file" 0
           fi
         fi
       fi
     else
-      curl -fL --retry 3 "$dist_url/$archive_name" -o "$partial_file"
+      ncc_download "$dist_url/$archive_name" "$partial_file" 0
     fi
     if [ "$(sha256_file "$partial_file" 2>/dev/null || true)" != "$expected" ]; then
       warn "续传结果摘要不匹配，隔离片段后进行完整重下。"
       mv "$partial_file" "${partial_file}.invalid-$(date +%Y%m%d%H%M%S)-$$"
-      curl -fL --retry 3 "$dist_url/$archive_name" -o "$partial_file"
+      ncc_download "$dist_url/$archive_name" "$partial_file" 0
     fi
     [ "$(sha256_file "$partial_file" 2>/dev/null || true)" = "$expected" ] ||
       die "Node.js 完整重下后 SHA-256 仍不匹配，已保留片段供排查。"
@@ -274,20 +299,29 @@ install_managed_node() {
   fi
   [ "$(sha256_file "$archive_file")" = "$expected" ] || die "Node.js 安装包 SHA-256 校验失败。"
 
-  local stage="$USER_PREFIX/share/codex-qq-bot/node.new.$$"
-  local previous="$USER_PREFIX/share/codex-qq-bot/node.previous.$$"
-  rm -rf "$stage" "$previous"
-  mkdir -p "$stage"
+  local stage previous
+  stage="$(mktemp -d "${MANAGED_NODE_HOME}.new.XXXXXX")"
+  previous="${stage}.previous"
   tar -xJf "$archive_file" --strip-components=1 -C "$stage"
-  if [ -e "$MANAGED_NODE_HOME" ]; then
-    mv "$MANAGED_NODE_HOME" "$previous"
+  if ! "$stage/bin/node" -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)' ||
+    ! PATH="$stage/bin:$PATH" "$stage/bin/npm" --version >/dev/null 2>&1; then
+    die "新 Node.js 无法在当前 CPU/系统库上运行，旧版本未改动。暂存目录：$stage；可通过系统包安装 Node.js 20+ 后重试。"
   fi
-  mv "$stage" "$MANAGED_NODE_HOME"
-  rm -rf "$previous"
+  if [ -e "$MANAGED_NODE_HOME" ]; then mv "$MANAGED_NODE_HOME" "$previous"; fi
+  if ! mv "$stage" "$MANAGED_NODE_HOME"; then
+    [ ! -e "$previous" ] || mv "$previous" "$MANAGED_NODE_HOME"
+    die "无法切换 Node.js，已尝试恢复旧版本。"
+  fi
   export PATH="$MANAGED_NODE_HOME/bin:$USER_PREFIX/bin:$PATH"
   hash -r
   FORCE_NODE_INSTALL="0"
-  node_is_usable || die "Node.js 安装完成后仍不可用。"
+  if ! node_is_usable; then
+    mv "$MANAGED_NODE_HOME" "$stage"
+    [ ! -e "$previous" ] || mv "$previous" "$MANAGED_NODE_HOME"
+    die "新 Node.js 安装后验证失败，已恢复旧版本。"
+  fi
+  # Retain the prior runtime for manual rollback; never delete it before validation.
+  [ ! -e "$previous" ] || log "旧 Node.js 已保留：$previous"
   log "已安装隔离的 Node.js $(node --version)：$MANAGED_NODE_HOME"
 }
 
@@ -323,7 +357,7 @@ ensure_codex() {
     log "计划用 npm 安装 Codex CLI 到 $USER_PREFIX。"
     return
   fi
-  npm install --global --prefix "$USER_PREFIX" @openai/codex
+  ncc_npm install --global --prefix "$USER_PREFIX" @openai/codex
   export PATH="$USER_PREFIX/bin:$PATH"
   hash -r
   codex_is_usable || die "Codex CLI 安装后仍无法启动。当前环境可能不在官方支持范围；原生 Termux 请使用 ncc 自动管理的 PRoot Debian。"
@@ -391,7 +425,7 @@ ensure_napcat() {
 
   mkdir -p "$CACHE_DIR"
   local installer="$CACHE_DIR/napcat-installer.sh"
-  curl -fL --retry 3 "$NAPCAT_INSTALLER_URL" -o "${installer}.part"
+  ncc_download "$NAPCAT_INSTALLER_URL" "${installer}.part" 0
   mv "${installer}.part" "$installer"
   bash -n "$installer" || die "NapCat 官方安装脚本语法检查失败。"
   local work_dir=""
@@ -457,6 +491,12 @@ if [ "$PLATFORM_NAME" = "unknown" ]; then
   die "无法识别当前操作系统，未执行任何系统包安装。"
 fi
 
+if [ "$MODE" != base ]; then
+  case "$ARCH_NAME" in
+    x64|arm64) ;;
+    *) die "当前用户空间架构 $ARCH_NAME 没有本安装器支持的官方 Codex 二进制。请使用 arm64/x64 Linux/PRoot；不会静默安装不兼容程序。" ;;
+  esac
+fi
 ensure_base_tools "$PACKAGE_MANAGER"
 [ "$MODE" = "base" ] && exit 0
 ensure_node "$OS_NAME" "$ARCH_NAME" "$NODE_STRATEGY" "$PACKAGE_MANAGER"

@@ -135,6 +135,15 @@ These variables control installation only; they are not Hub runtime configuratio
 | `CODEX_QQ_BOT_TERMUX_GUEST_PROJECT_DIR` | `/opt/codex-qq-bot` | Bind path inside managed PRoot; real files remain under the Termux user's project directory |
 | `CODEX_QQ_BOT_TERMUX_STATE_DIR` | `~/.local/state/codex-qq-bot` | Managed PRoot preparation state |
 | `CODEX_QQ_BOT_PREPARE_AFTER_INSTALL` | `1` for npm, `0` for raw `install.sh` | Whether source installation continues through platform dependencies, Codex, npm dependencies, and `verify`; `--prepare` / `--download-only` override it |
+| `CODEX_QQ_BOT_CONNECT_TIMEOUT` | `15` | curl connection timeout in seconds; wget connection/read timeout |
+| `CODEX_QQ_BOT_DOWNLOAD_TIMEOUT` | `600` | Maximum seconds for each curl file download |
+| `CODEX_QQ_BOT_METADATA_TIMEOUT` | `60` | Maximum seconds per source/Node manifest download with curl |
+| `CODEX_QQ_BOT_DOWNLOAD_ATTEMPTS` | `3` | Maximum attempts per download, from 1 to 5 |
+| `CODEX_QQ_BOT_NODE_DIST_URL` | `https://nodejs.org/dist` | Node distribution root with version directories and official-format checksums |
+| `CODEX_QQ_BOT_NPM_REGISTRY` | `npm configuration` | Explicit installer registry override; no automatic third-party mirror |
+| `CODEX_QQ_BOT_NPM_CACHE` | `~/.cache/codex-qq-bot/npm` | Isolated npm cache; the default respects XDG_CACHE_HOME |
+| `CODEX_QQ_BOT_GIT_URL` | `https://github.com/<repository>.git` | Git remote used on API failure; must be explicit when using a custom API |
+| `CODEX_QQ_BOT_TERMUX_IMAGE` | `empty` | Image/local archive for OCI proot-distro; an existing guest still takes precedence |
 
 The behavior and decision matrix live in [One-click installation and environment plans](INSTALLATION.md). Test-only `CODEX_QQ_BOT_BOOTSTRAP_FORCE_*` variables are not a user configuration interface.
 
