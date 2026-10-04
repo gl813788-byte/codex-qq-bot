@@ -1,6 +1,6 @@
 {
   "name": "codex-qq-bot",
-  "version": "1.1.9",
+  "version": "1.2.0",
   "private": false,
   "description": "把 QQ 接到本机 Codex 或 Claude Code 的机器人，附中文一键安装器",
   "type": "module",
