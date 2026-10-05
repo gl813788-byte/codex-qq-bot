@@ -220,7 +220,7 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 | --- | --- | --- |
 | `CODEX_REMOTE_CONTACT_QQ_ENHANCER` | `1` | 设为 `0` 关闭增强启动默认值 |
 | `CODEX_REMOTE_CONTACT_QQ_MEMORY_LIMIT` | `10` | 轻量会话记忆上限 |
-| `CODEX_REMOTE_CONTACT_QQ_GROUP_MEMORY_LIMIT` | `200` | 群聊滚动记录上限 |
+| `CODEX_REMOTE_CONTACT_QQ_GROUP_MEMORY_LIMIT` | `200` | 群聊/私聊滚动记录条数目标，至少保留 20 条；额外保留完整的最近 5 分钟，以支持图片再次识别 |
 | `CODEX_REMOTE_CONTACT_QQ_PROACTIVE` | `1` | 主动兴趣总开关默认值 |
 | `CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE` | `1` | 语义 judge 开关 |
 | `..._JUDGE_EVERY_MESSAGES` | `20` | 普通未 @ 消息阈值，范围 1–1000 |

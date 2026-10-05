@@ -370,11 +370,13 @@ import {
 import { fetchWithUrlPolicy } from "./safe-fetch.js";
 import { createCoalescingWriter } from "./coalescing-writer.js";
 import {
-  collectQqContextImages,
+  appendQqRecentMessage,
+  collectQqImageMemoryCandidates,
+  formatQqImageMemoryCandidates,
   getQqGroupRecentContextLimit,
-  qqContextImageMaxAgeMs,
   snapshotQqContextImages
 } from "./qq-enhancer/context-images.js";
+import { executeQqImageMemoryTool } from "./app/qq-image-memory-tool.js";
 import {
   createOneBotEventDeduplicator,
   getEventDedupeKey,
@@ -1879,6 +1881,7 @@ async function buildQqPendingSteeringInput(entries, generation) {
       semanticRecall.context ? "" : null,
       "",
       aggregate.text,
+      formatQqImageMemoryCandidates(getQqImageMemoryCandidates(parentEvent || aggregate)),
       parentEvent
         ? formatQqInboundFileCandidates(collectQqInboundFileCandidates(parentEvent), { maxBytes: qqFileMaxBytes })
         : formatQqInboundFileCandidates(collectQqInboundFileCandidates(aggregate), { maxBytes: qqFileMaxBytes }),
@@ -6815,6 +6818,20 @@ function formatQqBotInternalToolContext(event) {
 }
 
 async function executeQqStructuredNativeTool(call, event, context = {}) {
+  if (call?.namespace === "qq_context" && call?.tool === "images") {
+    const rootEvent = context.rootEvent || event;
+    const replyScope = context.replyScope;
+    if (!replyScope || replyScope !== getActiveQqReplyScopeForEvent(rootEvent)) {
+      return { ok: false, error: "本轮任务已结束，不能读取图片。" };
+    }
+    return executeQqImageMemoryTool(call.arguments, {
+      candidates: getQqImageMemoryCandidates(rootEvent),
+      taskWorkspace: rootEvent.qqTaskWorkspace,
+      prepareImage: (image, options) => prepareSingleQqModelImage(image, { ...options, fetchOneBotImage }),
+      maxBytes: qqImageMaxBytes,
+      assertActive: () => assertQqReplyScopeActive(replyScope)
+    });
+  }
   if (call?.namespace === "qq_runtime" && call?.tool === "host_command") {
     const rootEvent = context.rootEvent || event;
     const replyScope = context.replyScope;
@@ -8998,6 +9015,7 @@ async function buildAssistantInstructions(event) {
     senderId: event.senderId,
     enhancerEnabled: Boolean(state.qq.enhancer.enabled),
     toolsEnabled: !event.qqPrivateProactive,
+    imageMemoryContext: event.qqPrivateProactive ? "" : formatQqImageMemoryCandidates(getQqImageMemoryCandidates(event)),
     assistantProfile: assistantSkillBrief
   });
 }
@@ -9176,8 +9194,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   const webContext = "";
   const stickerCatalog = state.qq.enhancer.enabled ? await buildQqStickerCatalog(qqStickerDir) : [];
   assertQqReplyScopeActive(replyScope);
-  const qqContextImages = getQqRecentContextImageInputs(event);
-  const qqModelImages = getQqModelImageInputs(event, text, { contextImages: qqContextImages });
+  const qqModelImages = getQqModelImageInputs(event, text);
   const replyStickerCandidates = extractQqReplyStickerCandidates(event);
   event.qqReplyStickerCandidates = replyStickerCandidates;
   const shouldInspectImages = qqModelImages.length > 0;
@@ -9373,7 +9390,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       event.pendingImageRequestText ? "" : null,
       hasAnyQqImageReference(event) && !shouldInspectImages ? "本条 QQ 消息或引用消息带了图片，但文本兴趣不足或未明确要求看图；Hub 已跳过视觉输入以节省 token。不要声称看过图片内容。" : null,
       shouldInspectImages ? `收到的 QQ 图片：${formatQqImageSummary(qqModelImages)}` : null,
-      qqContextImages.length ? formatQqContextImageSources(qqModelImages) : null,
+      event.qqPrivateProactive ? null : formatQqImageMemoryCandidates(getQqImageMemoryCandidates(event)),
       imagePaths.length ? `可查看的本地图片数量：${imagePaths.length}` : null,
       event.qqAnimationVision?.length ? `动图信息：${event.qqAnimationVision.join("；")}。你可以自行决定要展开几个动图、每个抽几帧以及抽哪些位置；需要时调用 /看表情 当前序号 | 20%,50%,80%（也支持“中段3帧”“均匀5帧”）。不要把同一动图的多帧误当成多张独立表情。` : null,
       imagePaths.length ? "你可以查看图片内容，但回复要像群聊自然接话：不必默认逐条解析图片。只有对方明确让你看图、判断内容、评价截图/表情包，或图片是回答关键时，才说明看到的主元素、文字、构图或梗图大意；完全无法辨认主体时才说看不清。" : null,
@@ -9895,6 +9912,7 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
     taskWorkspace,
     quotedContext,
     imagePaths,
+    imageMemoryContext: formatQqImageMemoryCandidates(getQqImageMemoryCandidates(event)),
     inboundFileSummary: formatQqInboundFileCandidates(
       collectQqInboundFileCandidates(event),
       { maxBytes: qqFileMaxBytes }
@@ -10407,48 +10425,19 @@ function shouldInspectQqImages(event, text) {
   return scoreQqTextInterest(normalized, event) >= 6;
 }
 
-function getQqModelImageInputs(event, text, { contextImages = [] } = {}) {
+function getQqModelImageInputs(event, text) {
   const currentImages = Array.isArray(event.images) ? event.images : [];
   const quotedImages = Array.isArray(event.replyContext?.images) ? event.replyContext.images : [];
   const directImages = shouldInspectQqImages(event, text)
     ? [...currentImages, ...quotedImages]
     : [];
-  return dedupeQqImages([...directImages, ...(Array.isArray(contextImages) ? contextImages : [])]).slice(0, 4);
+  return dedupeQqImages(directImages).slice(0, 4);
 }
 
-function getQqRecentContextImageInputs(event) {
-  if (!event.groupId) return [];
-  if (event.proactiveDecision?.replyContext?.length) {
-    return collectQqContextImages(event.proactiveDecision.replyContext, {
-      limit: 4,
-      maxAgeMs: qqContextImageMaxAgeMs
-    });
-  }
-  if (!isExplicitQqAtEvent(event) && !event.isReplyToSelf && !event.replyContext?.isSelf) return [];
-  const currentMessageId = event.raw?.message_id == null ? "" : String(event.raw.message_id);
-  const recentEntries = selectConversationMessagesForContext(event, { expandLevel: 0 })
-    .filter((entry) => entry.contextLayer !== "related");
-  return collectQqContextImages(recentEntries, {
-    limit: 4,
-    excludeMessageId: currentMessageId,
-    maxAgeMs: qqContextImageMaxAgeMs
-  });
-}
-
-function formatQqContextImageSources(images = []) {
-  const lines = (Array.isArray(images) ? images : [])
-    .map((image, index) => image?.context ? [image, index] : null)
-    .filter(Boolean)
-    .map(([image, index]) => {
-      const context = image.context;
-      const text = context.text || "（纯图片消息）";
-      return `- 图片${index + 1} 来自最近群聊中的 ${context.sender || "群友"}：${text}`;
-    });
-  if (lines.length === 0) return null;
-  return [
-    "最近群聊上下文图片对应关系（这些图来自前文，不一定是当前发送者刚发的；结合对应消息理解）：",
-    ...lines
-  ].join("\n");
+function getQqImageMemoryCandidates(event) {
+  const scopeId = getQqMemoryScopeId(event);
+  const entries = state.qq.memory.enabled && scopeId ? state.qq.memory.recentMessages[scopeId] || [] : [];
+  return collectQqImageMemoryCandidates(entries, { event, scopeId });
 }
 
 async function prepareQqVisionImages(images, { outputDir, event } = {}) {
@@ -10869,7 +10858,7 @@ function rememberQqConversationAssistantMessage(scopeId, reply, {
     replyTargetId: normalizeQqIdentifier(replyTargetId) || undefined
   };
   const current = state.qq.memory.recentMessages[scopeId] || [];
-  state.qq.memory.recentMessages[scopeId] = [...current, entry].slice(-state.qq.memory.groupRecentLimit);
+  state.qq.memory.recentMessages[scopeId] = appendQqRecentMessage(current, entry, { limit: state.qq.memory.groupRecentLimit });
   const knowledgeUsage = qqKnowledgeBaseRepository.writable
     ? recordQqKnowledgeUsage(state.qq.knowledgeBase, [], {
       scopeId,
@@ -10901,7 +10890,7 @@ async function rememberQqGroupMessage(event) {
   if (hasUnhandledQqAudio(event)) return;
   await attachQqKnowledgeIdentity(event);
   const text = compactMemoryText(normalizeQqDisplayText(stripMentionText(event.text) || event.text || ""));
-  const images = snapshotQqContextImages(event.images, { limit: 4 });
+  const images = snapshotQqContextImages(event.images, { limit: 12 });
   if (!text && images.length === 0 && !event.hasAtSegment && !event.hasReplySegment) return;
   const entry = {
     at: new Date().toISOString(),
@@ -10925,11 +10914,12 @@ async function rememberQqGroupMessage(event) {
       senderName: event.replyContext.senderName,
       isSelf: Boolean(event.replyContext.isSelf),
       text: compactMemoryText(event.replyContext.text || ""),
-      imageCount: Array.isArray(event.replyContext.images) ? event.replyContext.images.length : 0
+      imageCount: Array.isArray(event.replyContext.images) ? event.replyContext.images.length : 0,
+      images: snapshotQqContextImages(event.replyContext.images, { limit: 12 })
     } : undefined
   };
   const current = state.qq.memory.recentMessages[scopeId] || [];
-  state.qq.memory.recentMessages[scopeId] = [...current, entry].slice(-state.qq.memory.groupRecentLimit);
+  state.qq.memory.recentMessages[scopeId] = appendQqRecentMessage(current, entry, { limit: state.qq.memory.groupRecentLimit });
   const knowledgeMatches = getQqKnowledgeMatchesForEvent(event);
   event.qqKnowledgeMatches = knowledgeMatches;
   const knowledgeUsage = qqKnowledgeBaseRepository.writable

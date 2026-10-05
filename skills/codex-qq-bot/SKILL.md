@@ -166,6 +166,14 @@ refactor with a behavior change.
   input/output paths. Ordinary file attachments must already exist under that
   output directory; rejected paths produce a warning and failed receipt even
   when the accompanying text was sent. Do not auto-import ordinary files.
+- Earlier images stay selectable in the original group/private scope while
+  within five minutes OR the latest 20 raw messages (before repeat compaction,
+  including text and Bot replies). Keep the full five-minute storage window
+  even when it exceeds the ordinary transcript count target. Prompts expose a
+  paged image directory; `qq_context.images` rechecks eligibility and returns
+  validated visual input on demand. It must not follow cross-session focus.
+  Preserve task-input realpath, type, size and signature checks, refresh the
+  directory on persistent resumes/fusion, and clear references on `/新对话`.
 
 ### Proactive interest
 

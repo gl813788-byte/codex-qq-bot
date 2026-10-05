@@ -35,6 +35,7 @@
 | `src/channels/qq/` | 唯一的 QQ / OneBot 消息传输边界 | 解析、校验和归一化 QQ 事件 |
 | `src/config/` | 环境变量与运行默认值 | 新环境变量、默认值、范围约束 |
 | `src/qq-enhancer/` | 可选 QQ 回复增强 | 图片、主动兴趣、回复风格 |
+| `src/qq-enhancer/context-images.js` + `src/app/qq-image-memory-tool.js` | 图片短期引用与按需重看 | 5 分钟或 20 条原始消息窗口、同范围图片目录、活动任务 input 校验与视觉工具结果 |
 | `src/qq-main-prompt.js` | 主模型提示词边界 | 角色、执行顺序、主动任务和按需工具目录 |
 | `src/qq-proactive-pipeline.js` | 主动聊天双模型契约 | 普通接话、冷群话题/水群和主动私聊的兴趣批准凭据与主模型必经校验 |
 | `src/qq-proactive-cycle-state.js` | 普通兴趣内存周期状态 | pending 消息计数、Bot 确认送达后的重置，以及作废送达前执行中 judge 且保留后续消息 |

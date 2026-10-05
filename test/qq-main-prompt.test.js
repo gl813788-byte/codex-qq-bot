@@ -7,6 +7,16 @@ import {
   formatQqTaskWorkspaceContext
 } from "../src/qq-main-prompt.js";
 
+test("main instructions advertise selectable image memory and require fresh visual evidence", () => {
+  const imageMemoryContext = "【本段对话含有图片：1 张可选】 image-123";
+  const prompt = formatQqMainModelInstructions({ imageMemoryContext });
+  assert.match(prompt, /5 分钟或最近 20 条原始消息/);
+  assert.match(prompt, /image-123/);
+  assert.match(prompt, /qq_context\.images 读取所选原图再作答/);
+  assert.match(prompt, /新目录优先于旧目录/);
+  assert.doesNotMatch(formatQqMainModelInstructions({ toolsEnabled: false, imageMemoryContext }), /image-123|qq_context\.images/);
+});
+
 test("every QQ turn identifies its current output directory, including a resumed conversation", () => {
   const workspace = (id) => ({ root: `/tasks/${id}`, inputDir: `/tasks/${id}/input`, outputDir: `/tasks/${id}/output` });
   const first = formatQqTaskWorkspaceContext(workspace("first"));

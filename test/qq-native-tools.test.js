@@ -5,6 +5,33 @@ import {
   createQqNativeToolDispatcher,
   mapQqNativeToolToCommand
 } from "../src/infrastructure/codex/qq-native-tools.js";
+import { normalizeDynamicToolResult } from "../src/infrastructure/agent/agent-turn-process.js";
+
+test("native image recall remains bound to the original conversation and preserves visual tool results", async () => {
+  const event = { groupId: "g1", isOwner: true };
+  const focused = { groupId: "g2", isOwner: true };
+  const imageResult = [{ type: "inputText", text: "image selected" }, { type: "inputImage", imageUrl: "data:image/png;base64,AAAA" }];
+  let inspections = 0;
+  const dispatch = createQqNativeToolDispatcher({
+    event, executeCommand: async () => { assert.fail("must be structured"); },
+    executeStructured: async (call, bound, context) => {
+      if (call.namespace === "qq_session") return { ok: true, scopeEvent: focused };
+      inspections += 1;
+      assert.equal(bound, event);
+      assert.equal(context.rootEvent, event);
+      return { ok: true, reply: "selected", contentItems: imageResult };
+    }
+  });
+  await dispatch({ namespace: "qq_session", tool: "manage", arguments: { action: "select" }, callId: "focus" });
+  const call = { namespace: "qq_context", tool: "images", arguments: { action: "inspect", selector: "image-x" }, callId: "inspect" };
+  const result = await dispatch(call);
+  assert.deepEqual(normalizeDynamicToolResult(result), { success: true, contentItems: imageResult });
+  assert.deepEqual(await dispatch(call), result);
+  assert.equal(inspections, 1);
+  const spec = buildQqNativeToolSpecs().find((item) => item.name === "qq_context").tools.find((item) => item.name === "images");
+  assert.deepEqual(spec.inputSchema.properties.action.enum, ["list", "inspect"]);
+  assert.deepEqual(buildQqNativeToolSpecs({ toolsEnabled: false }), []);
+});
 
 test("native QQ tools expose owner runtime controls only to verified owners", () => {
   const ordinary = buildQqNativeToolSpecs({ toolsEnabled: true });

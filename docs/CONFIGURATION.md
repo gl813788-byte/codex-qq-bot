@@ -218,7 +218,7 @@ Use the same token on both sides. Without one, the webhook trusts only requests 
 | --- | --- | --- |
 | `CODEX_REMOTE_CONTACT_QQ_ENHANCER` | `1` | Set `0` to disable the startup enhancement default |
 | `CODEX_REMOTE_CONTACT_QQ_MEMORY_LIMIT` | `10` | Lightweight context limit |
-| `CODEX_REMOTE_CONTACT_QQ_GROUP_MEMORY_LIMIT` | `200` | Rolling group transcript limit |
+| `CODEX_REMOTE_CONTACT_QQ_GROUP_MEMORY_LIMIT` | `200` | Group/private rolling transcript count target, with a minimum of 20; the entire latest five-minute window is additionally retained for image recall |
 | `CODEX_REMOTE_CONTACT_QQ_PROACTIVE` | `1` | Proactive-interest startup default |
 | `CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE` | `1` | Semantic judge switch |
 | `..._JUDGE_EVERY_MESSAGES` | `20` | Ordinary unmentioned message threshold, 1–1000 |

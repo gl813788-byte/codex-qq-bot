@@ -35,6 +35,7 @@ environment + runtime paths
 | `src/channels/qq/` | Single QQ and OneBot message transport boundary | parsing or validating incoming QQ events |
 | `src/config/` | Environment normalization and runtime defaults | adding an environment variable or changing a deployment default |
 | `src/qq-enhancer/` | Optional QQ reply behavior | changing context images, proactive interest or reply style |
+| `src/qq-enhancer/context-images.js` + `src/app/qq-image-memory-tool.js` | Short-lived image references and on-demand inspection | five-minute-or-20-raw-message eligibility, scoped image directory, active task input validation and visual tool results |
 | `src/qq-main-prompt.js` | Main-model prompt boundary | changing role, execution order, approved proactive tasks or the need-based tool directory |
 | `src/qq-proactive-pipeline.js` | Two-model proactive-chat contract | interest approvals and mandatory main-model validation for ordinary interjections, cold topic/chatter, and private outreach |
 | `src/qq-proactive-cycle-state.js` | In-memory ordinary-interest cycle state | counting pending messages, resetting at confirmed Bot delivery, and superseding an in-flight pre-delivery judge without consuming later messages |

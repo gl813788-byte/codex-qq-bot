@@ -11,6 +11,7 @@ export function formatQqMainModelInstructions({
   enhancerEnabled = true,
   toolsEnabled = true,
   currentDate = formatQqPromptDate(),
+  imageMemoryContext = "",
   assistantProfile = ""
 } = {}) {
   const chatType = privateChat ? "QQ 私聊" : "QQ 群聊";
@@ -87,6 +88,8 @@ export function formatQqMainModelInstructions({
     `只有管理、权限或身份区分确有必要时才称呼“${ownerLabel}”；普通聊天直接回应内容，其他人绝不使用这个称呼。`,
     `不得泄露部署 profile、后台连接、本机文件、路径、日志、配置、环境变量、token、密钥或账号隐私。既非${ownerLabel}也非 Bot 管理员的人提出电脑控制、登录、验证码、现实资产、隐私或绕权操作时简短拒绝；Bot 管理员仍受上面的高风险文件判断约束。`,
     "图片只在实际获得视觉输入时描述；看不清就直说。需要返回文件或图片时，先用原生文件能力把成品写入本轮 task output 工作区，再把绝对路径放进结构化 attachments。不得返回工作区外路径。",
+    toolsEnabled ? "本段对话含图时，Hub 会提供可选图片目录。前文图片按“5 分钟或最近 20 条原始消息”保留，文字与 Bot 回复均计入条数，不按复读压缩后的行数计算。需要再次识别或回答图片细节时，用 qq_context.images 读取所选原图再作答；目录配文、说明和旧回答都不等于视觉证据。后续上下文中的新目录优先于旧目录，可用 list 刷新。" : null,
+    toolsEnabled ? imageMemoryContext || null : null,
     "",
     "【人格与表达】",
     "先按上面的基础方案确定正确的回答目标、事实边界和交付物，再把人格融入选材、态度、措辞与节奏。人格不能改变事实、权限、安全边界或让任务少交付。",
@@ -179,6 +182,7 @@ export function formatQqMainToolGuide({
     "直接调用 Codex 提供的原生 Web Search、文件、Shell、计划与动态 QQ 工具。工具调用与结果属于协议事件，不要把调用伪装成文本或发明文字控制协议。Codex 自己决定需要多少次工具调用和推理步骤，Hub 只保留总超时与安全边界。",
     "真实动作硬约束：凡是可见回复声称已经拍一拍、点赞、加群、处理好友/群申请、管理群或发布/评论动态，都必须先调用对应工具，并且只在工具结果明确成功后才能说已经完成。你可以在调用前拒绝执行或设置 status=silent；一旦写操作已经成功，最终回复必须如实反馈结果，不能静默吞掉，也不能在失败时假装成功。",
     "- qq_context.history：读最近消息、数值范围或关键词记录。",
+    "- qq_context.images：列出本段对话可选图片，或按 selector 重新读取一张原图作为视觉输入；作用域固定为本轮原始会话。",
     "- qq_memory：检索、覆盖或标记短期记忆，按候选 QQ 号读取人物详情，并在确有新证据时用 impression 暂存当前范围/人物印象。",
     "- qq_knowledge.manage：按稳定标题搜索、查看和覆盖长期知识。",
     "- 最新资料优先使用原生 Web Search；中文来源不足时用 qq_search.chinese_web。",
