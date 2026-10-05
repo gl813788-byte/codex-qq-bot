@@ -177,7 +177,7 @@ test("boosts casual bot sticker planning above the learned human rate while keep
   assert.ok(preferred > 140 && preferred < 260, `unexpected sticker preference count: ${preferred}`);
 });
 
-test("compacts casual replies and preserves invisible memory markers", () => {
+test("keeps over-budget casual replies whole and preserves invisible memory markers", () => {
   const reply = "收到，确实有点离谱。这个展开说其实还有不少背景。\n[[qq_memory:{\"recentTopic\":\"群聊节奏\"}]]";
   const guarded = applyQqHumanReplyGuard(reply, {
     mode: "casual",
@@ -185,21 +185,44 @@ test("compacts casual replies and preserves invisible memory markers", () => {
     maxChars: 12,
     preferMultiBubble: false
   });
-  assert.match(guarded, /^确实有点离谱/);
-  assert.doesNotMatch(guarded, /不少背景/);
+  assert.match(guarded, /^确实有点离谱。这个展开说其实还有不少背景。\n/);
   assert.match(guarded, /\[\[qq_memory:/);
 });
 
-test("compacts only visible text while preserving a structured reply target", () => {
-  const guarded = applyQqHumanReplyGuard("正文还在。后面的解释可以裁掉。\n[[qq_reply:quote:2134857442]]", {
+test("keeps every sentence while preserving a structured reply target", () => {
+  const guarded = applyQqHumanReplyGuard("正文还在。后面的解释也要保留。\n[[qq_reply:quote:2134857442]]", {
     mode: "casual",
     compact: true,
     maxChars: 8,
     preferMultiBubble: false
   });
-  assert.match(guarded, /^正文还在/);
-  assert.doesNotMatch(guarded, /后面的解释/);
-  assert.match(guarded, /\[\[qq_reply:quote:2134857442\]\]/);
+  assert.match(guarded, /^正文还在。后面的解释也要保留/);
+  assert.match(guarded, /\[\[qq_reply:quote:2134857442\]\]$/);
+});
+
+test("never drops a multi-line answer that exceeds the casual length hint", () => {
+  const reply = "对，刚才只说了两个集合。一般是交替下去。\n\n三个集合时：\n|A∪B∪C|＝|A|＋|B|＋|C|－|A∩B|－|A∩C|－|B∩C|＋|A∩B∩C|";
+  for (const preferMultiBubble of [false, true]) {
+    const guarded = applyQqHumanReplyGuard(reply, {
+      mode: "casual",
+      compact: true,
+      maxChars: 28,
+      maxSentences: 1,
+      maxBubbles: 3,
+      preferMultiBubble
+    });
+    assert.equal(guarded, reply);
+  }
+});
+
+test("bubble splitting keeps repeated punctuation", () => {
+  const guarded = applyQqHumanReplyGuard("哈哈？？后劲好大", {
+    mode: "casual",
+    compact: true,
+    maxChars: 16,
+    preferMultiBubble: true
+  });
+  assert.equal(guarded, "哈哈？？\n|||\n后劲好大");
 });
 
 test("turns two natural beats into two bubbles when the round prefers it", () => {
