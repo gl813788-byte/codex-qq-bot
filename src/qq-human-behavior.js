@@ -300,25 +300,18 @@ export function applyQqHumanReplyGuard(reply, plan = {}, style = {}, { bubbleSep
   if (!visible) return raw;
   visible = visible.replace(/^(?:好的|好嘞|收到|明白了)[，,：:\s]+/, "");
   const maxChars = Math.max(6, Number(plan.maxChars || style.casualMax || 28));
-  const hardMax = Math.ceil(maxChars * (plan.preferMultiBubble ? 2.3 : 1.45));
-  let units = splitNaturalUnits(visible, bubbleSeparator);
-  if (units.length === 1) {
-    const clauses = splitNaturalClauses(visible);
-    if (clauses.length > 1) units = clauses;
-  }
-  const allowedUnits = plan.preferMultiBubble
-    ? Math.max(2, Number(plan.maxBubbles || 2))
-    : Math.max(1, Number(plan.maxSentences || 1));
-  const overBudget = characterLength(visible.replaceAll(bubbleSeparator, "")) > hardMax
-    || (characterLength(visible.replaceAll(bubbleSeparator, "")) > maxChars && units.length > allowedUnits);
-  if (overBudget && units.length > 1) {
-    visible = units.slice(0, allowedUnits).join(plan.preferMultiBubble ? `\n${bubbleSeparator}\n` : "");
-  }
+  // Length is only a prompt hint; the guard never drops model-written content.
   if (plan.preferMultiBubble && !visible.includes(bubbleSeparator)) {
-    const refreshed = units.length >= 2 ? units : splitNaturalUnits(visible, bubbleSeparator);
-    const bubbleCount = Math.min(Math.max(2, Number(plan.maxBubbles || 2)), refreshed.length);
-    if (refreshed.length >= 2 && refreshed.slice(0, bubbleCount).every((unit) => characterLength(unit) <= Math.ceil(maxChars * 1.3))) {
-      visible = refreshed.slice(0, bubbleCount).join(`\n${bubbleSeparator}\n`);
+    let units = splitNaturalUnits(visible, bubbleSeparator);
+    if (units.length === 1) {
+      const clauses = splitNaturalClauses(visible);
+      if (clauses.length > 1) units = clauses;
+    }
+    const maxBubbles = Math.max(2, Number(plan.maxBubbles || 2));
+    if (units.length >= 2
+      && units.length <= maxBubbles
+      && units.every((unit) => characterLength(unit) <= Math.ceil(maxChars * 1.3))) {
+      visible = units.join(`\n${bubbleSeparator}\n`);
     }
   }
   visible = visible
@@ -388,7 +381,7 @@ function splitNaturalUnits(text, bubbleSeparator) {
     .trim();
   const units = [];
   for (const line of normalized.split("\n")) {
-    const matches = line.match(/[^。！？!?~～]+[。！？!?~～]?/gu) || [];
+    const matches = line.match(/[。！？!?~～]*[^。！？!?~～]+[。！？!?~～]*|[。！？!?~～]+/gu) || [];
     for (const match of matches) {
       const value = match.trim();
       if (value) units.push(value);
