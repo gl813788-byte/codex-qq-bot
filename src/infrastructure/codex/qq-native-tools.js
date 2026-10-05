@@ -37,6 +37,15 @@ export function buildQqNativeToolSpecs({
         name: "download_file",
         description: "Download one file explicitly detected in the current triggering QQ message or its quoted message into this turn's task input directory. Use only selectors listed in the turn context.",
         inputSchema: objectSchema({ selector: string("An exact current-turn selector such as file-1.") })
+      }, {
+        type: "function",
+        name: "images",
+        description: "List selectable images in the original QQ conversation, or inspect one again as actual visual input. Earlier images remain eligible within five minutes OR the latest 20 raw messages. Only use selectors from the image directory; this tool never follows cross-session focus.",
+        inputSchema: objectSchema({
+          action: { type: "string", enum: ["list", "inspect"] },
+          selector: string("Exact image selector from the current image directory; required for inspect."),
+          offset: { type: "integer", minimum: 0, description: "Image directory pagination offset, default 0; 20 images per page." }
+        }, ["action"])
       }]
     },
     {
@@ -239,11 +248,13 @@ export function createQqNativeToolDispatcher({
     const toolRound = callCount;
     if (event && typeof event === "object") event.qqCurrentToolRound = toolRound;
     const hostCommandTool = call.namespace === "qq_runtime" && call.tool === "host_command";
-    const boundEvent = hostCommandTool ? event : focusedEvent || event;
+    const imageMemoryTool = call.namespace === "qq_context" && call.tool === "images";
+    const boundEvent = hostCommandTool || imageMemoryTool ? event : focusedEvent || event;
     const sessionTool = call.namespace === "qq_session" && call.tool === "manage";
     const inboundFileTool = call.namespace === "qq_context" && call.tool === "download_file";
     const structured = sessionTool
       || inboundFileTool
+      || imageMemoryTool
       || hostCommandTool
       || (call.namespace === "qq_memory" && ["impression", "robot_profile"].includes(call.tool));
     const command = structured ? "" : mapQqNativeToolToCommand(call.namespace, call.tool, call.arguments, { event: boundEvent });
@@ -264,6 +275,10 @@ export function createQqNativeToolDispatcher({
             ...(structuredResult?.scopeId ? { scopeId: String(structuredResult.scopeId) } : {}),
             result: String(structuredResult?.reply || structuredResult?.error || "结构化工具已执行。")
           };
+          if (imageMemoryTool && result.ok && Array.isArray(structuredResult?.contentItems)) {
+            result.contentItems = structuredResult.contentItems;
+            result.success = true;
+          }
           if (!result.ok) errorCode = "structured_tool_failed";
         } else if (command) {
           const commandResult = await executeCommand(command, boundEvent);

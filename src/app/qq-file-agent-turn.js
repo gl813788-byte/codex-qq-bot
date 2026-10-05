@@ -8,6 +8,7 @@ export function buildQqFileAgentTurn({
   taskWorkspace,
   quotedContext = "",
   imagePaths = [],
+  imageMemoryContext = "",
   inboundFileSummary = "",
   requestText = "",
   isImageGeneration = false
@@ -42,6 +43,8 @@ export function buildQqFileAgentTurn({
     "绝不输出 token、密钥、密码、cookie、私钥或完整敏感配置；只给脱敏摘要。",
     "需要发送图片或文件时，先把最终成品复制或写入 task output 目录，再把绝对路径填进结构化 attachments。只有 output 目录中的附件会被 Hub 发送。",
     "需要修改用户提供的图片时，把收到的本地图片作为参考输入交给原生图像能力；接口失败就如实说明，不能假装成功。",
+    "本段对话含图时，可从图片目录选择原图，用 qq_context.images 的 inspect 动作重新获得视觉输入；不要把配文或旧回答当作已经看过图片。需要修改时可用本轮输入目录中的已下载图片。",
+    imageMemoryContext || null,
     "最终只提交输出 Schema 要求的 JSON 对象。"
   ].filter(Boolean).join("\n");
   const prompt = [
@@ -49,6 +52,7 @@ export function buildQqFileAgentTurn({
     privileged ? `当前项目：${projectDir}` : null,
     quotedContext || null,
     imagePaths.length ? `收到的 QQ 图片：\n${imagePaths.join("\n")}` : null,
+    imageMemoryContext || null,
     inboundFileSummary || null,
     owner ? `${ownerLabel}的请求：` : administrator ? "Bot 管理员的请求：" : "群友的公开图片请求：",
     requestText || (isImageGeneration ? "根据收到的图片完成这次图片任务。" : "处理收到的文件或图片。")
