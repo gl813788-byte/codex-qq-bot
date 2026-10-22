@@ -35,7 +35,7 @@
     "access": "public"
   },
   "scripts": {
-    "start": "node src/server.js",
+    "start": "bash scripts/start-hub.sh",
     "deploy": "zsh scripts/deploy.command",
     "ncc": "zsh scripts/ncc.command",
     "check": "node scripts/check.mjs",

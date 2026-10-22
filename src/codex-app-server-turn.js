@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createProtocolImageBudget } from "./infrastructure/codex/protocol-image-budget.js";
 import {
   attachErrorFields,
   createAgentTurnErrors,
@@ -86,6 +87,7 @@ export function runCodexAppServerTurn({
     let pendingRestart = null;
     const pendingRequests = new Map();
     const dynamicToolCalls = new Map();
+    const imageBudget = createProtocolImageBudget();
     const agentMessages = [];
     const completedItems = [];
     const supersededTurnIds = new Set();
@@ -255,7 +257,10 @@ export function runCodexAppServerTurn({
               ...message.params,
               threadId: message.params?.threadId || threadId,
               turnId: message.params?.turnId || turnId
-            })).then(normalizeDynamicToolResult);
+            })).then(normalizeDynamicToolResult).then((result) => {
+              imageBudget.register(result);
+              return result;
+            });
             dynamicToolCalls.set(callId, call);
           }
           respond(message.id, await call);
@@ -300,6 +305,8 @@ export function runCodexAppServerTurn({
     const readProtocol = createNdjsonReader({
       errors,
       maxBytes: normalizePositiveInteger(maxProtocolBytes, DEFAULT_MAX_PROTOCOL_BYTES),
+      getByteAllowance: imageBudget.remainingBytes,
+      discountMessageBytes: imageBudget.discount,
       isClosed: () => settled,
       onMessage: handleProtocolMessage,
       onError: (error) => finish(error)

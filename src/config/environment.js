@@ -220,6 +220,9 @@ export function createEnvironmentConfig(env = process.env) {
     qqSocialExtensionBase: String(env.CODEX_REMOTE_CONTACT_QQ_SOCIAL_API_BASE || "").trim().replace(/\/$/, ""),
     qqOwnerFileImageTasksEnabled: env.CODEX_REMOTE_CONTACT_QQ_OWNER_FILE_IMAGE_TASKS !== "0",
     qqImageMaxBytes,
+    qqCompressedImageMaxEdge: boundedInteger(env.CODEX_REMOTE_CONTACT_QQ_COMPRESSED_IMAGE_MAX_EDGE, {
+      defaultValue: 1600, min: 256, max: 4096
+    }),
     qqFileMaxBytes,
     qqBubbleSeparator: normalizeBubbleSeparator(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR),
     qqBubbleSendDelayMs: Math.max(0, numberOrDefault(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEND_DELAY_MS, 650)),

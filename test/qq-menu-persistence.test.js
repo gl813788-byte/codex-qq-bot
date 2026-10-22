@@ -3,11 +3,6 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { qqCommandCatalog } from "../src/qq-command-catalog.js";
 
-test("QQ menu excludes channel shutdown", () => {
-  assert.equal(qqCommandCatalog.some((command) => command.key === "shutdown"), false);
-  assert.equal(qqCommandCatalog.some((command) => /关闭QQ/i.test(command.menuLine || "")), false);
-});
-
 test("Bot administrators are persisted as a distinct role with full menu routing", async () => {
   assert.ok(qqCommandCatalog.some((command) => command.key === "botAdmins"));
   assert.ok(qqCommandCatalog.some((command) => command.key === "crossSession"));

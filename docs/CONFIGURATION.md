@@ -163,6 +163,8 @@ A non-loopback listener requires explicit remote allowance and a token. Wildcard
 
 ### Codex
 
+Startup automatically sizes resources with `CODEX_REMOTE_CONTACT_RESOURCE_PROFILE` (or `NCC_RESOURCE_PROFILE`): `auto` (default), `standard`, `balanced`, or `low`. Auto reserves at least 256 MiB, capped by 2 GiB, 15% of effective total memory and 25% of available memory. After estimated shared QQ/Hub usage, it budgets about 512 MiB per model process and at most one per two usable CPUs (minimum one when memory permits). Explicit settings below override generated defaults; an explicit Node `--max-old-space-size` is preserved. `NCC_MEMORY_STANDARD_MB`, `NCC_MEMORY_BALANCED_MB` and `NCC_MEMORY_MINIMUM_MB` default to `3600`, `1800` and `1024`; insufficient automatic budgets stop startup. Preview with `npm run ncc -- resources --json`.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `CODEX_CLI_PATH` | path inside the macOS app | Codex executable; set it or expose `codex` on other platforms |
@@ -229,6 +231,7 @@ Use the same token on both sides. Without one, the webhook trusts only requests 
 | `..._JUDGE_BASE_URL` | empty | OpenAI-compatible API root for the `custom` provider |
 | `..._JUDGE_TIMEOUT_MS` | `6500` | Streaming idle timeout |
 | `CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES` | `20971520` | QQ image limit, 20 MiB by default |
+| `CODEX_REMOTE_CONTACT_QQ_COMPRESSED_IMAGE_MAX_EDGE` | `1600` | Compressed inspection's longest edge, bounded 256–4096 px; automatic startup selects 1280/1600/2048 according to Hub memory |
 | `CODEX_REMOTE_CONTACT_QQ_FILE_MAX_BYTES` | `52428800` | Per-file limit for model-selected inbound QQ downloads; bounded to 1 MiB–1 GiB |
 | `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | Safe-download mode; `proxy-compatible` additionally permits DNS names mapped into proxy Fake-IP range `198.18.0.0/15`, while literal private IPs and other reserved ranges stay blocked |
 | `CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR` | `|||` | Multi-bubble separator |

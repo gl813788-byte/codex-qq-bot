@@ -304,6 +304,78 @@ test("resumes a persistent thread and falls back to a new one when it is stale",
   );
 });
 
+test("large image tool echoes do not consume the ordinary protocol output budget", async () => {
+  const server = createFakeAppServer();
+  const imageUrl = `data:image/png;base64,${"A".repeat(5 * 1024 * 1024)}`;
+  let ready;
+  const readyPromise = new Promise((resolve) => { ready = resolve; });
+  const resultPromise = runCodexAppServerTurn({
+    prompt: "inspect two images",
+    timeoutMs: 5_000,
+    spawnProcess: server.spawn,
+    onReady: ready,
+    onDynamicToolCall: () => ({ contentItems: [{ type: "inputImage", imageUrl }], success: true })
+  });
+  await readyPromise;
+  for (const index of [1, 2]) {
+    const response = await Promise.race([
+      server.requestTool({ requestId: 900 + index, callId: `image-${index}`, tool: "images", arguments: {} }),
+      resultPromise
+    ]);
+    server.notify({
+      method: "item/completed",
+      params: { item: { id: `image-${index}`, type: "dynamicToolCall", ...response.result } }
+    });
+    server.notify({
+      method: "codex/event/dynamic_tool_call_end",
+      params: { msg: { call_id: `image-${index}`, ...response.result } }
+    });
+  }
+  server.complete("images inspected");
+  assert.equal((await resultPromise).finalResponse, "images inspected");
+});
+
+test("image allowance cannot be spent on text, unknown images or unlimited replay", async () => {
+  const imageUrl = `data:image/png;base64,${"A".repeat(5_000)}`;
+  for (const mode of ["text", "unknown-image", "replayed-image"]) {
+    const server = createFakeAppServer();
+    let ready;
+    const readyPromise = new Promise((resolve) => { ready = resolve; });
+    let calls = 0;
+    const resultPromise = runCodexAppServerTurn({
+      prompt: "bounded image output",
+      maxProtocolBytes: 4_000,
+      timeoutMs: 5_000,
+      spawnProcess: server.spawn,
+      onReady: ready,
+      onDynamicToolCall: () => {
+        calls += 1;
+        return { contentItems: [{ type: "inputImage", imageUrl }], success: true };
+      }
+    });
+    const rejected = assert.rejects(resultPromise, (error) => error.code === "CODEX_APP_SERVER_OUTPUT_LIMIT");
+    await readyPromise;
+    for (const requestId of [900, 901]) {
+      await server.requestTool({ requestId, callId: "same-image", tool: "images", arguments: {} });
+    }
+    assert.equal(calls, 1);
+    if (mode === "replayed-image") {
+      for (let index = 0; index < 5; index += 1) {
+        server.notify({ method: "item/completed", params: { item: { type: "inputImage", imageUrl } } });
+      }
+    } else {
+      server.notify({ method: "item/completed", params: { item: {
+        type: "inputImage", imageUrl
+      } } });
+      server.notify({ method: "item/completed", params: { item: mode === "text"
+        ? { type: "agentMessage", text: "x".repeat(5_000) }
+        : { type: "inputImage", imageUrl: imageUrl.replace(/A/g, "B") }
+      } });
+    }
+    await rejected;
+  }
+});
+
 test("handles dynamic tools as server requests and forwards native turn settings", async () => {
   const server = createFakeAppServer();
   const calls = [];

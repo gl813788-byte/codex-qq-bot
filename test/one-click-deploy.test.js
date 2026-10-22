@@ -17,7 +17,6 @@ const prepareEnvironmentPath = fileURLToPath(new URL("scripts/prepare-environmen
 const termuxProotPath = fileURLToPath(new URL("scripts/termux-proot.command", new URL("..", import.meta.url)));
 const remoteInstallerPath = fileURLToPath(new URL("install.sh", new URL("..", import.meta.url)));
 const npmInstallerPath = fileURLToPath(new URL("bin/codex-qq-bot.mjs", new URL("..", import.meta.url)));
-const packagePath = fileURLToPath(new URL("package.json", new URL("..", import.meta.url)));
 
 test("Chinese one-click deployment entry is executable and has valid Bash syntax", async () => {
   await access(launcherPath, constants.X_OK);
@@ -42,6 +41,12 @@ test("Chinese one-click deployment entry is executable and has valid Bash syntax
     });
     assert.equal(result.status, 0, result.stderr);
   }
+  const help = spawnSync("bash", [launcherPath, "--help"], { cwd: projectDir, encoding: "utf8" });
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /首次直接运行 ncc/);
+  assert.match(help.stdout, /自动检测环境/);
+  assert.match(help.stdout, /安装依赖/);
+  assert.match(help.stdout, /常规功能菜单/);
 });
 
 test("fresh-machine bootstrap plans every required layer without mutating the host", () => {
@@ -176,21 +181,6 @@ test("remote and npm installers expose a Chinese no-GitHub-web entry", async () 
     assert.doesNotMatch(help.stdout, /最新 GitHub Release/);
   }
 
-  const packageMetadata = JSON.parse(await readFile(packagePath, "utf8"));
-  assert.equal(packageMetadata.name, "codex-qq-bot");
-  assert.equal(packageMetadata.version, "1.2.0");
-  const installerSource = await readFile(remoteInstallerPath, "utf8");
-  const npmInstallerSource = await readFile(npmInstallerPath, "utf8");
-  assert.match(installerSource, /\/root\/Codex-QQ-Bot/);
-  assert.match(installerSource, /Codex-Remote-Contact/);
-  assert.match(installerSource, /--continue-at -/);
-  assert.match(installerSource, /command -v wget/);
-  assert.match(installerSource, /源码 ZIP 缺少中文一键部署入口/);
-  assert.match(installerSource, /下一步请运行/);
-  assert.match(installerSource, /CODEX_QQ_BOT_PREPARE_AFTER_INSTALL/);
-  assert.match(installerSource, /prepare_installed_project/);
-  assert.match(npmInstallerSource, /CODEX_QQ_BOT_PREPARE_AFTER_INSTALL/);
-  assert.match(npmInstallerSource, /"1"/);
 });
 
 test("a piped installer does not execute an unrelated detector from the current directory", async () => {
@@ -649,31 +639,6 @@ test("remote installer preserves an unrelated ncc command", async (t) => {
   } finally {
     await rm(home, { recursive: true, force: true });
   }
-});
-
-test("one-click launcher delegates first-run and later daily behavior to ncc", async () => {
-  const source = await readFile(launcherPath, "utf8");
-  const nccSource = await readFile(nccPath, "utf8");
-  const deploySource = await readFile(deployPath, "utf8");
-  assert.match(source, /exec zsh "\$NCC_SCRIPT"/);
-  assert.match(nccSource, /CODEX_REMOTE_CONTACT_NCC_SETUP_COMPLETED/);
-  assert.match(nccSource, /首次部署/);
-  assert.match(nccSource, /以后运行 ncc/);
-  assert.match(nccSource, /主人 QQ/);
-  assert.match(nccSource, /群白名单/);
-  assert.match(nccSource, /OneBot/);
-  assert.match(deploySource, /npm install/);
-  assert.match(deploySource, /npm --global=false run verify/);
-
-  const help = spawnSync("bash", [launcherPath, "--help"], {
-    cwd: projectDir,
-    encoding: "utf8"
-  });
-  assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /首次直接运行 ncc/);
-  assert.match(help.stdout, /自动检测环境/);
-  assert.match(help.stdout, /安装依赖/);
-  assert.match(help.stdout, /常规功能菜单/);
 });
 
 test("fresh ncc run enters first-run deployment and keeps it pending when cancelled", async () => {

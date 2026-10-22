@@ -467,14 +467,17 @@ test("rejects prototype keys from events and persisted records", () => {
 });
 
 test("bounds remembered people per group", () => {
-  let memory = createEmptyQqConversationMemory();
-  for (let index = 0; index < 501; index += 1) {
-    memory = updateQqConversationMemoryFromEvent(memory, {
-      groupId: "10001",
-      senderId: String(10000 + index),
-      text: `message ${index}`
-    }, { now: () => new Date(index * 1_000) });
+  let memory = updateQqConversationMemoryFromEvent(createEmptyQqConversationMemory(), {
+    groupId: "10001", senderId: "10000", text: "first message"
+  }, { now: () => new Date(0) });
+  const people = memory.groups["10001"].people;
+  for (let index = 1; index < 500; index += 1) {
+    const userId = String(10000 + index);
+    people[userId] = { ...structuredClone(people["10000"]), userId, updatedAt: new Date(index * 1_000).toISOString() };
   }
+  memory = updateQqConversationMemoryFromEvent(memory, {
+    groupId: "10001", senderId: "10500", text: "one person over capacity"
+  }, { now: () => new Date(500_000) });
   assert.equal(Object.keys(memory.groups["10001"].people).length, 500);
   assert.equal(memory.groups["10001"].people["10000"], undefined);
   assert.ok(memory.groups["10001"].people["10500"]);

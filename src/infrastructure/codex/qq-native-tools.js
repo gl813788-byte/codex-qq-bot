@@ -44,7 +44,8 @@ export function buildQqNativeToolSpecs({
         inputSchema: objectSchema({
           action: { type: "string", enum: ["list", "inspect"] },
           selector: string("Exact image selector from the current image directory; required for inspect."),
-          offset: { type: "integer", minimum: 0, description: "Image directory pagination offset, default 0; 20 images per page." }
+          offset: { type: "integer", minimum: 0, description: "Image directory pagination offset, default 0; 20 images per page." },
+          mode: { type: "string", enum: ["original", "compressed"], description: "Default original. Choose compressed for a forced read when the source exceeds the machine's image budget, or when a smaller visual input is sufficient. Compressed input may lose small text/details and uses the first animation frame." }
         }, ["action"])
       }]
     },

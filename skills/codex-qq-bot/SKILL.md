@@ -174,6 +174,19 @@ refactor with a behavior change.
   validated visual input on demand. It must not follow cross-session focus.
   Preserve task-input realpath, type, size and signature checks, refresh the
   directory on persistent resumes/fusion, and clear references on `/新对话`.
+- The model may choose `qq_context.images` with `mode: "compressed"` when an
+  original exceeds the machine budget or a preview is sufficient. Keep the
+  bounded source download, decoder memory/time/thread/disk limits, validated
+  output path/type/signature and explicit detail-loss/first-frame disclosure.
+  Compression uses local ImageMagick (`magick`); missing support fails clearly.
+  A validated task-input path may be used by the engine's native image reader
+  when dynamic-tool images are not displayed. Never expose it in QQ replies.
+- App Server echoes dynamic-tool image data in protocol notifications. Keep
+  the ordinary 8 MiB output cap and a separate finite allowance only for exact
+  image data URLs supplied by this turn (up to four echoes per tool result).
+  Duplicate call ids must not replenish credits; unknown images, text and
+  unfinished frames remain bounded. Cover large/multiple image echoes and
+  exhausted credits when changing the NDJSON reader or tool-result path.
 
 ### Proactive interest
 
@@ -389,10 +402,15 @@ dashboard or Hub code changes, first confirm no active QQ generation, then stop
 and start only the Hub; leave NapCat running.
 
 On this memory-constrained Termux/PRoot host, use `ncc napcat` only for short
-bridge diagnostics and stop it with `ncc stop-napcat` when finished. The global
-controller reads `MemAvailable` once before startup and selects the standard,
-balanced, or low-memory profile. The profile constrains both sides of the stack:
-QQ renderer/V8 limits and Hub heap/agent concurrency/queues. `ncc all` must start
+bridge diagnostics and stop it with `ncc stop-napcat` when finished. Startup uses
+the shared resource planner (`scripts/resource-profile.mjs`) to detect available
+physical memory, CPU affinity and nested cgroup v1/v2 CPU/memory limits once.
+It reserves system headroom, excludes swap, and sizes QQ, Hub heap, agent/OneBot
+concurrency/queues and image/compression budgets. These are safe estimates, not
+stress-tested hardware maxima. Explicit environment overrides take precedence;
+auto retains the saved numeric snapshot while either service is running. The
+repository `npm start` uses the same planner; `npm run ncc -- resources --json`
+previews a fresh estimate. No resident monitor is introduced. `ncc all` must start
 both Hub and QQ; it brings the Hub up first so active QQ events do not spin on a
 missing loopback receiver, and cleans a newly started Hub if QQ startup fails.
 There is no resident memory monitor or shell `wait` supervisor. QQ and Xvfb run

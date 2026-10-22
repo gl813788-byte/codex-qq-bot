@@ -97,6 +97,7 @@ test("the privileged menu lists every catalog command in catalog order", () => {
     }
   }
   assert.match(menu, /^  \/思考强度$/m);
+  assert.doesNotMatch(menu, /\/关闭QQ/);
 });
 
 test("every AI task usage example parses back to its own task", () => {

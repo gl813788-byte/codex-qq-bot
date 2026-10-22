@@ -66,7 +66,7 @@ export function formatQqImageMemoryCandidates(candidates = [], { offset = 0 } = 
     start + page.length < candidates.length
       ? `还有更多图片，调用 qq_context.images(action="list", offset=${start + page.length}) 查看下一页。`
       : null,
-    "需要看图、再次识别、核对细节或回答图片追问时，调用 qq_context.images(action=\"inspect\", selector=目录中的值)，实际读取返回的视觉输入后再回答；可按需选择多张。下载失败时如实说明，不得凭配文或旧回答编造。"
+    "需要看图、再次识别、核对细节或回答图片追问时，调用 qq_context.images(action=\"inspect\", selector=目录中的值)，实际读取返回的视觉输入后再回答；可按需选择多张。原图超预算、用户要求尽量读取或只需概览时，模型可选择 mode=\"compressed\" 缩放压缩后读取；小字细节可能损失，不得把压缩版本说成已查看原图。下载失败时如实说明，不得凭配文或旧回答编造。"
   ].filter(Boolean).join("\n");
 }
 

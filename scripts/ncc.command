@@ -834,12 +834,14 @@ case "${1:-menu}" in
   branding) branding_menu ;;
   search-config) search_config ;;
   start) start_hub ;;
+  resources) need_node; node "$PROJECT_DIR/scripts/resource-profile.mjs" "${@:2}" ;;
   open) open_hub_api ;;
   logs) shift; print_logs "$@" ;;
   help|-h|--help)
     cat <<EOF
 用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full] [--background]|branding|search-config|start|open|logs]
 首次直接运行 ncc：自动检测环境、安装依赖、验证并填写配置；完成后再运行为常规功能菜单。
+资源检测：ncc resources [--json] 预览本机 CPU、内存和启动预算；每次启动自动重新检测。
 安装中断后重新运行同一个 ncc，会验证并复用已完成的源码、环境、npm 依赖阶段。
 日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
 项目目录：$PROJECT_DIR

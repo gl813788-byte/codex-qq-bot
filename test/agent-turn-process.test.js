@@ -73,6 +73,38 @@ test("NDJSON reader frames split lines, stops once closed and reports bad output
   assert.equal(limited[0].code, "CODEX_APP_SERVER_OUTPUT_LIMIT");
 });
 
+test("NDJSON binary credits survive chunk boundaries and keep partial frames bounded", () => {
+  for (const chunkSize of [1, 7, 1024]) {
+    const messages = [];
+    const failures = [];
+    let credit = 100;
+    const read = createNdjsonReader({
+      errors, maxBytes: 80,
+      getByteAllowance: () => credit,
+      discountMessageBytes: (message) => {
+        const discount = message.image === "A".repeat(100) ? 100 : 0;
+        credit -= discount;
+        return discount;
+      },
+      onMessage: (message) => messages.push(message),
+      onError: (error) => failures.push(error)
+    });
+    const input = `${JSON.stringify({ image: "A".repeat(100) })}\n${JSON.stringify({ text: "已读取" })}\n`;
+    for (let offset = 0; offset < input.length; offset += chunkSize) read(input.slice(offset, offset + chunkSize));
+    assert.equal(messages.length, 2);
+    assert.deepEqual(failures, []);
+    read(" ".repeat(100));
+    assert.equal(failures[0].code, "CODEX_APP_SERVER_OUTPUT_LIMIT");
+  }
+
+  const failures = [];
+  createNdjsonReader({
+    errors, maxBytes: 40, getByteAllowance: () => 100,
+    onMessage: () => assert.fail("unfinished frame"), onError: (error) => failures.push(error)
+  })(" ".repeat(141));
+  assert.equal(failures[0].code, "CODEX_APP_SERVER_OUTPUT_LIMIT");
+});
+
 test("turn deadlines renew, expire with the renewal count and catch stalled replacements", async () => {
   const expired = [];
   let active = true;

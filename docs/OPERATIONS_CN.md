@@ -69,7 +69,7 @@ ncc connect
 
 本机全局控制器会从固定的 `NAPCAT_WORK_DIR`（默认 `/root/.local/share/napcat`）启动 QQ。这样 QQ 的相对路径缓存数据库不会再落进调用 `ncc` 时所在的仓库或 shell 目录；需要时可用环境变量改成其他持久目录。
 
-本机控制器在启动前只读取一次 `/proc/meminfo` 的 `MemAvailable`，自动选择标准、均衡或低内存档；不会启动常驻内存检测。档位会同时限制 QQ 的 V8 堆/渲染进程和 Hub 的 Node 堆/Codex 并发与队列。`ncc resources` 可预览选择结果。`ncc all` 始终以“Hub 就绪后启动 QQ”的顺序启动两项；若 QQ 启动失败，会清理本次新启动的 Hub，避免只留下半套服务。QQ 和 Xvfb 由两个独立 `screen` 会话直接托管，不再使用会在 Termux/PRoot 中空转的后台 `wait` supervisor。
+启动时一次性检测可用物理内存、可用 CPU，以及 cgroup v1/v2 当前层级和父层级的内存/CPU 配额。预留系统余量后，估算 QQ、Hub 堆、模型/OneBot 并发、队列、图片大小和压缩尺寸预算；不会把交换空间当成预算，也不通过压力测试寻找机器的崩溃极限。`ncc resources` 可预览本机控制器的快照，`npm run ncc -- resources --json` 可查看重新检测的详细估算；`npm start` 使用同一套策略。明确设置的并发、图片、压缩尺寸和 Node 堆配置优先；`NCC_RESOURCE_PROFILE` 仍可指定 `standard`、`balanced`、`low`。已有服务沿用保存的预算，重启后再检测。不启动常驻监控。`ncc all` 先启动 Hub，再启动 QQ；若 QQ 启动失败，会清理本次新启动的 Hub。QQ 和 Xvfb 仍由独立 `screen` 会话托管。
 
 ### 切换 AI 引擎
 
@@ -278,6 +278,7 @@ npm run verify
 | QQ 通道 false | OneBot 未连接、通道未启用或设置未保存 | 检查 `/api/state`、`data/settings.json` 和 `ncc connect` |
 | 白名单群不回复 | 群号不在 allowlist、未 @/回复 Bot、用户被 ban | 检查 state、`qq`/`onebot` 日志和权限 |
 | Codex 回复失败 | 未登录、CLI 路径/模型不可用、队列满 | `codex --version`、登录状态、maintenance、`codex` 日志 |
+| 看图时出现 `CODEX_APP_SERVER_OUTPUT_LIMIT` | App Server 在多种协议事件中重复回传工具图片的 base64，耗尽普通输出的 8 MiB 预算 | 确认 Hub 已加载当前代码：本轮实际提供的图片数据 URL 单独计入每次工具结果最多四次回传的预算。文字、未知图片和未完成协议帧仍受限，重复调用编号不会补充预算。验证后只重启 Hub。 |
 | 主动兴趣不回复 | 周期为空、judge 关闭/失败、兴趣不足、结果过时 | `interest` 日志、当前厂商对应 key、模型参数和群活跃状态 |
 | QQ 图片提示 `URL_PRIVATE_ADDRESS` 且解析到 `198.18/15` | 代理软件使用 Fake-IP DNS，严格下载模式按保留地址拦截 | 保持私网保护，设置 `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE=proxy-compatible` 后只重启 Hub；字面私网 IP 和其他保留地址仍会拒绝 |
 | 无关文字回复出现 `image download returned HTTP 400` | 持久化的附带上下文图片保留了已过期的腾讯下载地址 | 当前/明确引用图片仍可用；附带上下文图片会排除超过两小时或无时间戳的引用，确认运行中的 Hub 已加载当前源码 |

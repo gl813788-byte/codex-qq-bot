@@ -66,6 +66,8 @@ test("uses stable defaults and rejects invalid listener ports", () => {
   assert.equal(defaults.codexTaskTimeouts[CODEX_TASK_TYPES.QQ_IMAGE_GENERATION], 600_000);
   assert.equal(defaults.safeFetchMode, "strict");
   assert.equal(defaults.qqFileMaxBytes, 50 * 1024 * 1024);
+  assert.equal(defaults.qqCompressedImageMaxEdge, 1600);
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_QQ_COMPRESSED_IMAGE_MAX_EDGE: "99999" }).qqCompressedImageMaxEdge, 4096);
   assert.equal(invalidPort.hubPort, 3789);
 });
 
