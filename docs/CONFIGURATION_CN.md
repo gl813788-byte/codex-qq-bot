@@ -165,6 +165,8 @@ npm run ncc -- setup
 
 ### Codex
 
+启动时按 `CODEX_REMOTE_CONTACT_RESOURCE_PROFILE`（或 `NCC_RESOURCE_PROFILE`）自动分配资源，支持 `auto`（默认）、`standard`、`balanced`、`low`。自动档至少预留 256 MiB，至多取 2 GiB、有效总内存 15%、可用内存 25% 中的最小值。估算 QQ/Hub 共用开销后，按每个模型进程约 512 MiB、每两个可用 CPU 至多一个进程分配并发（内存允许时至少一个）。下表中的明确配置覆盖自动默认值；已指定的 Node `--max-old-space-size` 会保留。`NCC_MEMORY_STANDARD_MB`、`NCC_MEMORY_BALANCED_MB`、`NCC_MEMORY_MINIMUM_MB` 默认分别为 `3600`、`1800`、`1024`；自动预算不足会拒绝启动。可用 `npm run ncc -- resources --json` 预览。
+
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `CODEX_CLI_PATH` | macOS App 内置路径 | Codex 可执行文件；Linux/Windows 部署应设置或保证 `codex` 可发现 |
@@ -231,6 +233,7 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 | `..._JUDGE_BASE_URL` | 空 | `custom` 厂商的 OpenAI 兼容 API 根地址 |
 | `..._JUDGE_TIMEOUT_MS` | `6500` | judge 流式空闲超时 |
 | `CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES` | `20971520` | QQ 图片上限，默认 20 MiB |
+| `CODEX_REMOTE_CONTACT_QQ_COMPRESSED_IMAGE_MAX_EDGE` | `1600` | 压缩读取的最长边，范围 256–4096 像素；自动启动按 Hub 内存选择 1280/1600/2048 |
 | `CODEX_REMOTE_CONTACT_QQ_FILE_MAX_BYTES` | `52428800` | 模型按需下载入站 QQ 文件的单文件上限，范围 1 MiB–1 GiB |
 | `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | 安全下载模式；`proxy-compatible` 仅额外允许域名解析到 `198.18.0.0/15` 代理 Fake-IP，仍拦截字面私网 IP 和其他保留地址 |
 | `CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR` | `|||` | 多气泡分隔符 |

@@ -34,6 +34,8 @@
 | `src/channels/http/hub-http-server.js` | HTTP 请求分发与安全错误边界 | API/资源路由或 OneBot webhook 限流 |
 | `src/channels/qq/` | 唯一的 QQ / OneBot 消息传输边界 | 解析、校验和归一化 QQ 事件 |
 | `src/config/` | 环境变量与运行默认值 | 新环境变量、默认值、范围约束 |
+| `src/config/resource-profile.js` + `src/infrastructure/host-resources.js` | 启动资源预算与 OS/cgroup 检测 | CPU/内存约束、系统余量、堆/并发/队列和图片预算；启动控制器共用 |
+| `src/qq-enhancer/compress-image.js` | 有界本地图片压缩 | 首帧 JPEG 预览、解码资源限制和临时快照清理 |
 | `src/qq-enhancer/` | 可选 QQ 回复增强 | 图片、主动兴趣、回复风格 |
 | `src/qq-enhancer/context-images.js` + `src/app/qq-image-memory-tool.js` | 图片短期引用与按需重看 | 5 分钟或 20 条原始消息窗口、同范围图片目录、活动任务 input 校验与视觉工具结果 |
 | `src/qq-main-prompt.js` | 主模型提示词边界 | 角色、执行顺序、主动任务和按需工具目录 |

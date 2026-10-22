@@ -34,6 +34,8 @@ environment + runtime paths
 | `src/channels/http/hub-http-server.js` | HTTP request dispatch and safe error boundary | changing API/asset routing or OneBot webhook limiting |
 | `src/channels/qq/` | Single QQ and OneBot message transport boundary | parsing or validating incoming QQ events |
 | `src/config/` | Environment normalization and runtime defaults | adding an environment variable or changing a deployment default |
+| `src/config/resource-profile.js` + `src/infrastructure/host-resources.js` | Startup resource budgets and OS/cgroup detection | CPU/memory constraints, reserved headroom, heap/concurrency/queues and image budgets; shared by startup controllers |
+| `src/qq-enhancer/compress-image.js` | Bounded local image compression | First-frame JPEG previews, decoder resource limits and temporary snapshot cleanup |
 | `src/qq-enhancer/` | Optional QQ reply behavior | changing context images, proactive interest or reply style |
 | `src/qq-enhancer/context-images.js` + `src/app/qq-image-memory-tool.js` | Short-lived image references and on-demand inspection | five-minute-or-20-raw-message eligibility, scoped image directory, active task input validation and visual tool results |
 | `src/qq-main-prompt.js` | Main-model prompt boundary | changing role, execution order, approved proactive tasks or the need-based tool directory |

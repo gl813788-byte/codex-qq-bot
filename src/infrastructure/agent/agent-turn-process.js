@@ -100,34 +100,46 @@ export function createTurnDeadlines({
   return deadlines;
 }
 
-// Splits child stdout into JSON lines under a total byte budget. A handler
-// exception is reported like malformed output instead of escaping the stream.
-export function createNdjsonReader({ errors, maxBytes, isClosed = () => false, onMessage, onError }) {
+// Splits child stdout into JSON lines under a total byte budget. Optional
+// credits cover known binary echoes while keeping both unfinished frames and
+// ordinary output bounded. Both budget callbacks default to no allowance.
+export function createNdjsonReader({
+  errors, maxBytes, isClosed = () => false, onMessage, onError,
+  getByteAllowance = () => 0, discountMessageBytes = () => 0
+}) {
   let buffer = "";
   let bytes = 0;
   return (chunk) => {
+    if (isClosed()) return;
     const text = String(chunk || "");
-    bytes += Buffer.byteLength(text);
-    if (bytes > maxBytes) {
-      onError(errors.outputLimit());
-      return;
-    }
     buffer += text;
     let newlineIndex = buffer.indexOf("\n");
     while (newlineIndex >= 0) {
-      const line = buffer.slice(0, newlineIndex).trim();
+      const rawLine = buffer.slice(0, newlineIndex + 1);
+      const lineBytes = Buffer.byteLength(rawLine);
+      if (bytes + lineBytes > maxBytes + getByteAllowance()) {
+        onError(errors.outputLimit());
+        return;
+      }
+      const line = rawLine.trim();
       buffer = buffer.slice(newlineIndex + 1);
-      if (line) {
-        try {
-          onMessage(JSON.parse(line));
-        } catch (error) {
-          onError(errors.invalidJson(error));
+      try {
+        const message = line ? JSON.parse(line) : null;
+        const discount = message ? discountMessageBytes(message) : 0;
+        bytes += lineBytes - Math.max(0, Math.min(lineBytes, discount));
+        if (bytes > maxBytes) {
+          onError(errors.outputLimit());
           return;
         }
-        if (isClosed()) return;
+        if (line) onMessage(message);
+      } catch (error) {
+        onError(errors.invalidJson(error));
+        return;
       }
+      if (isClosed()) return;
       newlineIndex = buffer.indexOf("\n");
     }
+    if (bytes + Buffer.byteLength(buffer) > maxBytes + getByteAllowance()) onError(errors.outputLimit());
   };
 }
 

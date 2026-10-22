@@ -193,6 +193,8 @@ npm run verify   # syntax check + all tests; run before every commit
 
 Put new features in small modules that can be tested on their own instead of growing `src/server.js`.
 
+Test observable behavior and failure boundaries. Combine duplicate scenarios and avoid checks tied only to implementation names, fixed release versions, or CSS layout.
+
 ## Documentation
 
 - [Installation](docs/INSTALLATION.md)

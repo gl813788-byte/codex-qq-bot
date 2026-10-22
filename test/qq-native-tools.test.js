@@ -30,6 +30,7 @@ test("native image recall remains bound to the original conversation and preserv
   assert.equal(inspections, 1);
   const spec = buildQqNativeToolSpecs().find((item) => item.name === "qq_context").tools.find((item) => item.name === "images");
   assert.deepEqual(spec.inputSchema.properties.action.enum, ["list", "inspect"]);
+  assert.deepEqual(spec.inputSchema.properties.mode.enum, ["original", "compressed"]);
   assert.deepEqual(buildQqNativeToolSpecs({ toolsEnabled: false }), []);
 });
 

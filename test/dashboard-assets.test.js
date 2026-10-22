@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDashboardAssetHandler, dashboardAssetRoutes } from "../src/dashboard-assets.js";
+import { createDashboardAssetHandler } from "../src/dashboard-assets.js";
 
 function createResponse() {
   return {
@@ -28,18 +28,24 @@ test("serves only known dashboard assets with browser security headers", async (
       return Buffer.from(path.endsWith("client.html") ? "<main>Hub</main>" : "asset");
     }
   });
-  const response = createResponse();
+  for (const [url, contentType] of [
+    ["/", "text/html"], ["/dashboard", "text/html"], ["/client.css", "text/css"],
+    ["/client.js", "text/javascript"], ["/images/nexus-core.webp", "image/webp"]
+  ]) {
+    const response = createResponse();
+    assert.equal(await handler({ method: "GET", url, headers: {} }, response), true, url);
+    assert.equal(response.statusCode, 200);
+    assert.ok(response.headers["content-type"].startsWith(contentType), url);
+    assert.equal(response.headers["x-content-type-options"], "nosniff");
+    assert.match(response.headers["content-security-policy"], /frame-ancestors 'none'/);
+    assert.ok(response.headers.etag);
+    if (contentType === "text/html") assert.equal(response.body.toString(), "<main>Hub</main>");
+  }
 
-  assert.equal(await handler({ method: "GET", url: "/", headers: {} }, response), true);
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.toString(), "<main>Hub</main>");
-  assert.equal(response.headers["x-content-type-options"], "nosniff");
-  assert.match(response.headers["content-security-policy"], /frame-ancestors 'none'/);
-  assert.ok(response.headers.etag);
-
+  const loadCount = loads.length;
   const missing = createResponse();
   assert.equal(await handler({ method: "GET", url: "/../server.js", headers: {} }, missing), false);
-  assert.equal(loads.length, 1);
+  assert.equal(loads.length, loadCount);
 });
 
 test("supports HEAD, conditional requests, and in-memory asset caching", async () => {
@@ -65,25 +71,4 @@ test("supports HEAD, conditional requests, and in-memory asset caching", async (
   }, cached);
   assert.equal(cached.statusCode, 304);
   assert.equal(loads, 1);
-});
-
-test("serves the generated dashboard hero with its optimized image type", async () => {
-  let loadedPath = "";
-  const handler = createDashboardAssetHandler({
-    directory: "/virtual/dashboard",
-    loadAsset: async (path) => {
-      loadedPath = path;
-      return Buffer.from("webp");
-    }
-  });
-  const response = createResponse();
-
-  assert.equal(await handler({ method: "GET", url: "/images/nexus-core.webp", headers: {} }, response), true);
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.headers["content-type"], "image/webp");
-  assert.equal(loadedPath, "/virtual/dashboard/images/nexus-core.webp");
-});
-
-test("publishes the expected stable browser routes", () => {
-  assert.deepEqual(dashboardAssetRoutes, ["/", "/dashboard", "/client.css", "/client.js", "/images/nexus-core.webp"]);
 });

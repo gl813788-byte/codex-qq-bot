@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -69,6 +69,32 @@ test("ncc sends the force and background parameters and distinguishes acceptance
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test("startup applies resource budgets and preserves explicit environment overrides", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "qq-start-resources-"));
+  const nodePath = process.execPath;
+  const quote = (value) => `'${value.replace(/'/g, `'"'"'`)}'`;
+  const fields = ["NODE_OPTIONS", "CODEX_REMOTE_CONTACT_CODEX_MAX_CONCURRENCY", "CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES", "CODEX_REMOTE_CONTACT_QQ_COMPRESSED_IMAGE_MAX_EDGE"];
+  const script = `console.log(JSON.stringify(Object.fromEntries(${JSON.stringify(fields)}.map(key => [key,process.env[key]]))))`;
+  await writeFile(join(directory, "node"), `#!/bin/sh\ncase "$1" in\n*/src/server.js) exec ${quote(nodePath)} -e ${quote(script)} ;;\n*) exec ${quote(nodePath)} "$@" ;;\nesac\n`, { mode: 0o700 });
+  try {
+    for (const manual of [false, true]) {
+      const env = { ...process.env, PATH: `${directory}:${process.env.PATH}`, CODEX_REMOTE_CONTACT_RESOURCE_PROFILE: "balanced" };
+      for (const key of fields) delete env[key];
+      if (manual) {
+        env.NODE_OPTIONS = "--max-old-space-size=321";
+        env.CODEX_REMOTE_CONTACT_CODEX_MAX_CONCURRENCY = "3";
+        env.CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES = "12345678";
+      }
+      const { stdout } = await promisify(execFile)("bash", [join(projectDir, "scripts/start-hub.sh")], { env });
+      const applied = JSON.parse(stdout.trim().split("\n").at(-1));
+      assert.match(applied.NODE_OPTIONS, manual ? /321/ : /256/);
+      assert.equal(applied.CODEX_REMOTE_CONTACT_CODEX_MAX_CONCURRENCY, manual ? "3" : "1");
+      assert.equal(applied.CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES, manual ? "12345678" : String(10 * 1024 * 1024));
+      assert.equal(applied.CODEX_REMOTE_CONTACT_QQ_COMPRESSED_IMAGE_MAX_EDGE, "1600");
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 function escapeRegExp(value) {

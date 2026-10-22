@@ -494,6 +494,7 @@ const {
   qqSocialExtensionBase,
   qqOwnerFileImageTasksEnabled,
   qqImageMaxBytes,
+  qqCompressedImageMaxEdge,
   qqFileMaxBytes,
   qqBubbleSeparator,
   qqBubbleSendDelayMs,
@@ -3926,13 +3927,13 @@ async function cleanupQqEventTaskWorkspaceByBot(event, reason = "QQ send finishe
   });
 }
 
-async function prepareSingleQqModelImage(image, { outputDir, fetchOneBotImage: fetchImage } = {}) {
-  if (Number(image?.fileSize || 0) > qqImageMaxBytes) {
-    throw new Error(`QQ image exceeds ${qqImageMaxBytes} bytes`);
+async function prepareSingleQqModelImage(image, { outputDir, fetchOneBotImage: fetchImage, maxBytes = qqImageMaxBytes } = {}) {
+  if (Number(image?.fileSize || 0) > maxBytes) {
+    throw new Error(`QQ image exceeds ${maxBytes} bytes`);
   }
   const directPath = getExistingQqImagePath(image);
   if (directPath && await fileExists(directPath)) {
-    return copyQqImageToTemp(directPath, outputDir);
+    return copyQqImageToTemp(directPath, outputDir, maxBytes);
   }
 
   const file = image?.file ? String(image.file) : "";
@@ -3942,10 +3943,10 @@ async function prepareSingleQqModelImage(image, { outputDir, fetchOneBotImage: f
       const data = await fetcher(file);
       const fetchedPath = getExistingQqImagePath(data);
       if (fetchedPath && await fileExists(fetchedPath)) {
-        return copyQqImageToTemp(fetchedPath, outputDir);
+        return copyQqImageToTemp(fetchedPath, outputDir, maxBytes);
       }
       if (data?.url) {
-        return downloadQqImageUrl(data.url, outputDir, data.file_name || data.file || file);
+        return downloadQqImageUrl(data.url, outputDir, data.file_name || data.file || file, maxBytes);
       }
     } catch {
       // Fall through to image.url. Account stickers can use a synthetic name
@@ -3954,16 +3955,16 @@ async function prepareSingleQqModelImage(image, { outputDir, fetchOneBotImage: f
   }
 
   if (image?.url) {
-    return downloadQqImageUrl(String(image.url), outputDir, file || "qq-image");
+    return downloadQqImageUrl(String(image.url), outputDir, file || "qq-image", maxBytes);
   }
   return "";
 }
 
-async function copyQqImageToTemp(sourcePath, outputDir) {
+async function copyQqImageToTemp(sourcePath, outputDir, maxBytes = qqImageMaxBytes) {
   const sourceStats = await stat(sourcePath);
   if (!sourceStats.isFile()) throw new Error("QQ image source is not a regular file");
-  if (sourceStats.size > qqImageMaxBytes) {
-    throw new Error(`QQ image exceeds ${qqImageMaxBytes} bytes`);
+  if (sourceStats.size > maxBytes) {
+    throw new Error(`QQ image exceeds ${maxBytes} bytes`);
   }
   await mkdir(outputDir, { recursive: true });
   const sourceName = basename(sourcePath) || "qq-image";
@@ -3994,7 +3995,7 @@ function getExistingQqImagePath(image) {
   return "";
 }
 
-async function downloadQqImageUrl(url, outputDir, nameHint = "qq-image") {
+async function downloadQqImageUrl(url, outputDir, nameHint = "qq-image", maxBytes = qqImageMaxBytes) {
   const response = await fetchWithUrlPolicy(url, {
     headers: { "user-agent": userAgentName },
     signal: AbortSignal.timeout(15000)
@@ -4011,7 +4012,7 @@ async function downloadQqImageUrl(url, outputDir, nameHint = "qq-image") {
   const extension = inferImageExtension(nameHint, contentType);
   const safeName = String(nameHint || "qq-image").replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) || "qq-image";
   const outputPath = join(outputDir, `${Date.now()}-${crypto.randomUUID()}-${safeName}${safeName.toLowerCase().endsWith(extension) ? "" : extension}`);
-  await writeResponseBodyToFile(response, outputPath, { maxBytes: qqImageMaxBytes });
+  await writeResponseBodyToFile(response, outputPath, { maxBytes });
   return outputPath;
 }
 
@@ -6829,6 +6830,8 @@ async function executeQqStructuredNativeTool(call, event, context = {}) {
       taskWorkspace: rootEvent.qqTaskWorkspace,
       prepareImage: (image, options) => prepareSingleQqModelImage(image, { ...options, fetchOneBotImage }),
       maxBytes: qqImageMaxBytes,
+      compressedMaxEdge: qqCompressedImageMaxEdge,
+      signal: replyScope.signal,
       assertActive: () => assertQqReplyScopeActive(replyScope)
     });
   }
