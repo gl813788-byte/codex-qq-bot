@@ -1004,6 +1004,165 @@ const categoryLabels = Object.freeze({
   lifecycle: "流程"
 });
 
+// Key fields per category: the terminal shows only these with --compact and
+// shows them first otherwise; the dashboard shows the non-trivial ones on each
+// collapsed row. Categories without an entry use the default list.
+const defaultLogKeyFields = Object.freeze([
+  "operation", "action", "outcome", "status", "code", "errorCode", "error", "reason", "source", "url",
+  "durationMs", "totalDurationMs", "modelDurationMs", "modelTemperature", "deadlineRenewalCount", "resultCount",
+  "scopeType", "scopeId", "sourceScopeId", "targetScopeId", "targetType", "actorRole", "actorUserId",
+  "toolNamespace", "toolName", "toolAction", "toolCallId", "toolRound",
+  "entryId", "variantId", "title", "titles", "matchedTerms",
+  "appliedCount", "rejectedCount", "removedCount", "entryCount", "scopeCount", "titleCount", "slangCount", "variantCount",
+  "matchedTitleCount", "recordedHitCount", "contextExtendedCount", "hitCount", "totalHits", "recentHits", "retainedOccurrenceCount",
+  "deleted", "modelDecision", "modelOutput", "outputChars", "outputTruncated",
+  "reviewPipeline", "reviewStage", "interestRecommendation", "interestComplexity", "interestEvidenceConcerns", "interestModelOutput",
+  "mainModel", "mainModelDurationMs", "mainModelDecision", "mainModelOutput",
+  "contentMode", "researchRounds", "researchToolCalls", "researchToolKinds", "researchQueries", "failedToolCalls",
+  "proactiveKind", "interestGateRequired", "interestGateApproved", "interestGateProvider", "interestGateModel", "interestGateTask", "mainContentRequired",
+  "topicStartShouldStart", "topicStartMode", "topicStartInterest", "topicStartReason", "topicStartJudgeProvider", "topicStartJudgeModel", "topicStartJudgeDurationMs",
+  "privateStartShouldStart", "privateStartInterest", "privateStartReason", "privateStartJudgeProvider", "privateStartJudgeModel", "privateStartJudgeDurationMs", "spontaneityRoll"
+]);
+const logKeyFieldsByCategory = Object.freeze({
+  lifecycle: Object.freeze(["outcome", "messageType", "groupId", "triggerMode", "decisionReason", "totalDurationMs", "durationMs", "error"]),
+  search: Object.freeze(["query", "reason", "provider", "providers", "durationMs", "resultCount", "error"]),
+  interest: Object.freeze([
+    "shouldReply", "reason", "triggerMode", "messageCount", "judgeEveryMessages",
+    "activityAdvancedDuringJudge", "additionalActivityCount", "ruleScore", "labels", "blockers"
+  ])
+});
+// Who said what, then where it happened: shown on a collapsed dashboard row
+// after the speech fields and before the category's key fields run out.
+const logSpeechFields = Object.freeze(["senderName", "text"]);
+const logContextFields = Object.freeze(["groupId", "senderId", "model", "taskType", "messageType"]);
+
+export function getLogKeyFields(category) {
+  return logKeyFieldsByCategory[String(category || "").toLowerCase()] || defaultLogKeyFields;
+}
+
+// false, 0, empty strings and empty collections say nothing on their own; a
+// listed key field still shows them because there the absence is the news.
+export function isTrivialLogValue(value) {
+  if (value == null || value === false || value === 0 || value === "") return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object") return Object.keys(value).length === 0;
+  return false;
+}
+
+export function selectLogHighlightKeys(entry, { category = entry?.category, limit = 6 } = {}) {
+  const details = entry?.details && typeof entry.details === "object" ? entry.details : {};
+  const candidates = [...logSpeechFields, ...getLogKeyFields(category), ...logContextFields];
+  const output = [];
+  for (const key of candidates) {
+    if (output.length >= limit) break;
+    if (output.includes(key) || !Object.hasOwn(details, key)) continue;
+    const value = details[key];
+    if (isTrivialLogValue(value)) continue;
+    if (typeof value === "object" && !(Array.isArray(value) && value.every((item) => item == null || typeof item !== "object"))) continue;
+    output.push(key);
+  }
+  return output;
+}
+
+// Latencies (colored by slowness) are a subset of all millisecond fields;
+// windows, delays and intervals are formatted the same way but not colored.
+export function isLogDurationKey(key) {
+  return /(?:^d|D)urationMs$|(?:^t|T)imeoutMs$/.test(String(key || ""));
+}
+
+export function isLogMillisecondsKey(key) {
+  const value = String(key || "");
+  return /[a-z]Ms$/.test(value) && !/(?:at|since|until|epoch|time)Ms$/i.test(value);
+}
+
+const isoTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+
+// "2026-10-24T14:29:10.000Z" reads as local "10-24 22:29:10".
+export function formatLogTimestampValue(value) {
+  if (typeof value !== "string" || !isoTimestampPattern.test(value)) return value;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+const chatCodeLabelsZh = Object.freeze({
+  image: "图片",
+  face: "表情",
+  mface: "表情",
+  marketface: "表情",
+  record: "语音",
+  video: "视频",
+  file: "文件",
+  reply: "回复",
+  forward: "转发",
+  json: "卡片",
+  xml: "卡片",
+  poke: "戳一戳",
+  dice: "骰子",
+  rps: "猜拳",
+  share: "分享",
+  music: "音乐",
+  location: "位置",
+  markdown: "Markdown"
+});
+
+// Collapses OneBot CQ codes, whose image URLs fill whole screens, into short
+// markers such as [图片 动画表情] or @12345. Only for display; details keep
+// the original text.
+export function formatLogChatText(value, locale = "zh") {
+  if (typeof value !== "string" || !value.includes("[CQ:")) return value;
+  const zh = String(locale || "").toLowerCase().startsWith("zh");
+  // Older lines lost the closing bracket to URL redaction, so a code may also
+  // end at whitespace or the end of the text.
+  return value.replace(/\[CQ:([A-Za-z_]+)((?:[^\[\]\s]|\[[^\[\]]*\])*)(?:\]|(?=\s|$))/g, (match, type, params) => {
+    const read = (name) => {
+      const found = params.match(new RegExp(`(?:^|,)${name}=((?:[^,\\[\\]]|\\[[^\\[\\]]*\\])*)`));
+      return found ? decodeChatCodeValue(found[1]).replace(/^\[(.*)\]$/, "$1").trim() : "";
+    };
+    const kind = type.toLowerCase();
+    if (kind === "at") {
+      const target = read("qq");
+      return target === "all" ? "@全体成员" : `@${read("name") || target}`;
+    }
+    const label = zh ? (chatCodeLabelsZh[kind] || kind) : kind;
+    const note = kind === "image" ? read("summary") : kind === "file" ? read("name") || read("file") : "";
+    return note ? `[${label} ${note}]` : `[${label}]`;
+  });
+}
+
+function decodeChatCodeValue(value) {
+  return String(value || "")
+    .replace(/&#91;/g, "[")
+    .replace(/&#93;/g, "]")
+    .replace(/&#44;/g, ",")
+    .replace(/&amp;/g, "&");
+}
+
+export function formatLogDuration(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return String(value);
+  if (number >= 60_000) return `${(number / 60_000).toFixed(number >= 600_000 ? 1 : 2)}m`;
+  if (number >= 1000) return `${(number / 1000).toFixed(number >= 10_000 ? 1 : 2)}s`;
+  return `${number}ms`;
+}
+
+// One short display string for a highlighted field, in the terminal's words.
+export function formatLogHighlightValue(value, key = "", locale = "zh", maxLength = 160) {
+  const zh = String(locale || "").toLowerCase().startsWith("zh");
+  const format = (item) => {
+    if (item == null) return "";
+    if (/error/i.test(key) && zh) return formatLogError(item, locale);
+    if (isLogMillisecondsKey(key) && typeof item !== "boolean" && Number.isFinite(Number(item))) return formatLogDuration(item);
+    if (typeof item === "boolean") return zh ? (item ? "是" : "否") : String(item);
+    if (typeof item === "string" && key === "text") return formatLogChatText(item, locale);
+    if (typeof item === "string") return String(formatLogTimestampValue(formatLogDetailValue(item, key, locale)));
+    return String(item);
+  };
+  const text = Array.isArray(value) ? value.map(format).filter(Boolean).join(zh ? "、" : ", ") : format(value);
+  return compactLogDisplayText(text, maxLength);
+}
+
 export function formatLogMessage(message, locale = "zh") {
   const value = String(message || "");
   if (!String(locale || "").toLowerCase().startsWith("zh")) return value;

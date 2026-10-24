@@ -1,4 +1,16 @@
 const urlPattern = /https?:\/\/[^\s<>"'\]\[）)]+/gi;
+// After entity decoding a CQ value can hold one level of literal brackets,
+// e.g. [CQ:image,summary=[动画表情],file=…]. A plain [^\]]+ stops inside the
+// summary and leaves ",file=…,url=…]" behind, so match bracket groups first
+// and fall back to the plain form for an unbalanced value.
+const qqCqParamsSource = String.raw`(?:[^\[\]]|\[[^\[\]]*\])*`;
+
+export function createQqCqCodePattern(types = "[A-Za-z_]+", flags = "g") {
+  return new RegExp(
+    String.raw`\[CQ:(?:${types})(?:,${qqCqParamsSource})?\]|\[CQ:(?:${types}),[^\]]*\]`,
+    flags
+  );
+}
 
 export function decodeQqHtmlEntities(value) {
   return String(value || "")

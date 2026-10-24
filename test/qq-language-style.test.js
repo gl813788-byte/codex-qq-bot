@@ -52,3 +52,9 @@ test("analyzes human language by scope and optional stable sender id", () => {
   assert.equal(member.frequentPhrases.some((entry) => entry.key === "hesitation_marker"), true);
   assert.equal(group.punctuation.find((entry) => entry.key === "exclamation").messageCount, 16);
 });
+
+test("animated stickers add no punctuation to language statistics", () => {
+  const features = extractQqLanguageFeatures("[CQ:image,summary=[动画表情],file=8DD.jpg,sub_type=1,url=https://m.test/d?appid=1407&rkey=abc]");
+  assert.deepEqual(Object.keys(features.punctuationOccurrences), []);
+  assert.deepEqual(Object.keys(features.punctuationMessages), []);
+});

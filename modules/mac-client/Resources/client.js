@@ -1849,7 +1849,13 @@ function renderLogs() {
   if (signature === app.lastLogSignature && stream.childElementCount > 0) return;
   app.lastLogSignature = signature;
   const previousScrollTop = stream.childElementCount > 0 ? stream.scrollTop : app.logScrollTop;
-  stream.innerHTML = entries.length ? entries.map((entry, index) => renderLogEntry(entry, index)).join("") : emptyState(t("noLogs"));
+  let lastDay = "";
+  stream.innerHTML = entries.length ? entries.map((entry, index) => {
+    const day = formatLogDay(entry.ts);
+    const divider = day && day !== lastDay ? `<div class="log-day" role="separator">${escapeHtml(day)}</div>` : "";
+    lastDay = day || lastDay;
+    return divider + renderLogEntry(entry, index);
+  }).join("") : emptyState(t("noLogs"));
   if (app.logFollow) stream.scrollTop = stream.scrollHeight;
   else {
     stream.scrollTop = previousScrollTop;
@@ -1871,20 +1877,71 @@ function renderLogEntry(entry, index) {
   const durationClass = duration >= 10_000 ? "bad" : duration >= 2_000 ? "slow" : "";
   const open = app.logExpand || app.openLogIds.has(logEntryKey(entry));
   const engineTag = entry.engine ? `<span class="engine-tag ${logClassToken(entry.engine, "codex")}">${escapeHtml(engineNames[entry.engine] || entry.engine)}</span>` : "";
+  const traceTag = trace ? `<span class="log-trace tone-${traceTone(entry.traceId)}" title="${escapeHtml(entry.traceId)}">#${escapeHtml(trace)}</span>` : "";
   return `<div class="log-entry level-${level} category-${category}${open ? " open" : ""}" data-log-key="${escapeHtml(logEntryKey(entry))}">
     <button class="log-row" type="button" data-log-index="${index}" aria-expanded="${open}">
       <time class="log-time">${escapeHtml(formatClock(entry.ts))}</time>
       <span class="level-badge ${level}">${escapeHtml(formatLogLevel(level))}</span>
       <span class="log-origin"><span class="log-category">${escapeHtml(formatLogCategory(category))}</span>${engineTag}</span>
-      <span class="log-copy"><span class="log-message">${escapeHtml(message || "")}${trace ? `<span class="log-trace">${escapeHtml(trace)}</span>` : ""}</span>${error ? `<span class="log-error">${escapeHtml(error)}</span>` : ""}</span>
+      <span class="log-copy"><span class="log-message">${escapeHtml(message || "")}${traceTag}</span>${error ? `<span class="log-error">${escapeHtml(error)}</span>` : ""}${renderLogFacts(entry)}</span>
       <span class="log-duration ${durationClass}">${escapeHtml(duration == null ? "" : formatMs(duration))}</span>
     </button>
     ${open ? renderLogDetails(entry, index) : ""}
   </div>`;
 }
 
+// Key facts on the collapsed row, chosen server-side from the same key-field
+// table the terminal viewer uses; who said what comes first as one quote.
+function renderLogFacts(entry) {
+  const highlights = Array.isArray(entry.highlights) ? entry.highlights : [];
+  if (!highlights.length) return "";
+  const english = app.language === "en";
+  const valueOf = (item) => (english ? item.textEn : item.text) || "";
+  const speaker = highlights.find((item) => item.key === "senderName");
+  const said = highlights.find((item) => item.key === "text");
+  const chips = [];
+  if (said) {
+    const who = speaker ? valueOf(speaker) : String(entry.details?.senderId || "");
+    chips.push(`<span class="log-fact is-speech">${who ? `<b>${escapeHtml(who)}${english ? ":" : "："}</b>` : ""}${escapeHtml(valueOf(said))}</span>`);
+  }
+  for (const item of highlights) {
+    if (said && (item.key === "text" || item.key === "senderName" || (!speaker && item.key === "senderId"))) continue;
+    const label = english ? item.key : item.label;
+    chips.push(`<span class="log-fact ${logFactClass(item)}"><b>${escapeHtml(label)}</b>${escapeHtml(valueOf(item))}</span>`);
+  }
+  return `<span class="log-facts">${chips.join("")}</span>`;
+}
+
+function logFactClass(item) {
+  const key = String(item.key || "");
+  if (/error|blockers/i.test(key)) return "is-error";
+  if (key === "shouldReply") return item.textEn === "true" ? "is-good" : "is-muted";
+  if (/^(outcome|status)$/.test(key)) {
+    const text = String(item.textEn || "").toLowerCase();
+    if (/fail|error|timeout|false|declin|reject/.test(text)) return "is-bad";
+    if (/ignored|skipped|silent|queued/.test(text)) return "is-muted";
+    return "is-good";
+  }
+  if (/Ms$/.test(key)) return "is-time";
+  if (/reason$/i.test(key)) return "is-reason";
+  return "";
+}
+
+// FNV-1a: a "* 31" hash is the character sum modulo 6, so many ids collide.
+function traceTone(traceId) {
+  let hash = 2166136261;
+  for (const character of String(traceId || "")) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619) >>> 0;
+  return hash % 6;
+}
+
+function formatLogDay(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(app.language === "en" ? "en-GB" : "zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
+}
+
 function renderLogDetails(entry, index) {
-  const excluded = new Set(["ts", "level", "category", "message", "messageZh", "errorZh", "details", "detailsZh", "traceId", "engine"]);
+  const excluded = new Set(["ts", "level", "category", "message", "messageZh", "errorZh", "details", "detailsZh", "highlights", "traceId", "engine"]);
   const fields = [];
   if (entry.traceId) fields.push(["traceId", entry.traceId]);
   for (const [key, value] of Object.entries(entry)) {

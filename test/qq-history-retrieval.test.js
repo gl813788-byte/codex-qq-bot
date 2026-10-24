@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   fetchQqHistoryForSummary,
-  mergeQqHistoryMessages
+  mergeQqHistoryMessages,
+  normalizeOneBotHistoryMessage
 } from "../src/qq-history-retrieval.js";
 
 test("summary history paginates NapCat records and recognizes Bot messages", async () => {
@@ -58,3 +59,13 @@ function historyMessage(messageId, time, userId, text) {
     sender: { user_id: userId, nickname: `用户${userId}`, ...(messageId === "12" ? { is_robot: true } : {}) }
   };
 }
+
+test("history text folds animated stickers whose summary has brackets", () => {
+  const entry = normalizeOneBotHistoryMessage({
+    message_id: 7,
+    user_id: 10001,
+    time: 1_790_000_000,
+    raw_message: "[CQ:image,summary=[动画表情],file=8DD.jpg,sub_type=1,url=https://m.test/d?appid=1407&rkey=abc]哈哈"
+  });
+  assert.equal(entry.text, "[图片]哈哈");
+});

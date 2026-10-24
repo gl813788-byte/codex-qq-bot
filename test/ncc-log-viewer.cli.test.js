@@ -329,3 +329,84 @@ test("ncc log viewer aligns CJK columns and formats every duration the same way"
   assert.equal(new Set(columns).size, 1, `message column differs: ${columns.join(",")}`);
   assert.match(stdout, /结果：指令已处理 · 模型耗时：1\.50s · 单次超时：6\.50s · 回复字符数：12/);
 });
+
+test("ncc log viewer filters the whole rotated history instead of each file's tail", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-qq-log-history-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = join(directory, "hub.jsonl");
+  const noise = (index) => JSON.stringify({
+    ts: new Date(Date.UTC(2026, 9, 2, 0, 0, index)).toISOString(),
+    level: "debug",
+    category: "memory",
+    message: "noise",
+    details: { pad: "x".repeat(400) }
+  });
+  // About 1.3 MB in the rotated file; the old reader only looked at its last
+  // 640 KB, so this success entry near the start was never shown.
+  const rotated = [JSON.stringify({ ts: "2026-10-01T00:00:00.000Z", level: "success", category: "agent", message: "older agent turn", details: {} })];
+  for (let index = 0; index < 3000; index += 1) rotated.push(noise(index));
+  await writeFile(`${filePath}.1`, `${rotated.join("\n")}\n`, "utf8");
+  await writeFile(filePath, `${Array.from({ length: 20 }, (_, index) => noise(4000 + index)).join("\n")}\n`, "utf8");
+
+  const { stdout } = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--plain", "--level", "success"]);
+  assert.match(stdout, /older agent turn/);
+});
+
+test("ncc log viewer card layout groups by day, quotes chat and wraps to the width", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-qq-log-card-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = join(directory, "hub.jsonl");
+  const entries = [
+    {
+      ts: "2026-10-24T14:22:14.000Z",
+      level: "debug",
+      category: "qq",
+      message: "QQ message details received",
+      traceId: "a1b2c3d4-trace",
+      details: {
+        senderName: "小明",
+        senderId: "10001",
+        text: "[CQ:image,summary=[动画表情],file=a.jpg,url=https://x.test/a?rkey=[redacted]] 你好呀",
+        groupId: "20002",
+        imageCount: 1,
+        hasReply: false
+      }
+    },
+    {
+      ts: "2026-10-24T14:22:15.000Z",
+      level: "success",
+      category: "lifecycle",
+      message: "QQ reply lifecycle completed",
+      traceId: "a1b2c3d4-trace",
+      details: {
+        outcome: "sent",
+        groupId: "20002",
+        decisionReason: "model final decision",
+        totalDurationMs: 76137,
+        generationDurationMs: 58345,
+        proactive: false,
+        failedBubbleCount: 0,
+        modelOutput: "这是一段很长的模型输出".repeat(12)
+      }
+    }
+  ];
+  await writeFile(filePath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+  const width = (text) => [...text].reduce((sum, character) => sum + (/[⺀-꓏＀-｠]/.test(character) ? 2 : 1), 0);
+
+  const { stdout } = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--pretty", "--plain", "--width", "60"]);
+  const lines = stdout.trimEnd().split("\n");
+  assert.match(lines[0], /^── 2026-10-2\d 周.+ ─+$/);
+  assert.equal(lines.filter((line) => line.startsWith("── ")).length, 1, "one divider for one day");
+  assert.match(stdout, /\d{2}:\d{2}:\d{2} · 调试 QQ +收到 QQ 消息详情 #a1b2c3d4/);
+  assert.match(stdout, /  │ 小明 \(10001\)：\[图片 动画表情\] 你好呀/);
+  assert.match(stdout, /✓ 成功 流程 +QQ 回复流程完成 #a1b2c3d4 1\.27m/);
+  assert.match(stdout, /结果 已发送/);
+  assert.doesNotMatch(stdout, /是否主动发言|失败气泡|是否引用/);
+  for (const line of lines) assert.ok(width(line) <= 60, `line wider than 60 columns: ${line}`);
+
+  const verbose = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--pretty", "--plain", "--width", "60", "--verbose"]);
+  assert.match(verbose.stdout, /是否主动发言 否/);
+
+  const oneLine = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--plain"]);
+  assert.equal(oneLine.stdout.trimEnd().split("\n").length, 2);
+});

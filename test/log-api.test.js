@@ -151,3 +151,39 @@ test("log API tags agent entries with their engine and filters by engine", async
   assert.equal(agentCategory.matched, 4);
   assert.equal(agentCategory.entries.at(-1).details.engine, "codex");
 });
+
+test("log API applies default visibility before the limit and returns row highlights", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-qq-log-api-visible-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = join(directory, "hub.jsonl");
+  const logger = createLogger({ filePath, consoleOutput: false });
+  logger.success("QQ reply lifecycle completed", {
+    outcome: "sent",
+    groupId: "10001",
+    proactive: false,
+    replyChars: 0,
+    totalDurationMs: 2300
+  }, "lifecycle");
+  for (let index = 0; index < 1100; index += 1) logger.debug("QQ semantic memory layer synchronized", { count: index }, "memory");
+  logger.debug("QQ message details received", {
+    senderName: "小明",
+    senderId: "10001",
+    text: "[CQ:image,summary=[动画表情],file=a.jpg,url=https://example.test/a?rkey=secret] 你好呀",
+    imageCount: 1,
+    isAt: false
+  }, "qq");
+  await logger.flush();
+
+  const compact = await buildLogsResponse(filePath, new URLSearchParams("verbose=0&limit=10"));
+  assert.deepEqual(compact.entries.map((entry) => entry.message), ["QQ reply lifecycle completed"]);
+  assert.deepEqual(compact.entries[0].highlights.map((item) => [item.key, item.label, item.text]), [
+    ["outcome", "结果", "已发送"],
+    ["groupId", "群", "10001"],
+    ["totalDurationMs", "总耗时", "2.30s"]
+  ]);
+
+  const latest = await buildLogsResponse(filePath, new URLSearchParams("limit=1"));
+  assert.deepEqual(latest.entries[0].highlights.map((item) => item.key), ["senderName", "text", "senderId"]);
+  assert.equal(latest.entries[0].highlights[1].text, "[图片 动画表情] 你好呀");
+  assert.equal(latest.entries[0].highlights[1].textEn, "[image 动画表情] 你好呀");
+});

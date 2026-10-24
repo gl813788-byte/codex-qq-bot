@@ -19,6 +19,9 @@ test("automatic plans respect memory headroom and CPU capacity, and reject insuf
   assert.throws(() => planResourceProfile(facts(900)), /安全启动/);
   assert.throws(() => planResourceProfile(facts(1100)), /不足以启动/);
   assert.equal(planResourceProfile(facts(7000), { profile: "balanced" }).hubHeapMb, 256);
+  // Several days of rotated logs: 3 MiB x 8 on the balanced tier, 2 MiB x 6 on low.
+  assert.equal(planResourceProfile(facts(7000), { profile: "balanced" }).logFiles * planResourceProfile(facts(7000), { profile: "balanced" }).logBytes, 24 * MiB);
+  assert.equal(low.logFiles * low.logBytes, 12 * MiB);
   assert.throws(() => planResourceProfile(facts(7000), { minimumMb: 2000 }), /内存阈值/);
   assert.throws(() => planResourceProfile(facts(7000), { profile: "unknown" }), /资源档位/);
 });

@@ -4,11 +4,16 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
+  formatLogChatText,
   formatLogDetailText,
   formatLogError,
+  formatLogHighlightValue,
   formatLogMessage,
+  formatLogTimestampValue,
   getLogDetailLabel,
-  localizeLogDetails
+  isLogMillisecondsKey,
+  localizeLogDetails,
+  selectLogHighlightKeys
 } from "../src/log-presentation.js";
 
 test("log presentation uses consistent Chinese event names and concise error chains", () => {
@@ -414,4 +419,40 @@ test("terminal and dashboard share one vocabulary for lifecycle, search and dura
   const labels = source.slice(source.indexOf("const detailLabelsZh"), source.indexOf("const detailValuesZh"));
   assert.doesNotMatch(labels, /用时"/, "duration labels use 耗时");
   assert.equal(getLogDetailLabel("messageId"), "消息 ID");
+});
+
+test("display helpers shorten chat codes, timestamps and millisecond fields", () => {
+  assert.equal(
+    formatLogChatText("[CQ:reply,id=5][CQ:at,qq=10001] 看 [CQ:image,summary=&#91;动画表情&#93;,file=a.jpg,url=https://x.test/a?rkey=[redacted]] [CQ:face,id=14]"),
+    "[回复]@10001 看 [图片 动画表情] [表情]"
+  );
+  // Lines written before the redaction fix lost the closing bracket.
+  assert.equal(formatLogChatText("[CQ:image,file=b.jpg,url=https://x.test/b?rkey=[redacted]"), "[图片]");
+  assert.equal(formatLogChatText("[CQ:at,qq=all] 开会"), "@全体成员 开会");
+  assert.equal(formatLogChatText("普通文字"), "普通文字");
+
+  const local = formatLogTimestampValue("2026-10-24T14:29:10.000Z");
+  assert.match(local, /^\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.equal(formatLogTimestampValue("not a time"), "not a time");
+
+  assert.equal(isLogMillisecondsKey("nextCheckAfterMs"), true);
+  assert.equal(isLogMillisecondsKey("quietWindowMs"), true);
+  assert.equal(isLogMillisecondsKey("sinceMs"), false);
+  assert.equal(isLogMillisecondsKey("lastActivityAtMs"), false);
+  assert.equal(formatLogHighlightValue(10_800_000, "nextCheckAfterMs"), "180.0m");
+  assert.equal(formatLogHighlightValue(["a", "b"], "titles"), "a、b");
+  assert.equal(formatLogHighlightValue(false, "shouldReply"), "否");
+});
+
+test("row highlights skip trivial values but keep who said what first", () => {
+  const entry = {
+    category: "lifecycle",
+    details: { outcome: "ignored", groupId: "10001", triggerMode: null, decisionReason: "Mention-only mode ignored this message", replyChars: 0, proactive: false, totalDurationMs: 1400 }
+  };
+  assert.deepEqual(selectLogHighlightKeys(entry), ["outcome", "groupId", "decisionReason", "totalDurationMs"]);
+  assert.deepEqual(selectLogHighlightKeys({
+    category: "qq",
+    details: { source: "OneBot", senderName: "小明", senderId: "1", text: "+1", imageCount: 0, atTargets: [] }
+  }), ["senderName", "text", "source", "senderId"]);
+  assert.deepEqual(selectLogHighlightKeys({ category: "memory", details: { nested: { a: 1 }, title: "黑话" } }), ["title"]);
 });
