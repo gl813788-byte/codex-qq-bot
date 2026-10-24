@@ -55,6 +55,7 @@ environment + runtime paths
 | `src/infrastructure/claude/claude-child-env.js` | Claude child environment | Allowlisted variables, the connection profile and fixed quiet switches |
 | `src/infrastructure/codex/qq-native-tools.js` | Dynamic QQ tool surface | mapping structured App Server calls to existing authenticated Hub operations |
 | `src/qq-cross-session.js` | Cross-session catalog and event rebinding | listing/resolving group/private selectors or safely rebinding a verified role to a target session |
+| `src/qq-cross-session-search.js` | Cross-session chat-record search | chat-history read/search flow: keyword, person-QQ and approximate semantic search over every permitted session or sessions named by label/selector, with per-hit source labels; enforces the third-party private-chat boundary and assembles bounded cross-session material for interest judges |
 | `src/qq-operation-log.js` | Unified QQ operation-log fields | aligning actor and source/target scope fields across Agent, administrator, social and cross-session work |
 | `src/infrastructure/codex/qq-agent-output.js` | Structured QQ final-output boundary | reply/silence/addressing/attachment schema and delivery compatibility translation |
 | `src/infrastructure/codex/qq-agent-attachments.js` | Codex generated-image import boundary | copying only current-turn, current-thread, signature-checked generated images into the active QQ task output, including recovery of the latest valid image for an explicit image task that omitted its attachment, while leaving file policy unchanged |

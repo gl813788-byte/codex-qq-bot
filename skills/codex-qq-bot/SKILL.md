@@ -166,6 +166,12 @@ refactor with a behavior change.
   input/output paths. Ordinary file attachments must already exist under that
   output directory; rejected paths produce a warning and failed receipt even
   when the accompanying text was sent. Do not auto-import ordinary files.
+- `qq_context.history` keyword or `userId` searches also cover other sessions.
+  Every cross-session hit must name its session, selector, line, time and
+  sender. Ordinary requesters reach groups and their own private chat; other
+  people's private chats require verified owner or administrator authority.
+  Named `sessions` targets resolve only among permitted scopes, so names never
+  reveal a hidden private chat. Log counts only, never terms or message bodies.
 - Earlier images stay selectable in the original group/private scope while
   within five minutes OR the latest 20 raw messages (before repeat compaction,
   including text and Bot replies). Keep the full five-minute storage window
@@ -216,6 +222,11 @@ refactor with a behavior change.
   real context, it has no worthwhile response, is unwilling to continue, or
   safety requires silence. Do not silently revoke approval in Hub routing before
   the main model receives the turn.
+- Ordinary group and private-outreach judges may receive bounded cross-session
+  material from `src/qq-cross-session-search.js`: the sender's recent messages
+  in other sessions plus semantically related records, each labeled with its
+  source session. Load it lazily only before a provider call, keep it optional
+  on failure, and never include third-party private chats in background judges.
 - Cold-group and private-outreach results retain their activity-staleness guards.
   A decline, provider failure, invalid structure, missing credential, or missing
   two-model approval never starts visible proactive chat.

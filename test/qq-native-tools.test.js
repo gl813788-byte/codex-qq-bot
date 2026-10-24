@@ -176,6 +176,16 @@ test("structured robot profile calls stay native and bound to the turn event", a
 
 test("native tool arguments map to existing validated Hub commands", () => {
   assert.equal(mapQqNativeToolToCommand("qq_context", "history", { query: "最近 50" }), "/聊天记录 最近 50");
+  assert.equal(mapQqNativeToolToCommand("qq_context", "history", { query: "" }), "/聊天记录 最近 50");
+  assert.equal(
+    mapQqNativeToolToCommand("qq_context", "history", { query: "原神 角色", userId: "12345", sessions: "group: 67890, 学习 群", contextLines: 9 }),
+    "/聊天记录 人物:12345 会话:group:67890,学习群 上下文:3 原神 角色"
+  );
+  assert.equal(mapQqNativeToolToCommand("qq_context", "history", { query: "", userId: "12345" }), "/聊天记录 人物:12345");
+  const historySchema = buildQqNativeToolSpecs().find((item) => item.name === "qq_context").tools
+    .find((tool) => tool.name === "history").inputSchema;
+  assert.deepEqual(historySchema.required, ["query"]);
+  assert.deepEqual(Object.keys(historySchema.properties), ["query", "userId", "sessions", "contextLines"]);
   assert.equal(mapQqNativeToolToCommand("qq_search", "chinese_web", { query: "Codex 最新版本" }), "/联网 Codex 最新版本");
   assert.equal(mapQqNativeToolToCommand("qq_runtime", "configure", { command: "思考强度 high" }, { event: { isOwner: true } }), "/思考强度 high");
   assert.equal(mapQqNativeToolToCommand("qq_runtime", "configure", { command: "思考强度 high" }, { event: { isOwner: false } }), "");

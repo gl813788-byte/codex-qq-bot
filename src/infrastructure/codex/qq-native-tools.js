@@ -30,8 +30,13 @@ export function buildQqNativeToolSpecs({
       tools: [{
         type: "function",
         name: "history",
-        description: "Read recent messages, a numeric range such as 20-40, or search by keyword.",
-        inputSchema: objectSchema({ query: string("Examples: 最近 50, 20-40, or a keyword.") })
+        description: "Read recent messages or a numeric range such as 20-40 of the current conversation, or search chat records. A keyword or person search covers the current conversation and every other permitted QQ session unless sessions names specific targets; each cross-session hit names its session label, selector, line, time and sender, so cite that source instead of presenting it as the current conversation. Ordinary requesters reach groups and their own private chat; only the verified owner or Bot administrators reach other people's private chats.",
+        inputSchema: objectSchema({
+          query: string("Examples: 最近 50, 20-40, or short keywords separated by spaces such as 原神 角色; empty when searching only by userId."),
+          userId: string("Optional QQ id whose sent, @-mentioned or quoted messages to find across sessions."),
+          sessions: string("Optional target sessions, comma-separated: group:GROUP_ID, private:QQ_ID, a bare id, a group name, a private contact name, or 当前. Reads or searches only those sessions (up to 5); an ambiguous or unknown name returns the permitted candidate sessions."),
+          contextLines: { type: "integer", minimum: 0, maximum: 3, description: "Neighboring lines around each cross-session hit, default 0." }
+        }, ["query"])
       }, {
         type: "function",
         name: "download_file",
@@ -332,7 +337,18 @@ function notifyToolObserver(observer, payload) {
 export function mapQqNativeToolToCommand(namespace, tool, args = {}, { event = null } = {}) {
   const ns = String(namespace || "");
   const name = String(tool || "");
-  if (ns === "qq_context" && name === "history") return `/聊天记录 ${clean(args.query || "最近 50")}`;
+  if (ns === "qq_context" && name === "history") {
+    const userId = clean(args.userId).replace(/\s+/g, "");
+    const sessions = clean(args.sessions).replace(/\s+/g, "");
+    const contextLines = Math.max(0, Math.min(3, Math.trunc(Number(args.contextLines) || 0)));
+    return joinCommand(
+      "/聊天记录",
+      userId ? `人物:${userId}` : "",
+      sessions ? `会话:${sessions}` : "",
+      contextLines ? `上下文:${contextLines}` : "",
+      clean(args.query) || (userId ? "" : "最近 50")
+    );
+  }
   if (ns === "qq_memory" && name === "person_detail") return `/人物记忆 详细 ${clean(args.userId)}`;
   if (ns === "qq_memory" && name === "person_alias") {
     const actions = { list: "列表", add: "添加", remove: "删除", rename: "修改" };

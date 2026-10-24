@@ -927,3 +927,80 @@ test("a bot delivery supersedes an in-flight old judge without consuming newer m
   assert.equal(state.proactive.messageCountByGroupId[event.groupId], 1);
   assert.equal(state.proactive.lastJudgeAtByGroupId[event.groupId], 2_000_000);
 });
+
+test("ordinary interest judge loads labeled cross-session material only before a model call", async () => {
+  let loads = 0;
+  let requestBody = null;
+  const crossSessionContext = {
+    aboutSender: [{ session: "群 学习群(20002)", selector: "group:20002", time: "昨天 18:00", sender: "小赵(QQ 60006)", text: "下周答辩", matchedBy: ["sender"] }],
+    relatedElsewhere: [],
+    privacySkippedScopeCount: 1
+  };
+  const waiting = await shouldProactivelyReplyToQq(event, proactiveState(1500, { judgeEveryMessages: 3 }), {
+    openRouterApiKey: "configured-for-test",
+    loadCrossSessionContext: async () => {
+      loads += 1;
+      return crossSessionContext;
+    },
+    fetch: async () => assert.fail("must not call the provider before the cycle is due")
+  });
+  assert.equal(waiting.ok, false);
+  assert.equal(loads, 0);
+
+  const result = await shouldProactivelyReplyToQq(event, proactiveState(), {
+    openRouterApiKey: "configured-for-test",
+    loadCrossSessionContext: async () => {
+      loads += 1;
+      return crossSessionContext;
+    },
+    fetch: async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return jsonJudgeResponse();
+    }
+  });
+  assert.equal(loads, 1);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.crossSessionContext, { aboutSenderCount: 1, relatedElsewhereCount: 0 });
+  assert.match(requestBody.messages[0].content, /【跨会话材料】/);
+  assert.match(requestBody.messages[0].content, /不代表当前群正在讨论的内容/);
+  const payload = JSON.parse(requestBody.messages[1].content);
+  assert.deepEqual(payload.crossSessionContext, crossSessionContext);
+
+  const failingLoader = await shouldProactivelyReplyToQq(event, proactiveState(), {
+    openRouterApiKey: "configured-for-test",
+    loadCrossSessionContext: async () => { throw new Error("index unavailable"); },
+    fetch: async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return jsonJudgeResponse();
+    }
+  });
+  assert.equal(failingLoader.ok, true);
+  assert.doesNotMatch(requestBody.messages[0].content, /【跨会话材料】/);
+  assert.equal(JSON.parse(requestBody.messages[1].content).crossSessionContext, undefined);
+});
+
+test("private proactive judge receives the contact's labeled activity from other sessions", async () => {
+  let requestBody = null;
+  await judgeQqPrivateProactiveStart({
+    apiKey: "test-key",
+    baseUrl: "https://openrouter.test/api/v1",
+    model: "test/interest-model",
+    timeoutMs: 1500,
+    privateInterest: { phase: "long", frequency: "low", idleHours: 30 },
+    frequencyPrior: { probability: 0.12, roll: 0.09 },
+    recentMessages: [],
+    crossSessionContext: {
+      aboutSender: [{ session: "群 学习群(20002)", selector: "group:20002", sender: "小赵(QQ 60006)", text: "下周答辩" }],
+      relatedElsewhere: []
+    },
+    fetch: async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ shouldStart: false, interest: 10, reason: "不急" }) }, finish_reason: "stop" }]
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+  });
+  assert.match(requestBody.messages[0].content, /它不是私聊里发生的事/);
+  assert.doesNotMatch(requestBody.messages[0].content, /\nnull\n|^null|null$/);
+  assert.equal(JSON.parse(requestBody.messages[1].content).crossSessionContext.aboutSender[0].selector, "group:20002");
+});

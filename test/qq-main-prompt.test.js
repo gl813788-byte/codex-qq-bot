@@ -106,6 +106,9 @@ test("tool guide describes native tools and server-bound permissions", () => {
     knowledgeTitleCount: 3
   });
   assert.match(ordinary, /qq_context\.history/);
+  assert.match(ordinary, /关键词或 userId 搜索会同时检索其他可访问会话，每条结果标明来源会话/);
+  assert.match(ordinary, /不要把其他会话的内容说成当前会话里发生的事/);
+  assert.match(ordinary, /要看指定对话时用 sessions 填群名、私聊对象、QQ 号或 selector/);
   assert.match(ordinary, /qq_knowledge\.manage/);
   assert.match(ordinary, /原生 Web Search/);
   assert.match(ordinary, /原始 callId 的服务端绑定上下文/);
