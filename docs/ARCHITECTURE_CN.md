@@ -55,6 +55,7 @@
 | `src/infrastructure/claude/claude-child-env.js` | Claude 子进程环境 | 白名单变量、连接 profile 和固定的静默开关 |
 | `src/infrastructure/codex/qq-native-tools.js` | QQ 动态工具表面 | 把结构化 App Server 调用映射到已有鉴权 Hub 操作 |
 | `src/qq-cross-session.js` | 跨会话目录与事件重绑定 | 列出/解析群聊私聊 selector，或把已验证角色安全绑定到目标会话 |
+| `src/qq-cross-session-search.js` | 跨会话聊天记录检索 | 聊天记录工具的读取/搜索流程：按关键词、人物 QQ 号或语义近似检索所有可访问会话或按名称/选择器指定的会话，逐条标注来源会话；执行他人私聊隐私边界，并为兴趣模型组装有界的跨会话材料 |
 | `src/qq-operation-log.js` | QQ 操作日志统一字段 | 统一 Agent、管理员、社交和跨会话的操作者及来源/目标范围 |
 | `src/infrastructure/codex/qq-agent-output.js` | QQ 结构化最终输出边界 | 回复/静默/寻址/附件 Schema 与投递兼容转换 |
 | `src/infrastructure/codex/qq-agent-attachments.js` | Codex 生成图导入边界 | 仅把当前轮、当前线程且通过图片签名校验的生成图复制进活动 QQ 任务输出目录；明确生图任务漏填附件时回收最新有效图片，普通文件策略保持不变 |

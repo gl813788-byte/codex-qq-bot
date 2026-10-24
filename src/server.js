@@ -288,6 +288,10 @@ import {
   resolveQqCrossSessionScope as resolveQqCrossSessionScopeFromState
 } from "./qq-cross-session.js";
 import {
+  buildQqInterestCrossSessionContext,
+  runQqHistorySearch
+} from "./qq-cross-session-search.js";
+import {
   buildQqOperationLogDetails,
   getQqLogScopeId,
   getQqLogScopeType
@@ -4273,6 +4277,13 @@ async function judgeQqProactiveEvent(event, { triggerMode = "message", countMess
     knowledgeMatches,
     interestSignals,
     conversationFollowUp: event.qqConversationFollowUp,
+    loadCrossSessionContext: () => buildQqInterestCrossSessionContext(getQqCrossSessionSource(event), event, {
+      currentScopeId: String(event.groupId),
+      query: [
+        stripMentionText(event.text) || event.text,
+        event.replyContext?.text
+      ].map((value) => normalizeQqDisplayText(value || "")).filter(Boolean).join("\n")
+    }),
     triggerMode,
     countMessage
   })).catch((error) => ({
@@ -5033,7 +5044,10 @@ async function runQqPrivateInterestCheck() {
           probability: plan.probability,
           roll: spontaneityRoll
         },
-        recentMessages: entries
+        recentMessages: entries,
+        crossSessionContext: await buildQqInterestCrossSessionContext(getQqCrossSessionSource(event), event, {
+          currentScopeId: getQqMemoryScopeId(event)
+        }).catch(() => null)
       })
       : { ok: false, reason: "interest model judge is disabled", fallback: false };
     logQqPrivateProactiveStartJudge(event, privateStartJudge, plan, spontaneityRoll);
@@ -5374,6 +5388,8 @@ function logQqProactiveInterestDecision(event, decision = {}) {
     relationshipInterestBoost: decision.relationshipInterest?.interestBoost ?? null,
     relationshipCadenceMessages: decision.relationshipInterest?.judgeEveryMessages ?? null,
     relationshipCadenceMinutes: decision.relationshipInterest?.judgeEveryMinutes ?? null,
+    crossSessionAboutSenderCount: decision.crossSessionContext?.aboutSenderCount ?? null,
+    crossSessionRelatedCount: decision.crossSessionContext?.relatedElsewhereCount ?? null,
     penalty: interest.penalty,
     labels: interest.labels || [],
     blockers: interest.blockers || [],
@@ -7186,11 +7202,8 @@ async function executeQqBotInternalCommand(command, event) {
   }
 
   if (isQqBotHistoryCommand(normalizedCommand)) {
-    return {
-      ok: true,
-      command: normalizedCommand,
-      reply: buildQqHistoryReply(event, normalizedCommand)
-    };
+    const result = await buildQqHistorySearchReply(event, normalizedCommand);
+    return { ...result, command: normalizedCommand };
   }
 
   if (isQqBotSocialCommand(normalizedCommand)) {
@@ -8847,6 +8860,38 @@ function formatQqBanUntil(until) {
   } catch {
     return "未知时间";
   }
+}
+
+async function buildQqHistorySearchReply(event, command) {
+  const rootEvent = event?.qqCrossSessionRootEvent || event;
+  const rootScopeId = getQqMemoryScopeId(rootEvent);
+  const eventScopeId = getQqMemoryScopeId(event);
+  const scopeEventFor = (scopeId) => {
+    if (scopeId === eventScopeId) return event;
+    return scopeId === rootScopeId ? rootEvent : createQqCrossSessionEvent(scopeId, rootEvent);
+  };
+  return runQqHistorySearch(String(command || "")
+    .replace(/^\/?(聊天记录|查记录|搜索记录|搜记录|读记录|读取记录|看记录|记录|history|log|logs)\s*/i, ""), {
+    source: getQqCrossSessionSource(rootEvent),
+    eventScopeId,
+    rootScopeId,
+    privileged: hasQqPrivilegedAccess(rootEvent),
+    requesterId: String(rootEvent?.senderId || ""),
+    readHistory: (scopeId, query) => buildQqHistoryReply(scopeEventFor(scopeId), `/聊天记录 ${query}`),
+    countHistoryMatches: (scopeId, query) => selectQqHistoryEntries(
+      state.qq.memory.recentMessages[scopeId] || [],
+      query
+    ).entries.length,
+    personLabel: (userId) => formatQqIdentity({
+      userId,
+      name: state.qq.conversationMemory?.people?.[userId]?.displayName || ""
+    }),
+    onSearch: (details) => logger.info("QQ chat-history search completed", buildQqOperationLogDetails(rootEvent, {
+      operation: "history.search",
+      sourceScopeId: rootScopeId,
+      ...details
+    }), "qq", qqLogContext(rootEvent))
+  });
 }
 
 function buildQqHistoryReply(event, command) {
