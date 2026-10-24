@@ -2,6 +2,7 @@ import { formatQqIdentity } from "./channels/qq/mention-identities.js";
 import { createQqContextSemanticScorer } from "./qq-context-relevance.js";
 import { describeQqCrossSessionScope } from "./qq-cross-session.js";
 import { formatQqContextTime } from "./qq-context-time.js";
+import { createQqCqCodePattern } from "./qq-message-content.js";
 
 const maxQueryTerms = 8;
 const maxResultLimit = 40;
@@ -546,8 +547,8 @@ function normalizeSearchText(value) {
 
 function compactText(value, limit) {
   return String(value || "")
-    .replace(/\[CQ:image,[^\]]*\]/gi, "[图片]")
-    .replace(/\[CQ:face,[^\]]*\]/gi, "[表情]")
+    .replace(createQqCqCodePattern("image", "gi"), "[图片]")
+    .replace(createQqCqCodePattern("face", "gi"), "[表情]")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, limit);

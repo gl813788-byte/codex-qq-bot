@@ -1,7 +1,8 @@
-import { appendFile, mkdir, open, readdir, rename, stat, unlink } from "node:fs/promises";
+import { appendFile, mkdir, rename, stat, unlink } from "node:fs/promises";
 import crypto from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { formatLogMessage, getLogCategoryLabel, getLogLevelLabel } from "./log-presentation.js";
+import { readRecentLogEntries } from "./log-reader.js";
 import {
   canonicalLogCategory,
   expandLogCategoryFilter,
@@ -109,6 +110,27 @@ export function createLogger({
   return buildLoggerApi();
 }
 
+// Remembers the last signature logged per key so an event that repeats after
+// almost every message is only logged when its result actually changes.
+export function createLogChangeGate({ maxKeys = 200 } = {}) {
+  const signatures = new Map();
+  const limit = normalizePositiveInteger(maxKeys, 200);
+  return {
+    changed(key, signature) {
+      const id = String(key);
+      const value = String(signature);
+      if (signatures.get(id) === value) return false;
+      signatures.delete(id);
+      signatures.set(id, value);
+      while (signatures.size > limit) signatures.delete(signatures.keys().next().value);
+      return true;
+    },
+    forget(key) {
+      signatures.delete(String(key));
+    }
+  };
+}
+
 function normalizeLevel(value, fallback) {
   const normalized = String(value || "").trim().toLowerCase();
   return defaultLevels.has(normalized) ? normalized : fallback;
@@ -144,7 +166,8 @@ export async function readLogEntries(filePath, {
   operation = "",
   since = "",
   until = "",
-  minDurationMs = 0
+  minDurationMs = 0,
+  match = null
 } = {}) {
   const maxEntries = Math.max(1, Math.min(1000, Number(limit) || 100));
   const filters = {
@@ -161,37 +184,21 @@ export async function readLogEntries(filePath, {
     untilMs: normalizeTimestamp(until),
     minDurationMs: Math.max(0, Number(minDurationMs) || 0)
   };
-  const files = await listExistingLogFiles(filePath);
-  const lines = [];
-  for (const file of files) {
-    const handle = await open(file, "r").catch(() => null);
-    if (!handle) continue;
-    try {
-      const { size } = await handle.stat();
-      const readSize = Math.min(size, Math.max(256 * 1024, maxEntries * 8192));
-      const buffer = Buffer.alloc(readSize);
-      await handle.read(buffer, 0, readSize, Math.max(0, size - readSize));
-      lines.push(...buffer.toString("utf8").split("\n").filter(Boolean));
-    } finally {
-      await handle.close().catch(() => null);
-    }
-  }
-  const entries = [];
-  for (const line of lines) {
-    const parsed = parseLogLine(line);
-    if (!parsed) continue;
-    if (!matchesLogFilters(parsed, filters)) continue;
-    entries.push(parsed);
-  }
-  return entries
-    .sort((left, right) => String(left.ts || "").localeCompare(String(right.ts || "")))
-    .slice(-maxEntries);
+  const entries = await readRecentLogEntries(filePath, {
+    limit: maxEntries,
+    parse: (line) => parseLogLine(line, filters),
+    match: (entry) => matchesLogFilters(entry, filters) && (typeof match !== "function" || match(entry))
+  });
+  return entries.sort((left, right) => String(left.ts || "").localeCompare(String(right.ts || "")));
+}
+
+function normalizeEntryLevel(value) {
+  const level = String(value || "").toLowerCase();
+  return defaultLevels.has(level) ? level : "info";
 }
 
 export function normalizeEntry(entry) {
-  const level = defaultLevels.has(String(entry?.level || "").toLowerCase())
-    ? String(entry.level).toLowerCase()
-    : "info";
+  const level = normalizeEntryLevel(entry?.level);
   return {
     schemaVersion: Number(entry?.schemaVersion || 1),
     id: entry?.id ? String(entry.id).slice(0, 120) : null,
@@ -407,7 +414,9 @@ function redactString(value) {
   return value
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/\b(?:sk|gho|ghp|github_pat)_[A-Za-z0-9_]{12,}\b/g, "[redacted-token]")
-    .replace(/([?&](?:access_token|api[_-]?key|auth(?:orization)?|key|rkey|sig(?:nature)?|token)=)[^&#\s]+/gi, "$1[redacted]");
+    // Stops at "]" so a CQ code keeps its closing bracket, and skips values
+    // already redacted because stored lines are normalized again on read.
+    .replace(/([?&](?:access_token|api[_-]?key|auth(?:orization)?|key|rkey|sig(?:nature)?|token)=)(?!\[redacted\])[^&#\s\]]+/gi, "$1[redacted]");
 }
 
 async function appendLogLine(filePath, line, { maxBytes, maxFiles }) {
@@ -428,25 +437,15 @@ async function rotateIfNeeded(filePath, incomingBytes, { maxBytes, maxFiles }) {
   await rename(filePath, join(dir, `${base}.1`)).catch(() => null);
 }
 
-async function listExistingLogFiles(filePath) {
-  const dir = dirname(filePath);
-  const base = basename(filePath);
-  const names = await readdir(dir).catch(() => []);
-  return names
-    .filter((name) => name === base || name.startsWith(`${base}.`))
-    .sort((left, right) => rotationOrder(right, base) - rotationOrder(left, base))
-    .map((name) => join(dir, name));
-}
-
-function rotationOrder(name, base) {
-  if (name === base) return 0;
-  const suffix = Number(name.slice(base.length + 1));
-  return Number.isFinite(suffix) ? suffix : 999;
-}
-
-function parseLogLine(line) {
+// Level and category are checked on the raw line first: they normalize the
+// same way either way, and skipping normalization of every other line keeps
+// sparse filters over the whole history cheap.
+function parseLogLine(line, filters = null) {
   try {
-    return normalizeEntry(JSON.parse(line));
+    const raw = JSON.parse(line);
+    if (filters?.levels.size > 0 && !filters.levels.has(normalizeEntryLevel(raw?.level))) return null;
+    if (filters?.categories.size > 0 && !filters.categories.has(normalizeCategory(raw?.category))) return null;
+    return normalizeEntry(raw);
   } catch {
     return null;
   }

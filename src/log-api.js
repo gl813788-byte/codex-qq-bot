@@ -1,5 +1,12 @@
 import { readLogEntries, summarizeLogEntries } from "./logger.js";
-import { formatLogError, formatLogMessage, localizeLogDetails } from "./log-presentation.js";
+import {
+  formatLogError,
+  formatLogHighlightValue,
+  formatLogMessage,
+  getLogDetailLabel,
+  localizeLogDetails,
+  selectLogHighlightKeys
+} from "./log-presentation.js";
 import { canonicalLogCategory, resolveLogEngine } from "./infrastructure/agent/agent-engines.js";
 
 export async function buildLogsResponse(logFilePath, searchParams) {
@@ -19,6 +26,9 @@ export async function buildLogsResponse(logFilePath, searchParams) {
   const verboseValue = String(searchParams.get("verbose") ?? "1").toLowerCase();
   const verbose = !["0", "false", "no", "off"].includes(verboseValue);
   const normalizedLimit = Math.max(1, Math.min(1000, Number(limit) || 100));
+  const hasAdvancedFilter = Boolean(engine || traceId || query || groupId || senderId || scopeId || operation || since || until || minDurationMs);
+  // Visibility is part of the match so hidden debug lines never use up the
+  // window that the visible entries are taken from.
   const entries = await readLogEntries(logFilePath, {
     limit: 1000,
     level,
@@ -32,11 +42,10 @@ export async function buildLogsResponse(logFilePath, searchParams) {
     operation,
     since,
     until,
-    minDurationMs
+    minDurationMs,
+    match: (entry) => isVisibleByDefault(entry, { verbose, level, category, hasAdvancedFilter })
   });
-  const hasAdvancedFilter = Boolean(engine || traceId || query || groupId || senderId || scopeId || operation || since || until || minDurationMs);
   const visibleEntries = entries
-    .filter((entry) => isVisibleByDefault(entry, { verbose, level, category, hasAdvancedFilter }))
     .slice(-normalizedLimit)
     .map((entry) => presentEntry(verbose ? entry : compactEntry(entry)));
   return {
@@ -111,14 +120,23 @@ function compactEntry(entry) {
 
 function presentEntry(entry) {
   const error = entry.details?.error ?? entry.details?.modelError ?? entry.details?.diagnostic ?? null;
+  // Legacy "codex" entries read as agent entries from the Codex engine.
+  const category = canonicalLogCategory(entry.category) || "system";
   return {
     ...entry,
-    // Legacy "codex" entries read as agent entries from the Codex engine.
-    category: canonicalLogCategory(entry.category) || "system",
+    category,
     engine: resolveLogEngine(entry),
     messageZh: formatLogMessage(entry.message, "zh"),
     errorZh: error == null ? null : formatLogError(error, "zh"),
-    detailsZh: localizeLogDetails(entry.details || {}, "zh")
+    detailsZh: localizeLogDetails(entry.details || {}, "zh"),
+    highlights: selectLogHighlightKeys(entry, { category })
+      .filter((key) => !(key === "error" && error != null))
+      .map((key) => ({
+        key,
+        label: getLogDetailLabel(key, "zh"),
+        text: formatLogHighlightValue(entry.details[key], key, "zh"),
+        textEn: formatLogHighlightValue(entry.details[key], key, "en")
+      }))
   };
 }
 

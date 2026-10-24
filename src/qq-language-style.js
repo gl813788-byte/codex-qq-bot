@@ -1,4 +1,6 @@
-const cqCodePattern = /\[CQ:[^\]]+\]/giu;
+import { createQqCqCodePattern } from "./qq-message-content.js";
+
+const cqCodePattern = createQqCqCodePattern("[A-Za-z_]+", "giu");
 const urlPattern = /https?:\/\/\S+/giu;
 
 const punctuationDefinitions = Object.freeze([

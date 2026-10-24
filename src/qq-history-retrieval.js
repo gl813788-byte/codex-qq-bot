@@ -1,4 +1,5 @@
 import { normalizeQqOfficialRobotMarker } from "./qq-robot-profile.js";
+import { createQqCqCodePattern } from "./qq-message-content.js";
 
 export async function fetchQqHistoryForSummary({
   event,
@@ -187,8 +188,8 @@ function normalizeId(value) {
 
 function compactText(value, limit) {
   return String(value || "")
-    .replace(/\[CQ:image,[^\]]*\]/gi, "[图片]")
-    .replace(/\[CQ:face,[^\]]*\]/gi, "[表情]")
+    .replace(createQqCqCodePattern("image", "gi"), "[图片]")
+    .replace(createQqCqCodePattern("face", "gi"), "[表情]")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, limit);

@@ -1,15 +1,22 @@
 #!/usr/bin/env node
-import { open, readdir, stat } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { open, stat } from "node:fs/promises";
 import {
   compactLogDisplayText,
+  formatLogChatText,
   formatLogDetailValue,
+  formatLogDuration as formatMs,
   formatLogError,
   formatLogMessage,
   getLogCategoryLabel,
   getLogDetailLabel,
-  getLogLevelLabel
+  getLogKeyFields,
+  getLogLevelLabel,
+  formatLogTimestampValue,
+  isLogDurationKey as isDurationKey,
+  isLogMillisecondsKey,
+  isTrivialLogValue
 } from "../src/log-presentation.js";
+import { readRecentLogEntries } from "../src/log-reader.js";
 import { summarizeProcessDiagnostics } from "../src/process-diagnostics.js";
 import {
   AGENT_ENGINE_IDS,
@@ -26,6 +33,7 @@ const logCategories = ["system", "qq", "onebot", "agent", "codex", "web", "searc
 const categoryColumnWidth = 6;
 const colors = {
   reset: "\x1b[0m",
+  bold: "\x1b[1m",
   dim: "\x1b[2m",
   red: "\x1b[31m",
   yellow: "\x1b[33m",
@@ -67,32 +75,11 @@ const categoryColors = {
 const engineColors = { codex: "brightGreen", claude: "brightYellow" };
 const traceColors = ["brightBlue", "brightCyan", "brightMagenta", "brightYellow", "green", "magenta"];
 
-// --compact shows only these fields, in this order. --verbose (the default)
-// shows them first, then every other field in logged order.
-const keyFieldsByCategory = {
-  lifecycle: ["outcome", "messageType", "groupId", "triggerMode", "decisionReason", "totalDurationMs", "durationMs", "error"],
-  search: ["query", "reason", "provider", "providers", "durationMs", "resultCount", "error"],
-  interest: [
-    "shouldReply", "reason", "triggerMode", "messageCount", "judgeEveryMessages",
-    "activityAdvancedDuringJudge", "additionalActivityCount", "ruleScore", "labels", "blockers"
-  ]
-};
-const defaultKeyFields = [
-  "operation", "action", "outcome", "status", "code", "errorCode", "error", "reason", "source", "url",
-  "durationMs", "totalDurationMs", "modelDurationMs", "modelTemperature", "deadlineRenewalCount", "resultCount",
-  "scopeType", "scopeId", "sourceScopeId", "targetScopeId", "targetType", "actorRole", "actorUserId",
-  "toolNamespace", "toolName", "toolAction", "toolCallId", "toolRound",
-  "entryId", "variantId", "title", "titles", "matchedTerms",
-  "appliedCount", "rejectedCount", "removedCount", "entryCount", "scopeCount", "titleCount", "slangCount", "variantCount",
-  "matchedTitleCount", "recordedHitCount", "contextExtendedCount", "hitCount", "totalHits", "recentHits", "retainedOccurrenceCount",
-  "deleted", "modelDecision", "modelOutput", "outputChars", "outputTruncated",
-  "reviewPipeline", "reviewStage", "interestRecommendation", "interestComplexity", "interestEvidenceConcerns", "interestModelOutput",
-  "mainModel", "mainModelDurationMs", "mainModelDecision", "mainModelOutput",
-  "contentMode", "researchRounds", "researchToolCalls", "researchToolKinds", "researchQueries", "failedToolCalls",
-  "proactiveKind", "interestGateRequired", "interestGateApproved", "interestGateProvider", "interestGateModel", "interestGateTask", "mainContentRequired",
-  "topicStartShouldStart", "topicStartMode", "topicStartInterest", "topicStartReason", "topicStartJudgeProvider", "topicStartJudgeModel", "topicStartJudgeDurationMs",
-  "privateStartShouldStart", "privateStartInterest", "privateStartReason", "privateStartJudgeProvider", "privateStartJudgeModel", "privateStartJudgeDurationMs", "spontaneityRoll"
-];
+const levelSymbols = { debug: "·", info: "•", success: "✓", warn: "!", error: "✗" };
+const durationKeys = ["totalDurationMs", "durationMs", "modelDurationMs", "sendDurationMs", "generationDurationMs"];
+// The card layout prints a date divider whenever the local day changes, also
+// across --follow polls.
+const cardState = { lastDay: "" };
 
 class CliError extends Error {}
 
@@ -126,8 +113,11 @@ function parseArgs(args) {
     category: "",
     engine: "",
     plain: !process.stdout.isTTY,
+    layout: process.stdout.isTTY ? "card" : "line",
+    width: Number(process.stdout.columns) || 100,
     all: false,
     verbose: true,
+    showTrivial: false,
     traceId: "",
     query: "",
     groupId: "",
@@ -171,12 +161,22 @@ function parseArgs(args) {
       output.plain = true;
     } else if (arg === "--color" || arg === "--colour") {
       output.plain = false;
+    } else if (arg === "--pretty" || arg === "--card") {
+      output.layout = "card";
+    } else if (arg === "--oneline" || arg === "--line") {
+      output.layout = "line";
+    } else if (arg === "--width") {
+      const width = Number(valueOf(++index, arg));
+      if (!Number.isInteger(width) || width < 40) throw new CliError(`${arg} 需要不小于 40 的整数`);
+      output.width = Math.min(400, width);
     } else if (arg === "--all") {
       output.all = true;
     } else if (arg === "--verbose" || arg === "--detail" || arg === "--details") {
       output.verbose = true;
+      output.showTrivial = true;
     } else if (arg === "--compact" || arg === "--no-verbose") {
       output.verbose = false;
+      output.showTrivial = false;
     } else if (arg === "--trace") {
       output.traceId = valueOf(++index, arg).toLowerCase();
     } else if (arg === "--search" || arg === "--query" || arg === "-q") {
@@ -207,6 +207,7 @@ function parseArgs(args) {
     } else if (arg === "--json") {
       output.json = true;
       output.plain = true;
+      output.layout = "line";
     } else {
       throw new CliError(`未知参数 ${arg}`);
     }
@@ -224,50 +225,17 @@ function validateChoices(value, allowed, flag) {
 }
 
 async function printExisting(options) {
-  const hasDiagnosticFilter = Boolean(options.traceId || options.query || options.groupId || options.senderId || options.scopeId || options.operation
-    || options.sinceMs != null || options.untilMs != null || options.minDurationMs > 0);
-  const body = await readLogHistory(options.file, Math.max(hasDiagnosticFilter ? 1024 * 1024 : 256 * 1024, options.tail * 8192)).catch((error) => {
-    if (error.code === "ENOENT") return "";
-    throw error;
+  const entries = await readRecentLogEntries(options.file, {
+    limit: options.tail,
+    parse: parseLine,
+    match: (entry) => matchesViewerFilters(entry, options)
   });
-  const entries = body
-    .split("\n")
-    .filter(Boolean)
-    .map(parseLine)
-    .filter((entry) => entry && matchesViewerFilters(entry, options))
-    .slice(-options.tail);
   if (options.json) {
     for (const entry of entries) process.stdout.write(`${JSON.stringify(entry)}\n`);
   } else {
     for (const entry of entries) process.stdout.write(`${renderEntry(entry, options)}\n`);
   }
   if (options.summary) process.stdout.write(`${renderSummary(entries, options)}\n`);
-}
-
-async function readLogHistory(file, bytesPerFile) {
-  const directory = dirname(file);
-  const base = basename(file);
-  const names = await readdir(directory).catch((error) => {
-    if (error.code === "ENOENT") return [];
-    throw error;
-  });
-  const files = names
-    .filter((name) => name === base || new RegExp(`^${escapeRegExp(base)}\\.\\d+$`).test(name))
-    .sort((left, right) => rotationIndex(right, base) - rotationIndex(left, base))
-    .map((name) => join(directory, name));
-  const chunks = [];
-  for (const current of files) chunks.push(await readTail(current, bytesPerFile));
-  return chunks.join("\n");
-}
-
-function rotationIndex(name, base) {
-  if (name === base) return 0;
-  const value = Number(name.slice(base.length + 1));
-  return Number.isFinite(value) ? value : 999;
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function followFile(options) {
@@ -321,19 +289,6 @@ async function followFile(options) {
 
 function getFileIdentity(entry) {
   return `${entry.dev ?? ""}:${entry.ino ?? ""}:${entry.birthtimeMs ?? ""}`;
-}
-
-async function readTail(file, bytes) {
-  const handle = await open(file, "r");
-  try {
-    const { size } = await handle.stat();
-    const readSize = Math.min(size, bytes);
-    const buffer = Buffer.alloc(readSize);
-    await handle.read(buffer, 0, readSize, Math.max(0, size - readSize));
-    return buffer.toString("utf8");
-  } finally {
-    await handle.close().catch(() => null);
-  }
 }
 
 function renderLine(line, options) {
@@ -418,6 +373,10 @@ function matchesSenderId(details, scopeIds, senderId) {
 }
 
 function renderEntry(entry, options) {
+  return options.layout === "card" ? renderCard(entry, options) : renderOneLine(entry, options);
+}
+
+function renderOneLine(entry, options) {
   const level = String(entry.level || "info").toLowerCase();
   const category = canonicalLogCategory(entry.category) || "system";
   const engine = resolveLogEngine(entry);
@@ -436,6 +395,124 @@ function renderEntry(entry, options) {
   return fields.length > 0 ? `${header} ${renderFields(fields, entry, options)}` : header;
 }
 
+// Card layout for interactive terminals:
+//   ── 2026-10-24 周六 ─────────
+//   22:22:15 ✓ 成功 流程   QQ 回复流程完成  #a1b2c3d4  1.41s
+//     │ 小明 (10001)：你好呀
+//     │ 结果 已发送 · 群 20002 · 触发方式 消息数
+// The bar takes the trace's color so one reply flow reads as one strand, and
+// fields wrap at the terminal width instead of running off the screen.
+function renderCard(entry, options) {
+  const level = String(entry.level || "info").toLowerCase();
+  const category = canonicalLogCategory(entry.category) || "system";
+  const engine = resolveLogEngine(entry);
+  const levelColor = levelColors[level] || "white";
+  const categoryColor = colorForCategory(entry, category);
+  const traceColor = entry.traceId ? colorForTrace(entry.traceId) : "gray";
+  const details = entry.details && typeof entry.details === "object" ? entry.details : {};
+  const lines = [];
+  const day = formatLocalDay(entry.ts);
+  if (day && day !== cardState.lastDay) {
+    cardState.lastDay = day;
+    lines.push(color(`── ${day} ${"─".repeat(Math.max(4, Math.min(options.width, 72) - displayWidth(day) - 4))}`, "dim", options));
+  }
+  const strong = ["error", "warn"].includes(level) ? ["bold", levelColor] : levelColor;
+  const messageColor = level === "debug" ? ["dim", categoryColor]
+    : ["error", "warn", "success"].includes(level) ? strong : categoryColor;
+  const duration = getPrimaryDuration(details);
+  lines.push([
+    color(formatLocalClock(entry.ts), "dim", options),
+    color(`${levelSymbols[level] || "•"} ${padDisplay(getLogLevelLabel(level), 4)}`, strong, options),
+    color(padDisplay(getLogCategoryLabel(category), categoryColumnWidth), categoryColor, options),
+    color(formatLogMessage(entry.message || "", "zh"), messageColor, options),
+    engine ? color(getAgentEngine(engine).name, engineColors[engine] || "white", options) : null,
+    entry.traceId ? color(`#${shortTraceId(entry.traceId)}`, traceColor, options) : null,
+    duration ? color(formatMs(duration.value), colorForDuration(duration.value), options) : null
+  ].filter(Boolean).join(" "));
+
+  const gutter = { text: "  │ ", color: traceColor };
+  const available = Math.max(20, options.width - displayWidth(gutter.text));
+  const skipKeys = new Set(duration ? [duration.key] : []);
+  const speech = typeof details.text === "string" && details.text.trim() && (details.senderName || details.senderId);
+  if (speech) {
+    const name = details.senderName ? `${details.senderName}${details.senderId ? ` (${details.senderId})` : ""}` : String(details.senderId);
+    const text = compactLogDisplayText(formatLogChatText(details.text, "zh"), options.verbose ? 900 : 160);
+    for (const line of wrapTokens([[{ text: name, color: "brightCyan" }, { text: "：", color: "dim" }, { text, color: "brightWhite" }]], available)) {
+      lines.push(renderSegments([gutter, ...line], options));
+    }
+    for (const key of ["text", "senderName", "senderId"]) skipKeys.add(key);
+  }
+  const fields = collectFields(entry, options, skipKeys);
+  const tokens = fields.map((field) => options.plain
+    ? [{ text: `${field.label} ${field.text}` }]
+    : [{ text: `${field.label} `, color: "dim" }, { text: field.text, color: colorForField(field, entry) }]);
+  for (const line of wrapTokens(tokens, available, { text: " · ", color: "dim" })) {
+    lines.push(renderSegments([gutter, ...line], options));
+  }
+  return lines.join("\n");
+}
+
+// Packs tokens (arrays of { text, color } segments) into lines no wider than
+// `width` columns. A token wider than a whole line is broken by characters.
+function wrapTokens(tokens, width, separator = null) {
+  const lines = [];
+  let line = [];
+  let used = 0;
+  const breakLine = () => {
+    lines.push(line);
+    line = [];
+    used = 0;
+  };
+  for (const token of tokens) {
+    const tokenWidth = token.reduce((sum, segment) => sum + displayWidth(segment.text), 0);
+    const separatorWidth = line.length > 0 && separator ? displayWidth(separator.text) : 0;
+    if (line.length > 0 && used + separatorWidth + tokenWidth > width) breakLine();
+    if (line.length > 0 && separator) {
+      line.push(separator);
+      used += separatorWidth;
+    }
+    for (const segment of token) {
+      let rest = Array.from(String(segment.text || ""));
+      while (rest.length > 0) {
+        let taken = 0;
+        let takenWidth = 0;
+        while (taken < rest.length && used + takenWidth + displayWidth(rest[taken]) <= width) {
+          takenWidth += displayWidth(rest[taken]);
+          taken += 1;
+        }
+        if (taken === 0 && line.length === 0) {
+          taken = 1;
+          takenWidth = displayWidth(rest[0]);
+        }
+        if (taken === 0) {
+          breakLine();
+          continue;
+        }
+        line.push({ ...segment, text: rest.slice(0, taken).join("") });
+        used += takenWidth;
+        rest = rest.slice(taken);
+        if (rest.length > 0) breakLine();
+      }
+    }
+  }
+  if (line.length > 0) lines.push(line);
+  return lines;
+}
+
+function renderSegments(segments, options) {
+  return segments.map((segment) => (segment.color ? color(segment.text, segment.color, options) : segment.text)).join("");
+}
+
+function getPrimaryDuration(details) {
+  let best = null;
+  for (const key of durationKeys) {
+    const value = Number(details?.[key]);
+    if (typeof details?.[key] === "boolean" || !Number.isFinite(value) || value <= 0) continue;
+    if (!best || value > best.value) best = { key, value };
+  }
+  return best;
+}
+
 function isDefaultVisible(entry, level) {
   return ["success", "warn", "error"].includes(level)
     || ["Codex QQ Bot hub started", "QQ web lookup started"].includes(String(entry.message || ""));
@@ -446,9 +523,10 @@ function colorForCategory(entry, category) {
   return categoryColors[category] || "white";
 }
 
+// FNV-1a: a "* 31" hash is the character sum modulo 6, so many ids collide.
 function colorForTrace(traceId) {
-  let hash = 0;
-  for (const character of String(traceId || "")) hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
+  let hash = 2166136261;
+  for (const character of String(traceId || "")) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619) >>> 0;
   return traceColors[hash % traceColors.length];
 }
 
@@ -462,9 +540,9 @@ function isAtBotEntry(entry) {
 
 // One field list for every category: key fields first, then (verbose) the
 // rest. Each field is { key, label, value, text } so coloring uses the key.
-function collectFields(entry, options) {
+function collectFields(entry, options, skipKeys = new Set()) {
   const details = entry.details && typeof entry.details === "object" ? entry.details : {};
-  const keyFields = keyFieldsByCategory[canonicalLogCategory(entry.category)] || defaultKeyFields;
+  const keyFields = getLogKeyFields(canonicalLogCategory(entry.category));
   const ordered = [
     ...keyFields.filter((key) => Object.hasOwn(details, key)),
     ...(options.verbose ? Object.keys(details).filter((key) => !keyFields.includes(key)) : [])
@@ -473,7 +551,10 @@ function collectFields(entry, options) {
   const fields = [];
   for (const key of ordered) {
     const value = details[key];
+    if (skipKeys.has(key)) continue;
     if (value == null || value === "" || (Array.isArray(value) && value.length === 0)) continue;
+    // 否/0 fields only add noise unless they are key fields or --verbose asks.
+    if (!options.showTrivial && !keyFields.includes(key) && isTrivialLogValue(value)) continue;
     if (key === "stderr" || key === "stdout") {
       const diagnostics = summarizeProcessDiagnostics({ [key]: value });
       if (diagnostics.lines.length === 0) continue;
@@ -490,7 +571,7 @@ function collectFields(entry, options) {
 function formatFieldValue(value, key) {
   if (value == null) return "";
   if (/error/i.test(key) && !Array.isArray(value)) return formatLogError(value, "zh");
-  if (isDurationKey(key) && Number.isFinite(Number(value)) && typeof value !== "boolean") return formatMs(value);
+  if (isLogMillisecondsKey(key) && Number.isFinite(Number(value)) && typeof value !== "boolean") return formatMs(value);
   if (key === "providers" && Array.isArray(value)) return value.join(" → ");
   if (key === "results" && Array.isArray(value)) return value.map(formatSearchResult).join("；");
   if (typeof value === "boolean") return value ? "是" : "否";
@@ -501,12 +582,9 @@ function formatFieldValue(value, key) {
       .map(([itemKey, item]) => `${getLogDetailLabel(itemKey, "zh")} ${formatFieldValue(item, itemKey)}`)
       .join("，");
   }
-  if (typeof value === "string") return String(formatLogDetailValue(value, key, "zh"));
+  if (typeof value === "string" && key === "text") return formatLogChatText(value, "zh");
+  if (typeof value === "string") return String(formatLogTimestampValue(formatLogDetailValue(value, key, "zh")));
   return String(value);
-}
-
-function isDurationKey(key) {
-  return /(?:^d|D)urationMs$|(?:^t|T)imeoutMs$/.test(String(key || ""));
 }
 
 function formatSearchResult(result, index) {
@@ -558,14 +636,6 @@ function colorForDuration(milliseconds) {
   return "cyan";
 }
 
-function formatMs(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return String(value);
-  if (number >= 60_000) return `${(number / 60_000).toFixed(number >= 600_000 ? 1 : 2)}m`;
-  if (number >= 1000) return `${(number / 1000).toFixed(number >= 10_000 ? 1 : 2)}s`;
-  return `${number}ms`;
-}
-
 // CJK characters take two terminal columns; pad by columns so the level and
 // category columns line up.
 function padDisplay(text, width) {
@@ -579,6 +649,21 @@ function displayWidth(text) {
     width += /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(character) ? 2 : 1;
   }
   return width;
+}
+
+function formatLocalDay(value) {
+  const date = new Date(String(value || ""));
+  if (!Number.isFinite(date.getTime())) return "";
+  const pad = (number) => String(number).padStart(2, "0");
+  const weekday = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][date.getDay()];
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${weekday}`;
+}
+
+function formatLocalClock(value) {
+  const date = new Date(String(value || ""));
+  if (!Number.isFinite(date.getTime())) return String(value || "").slice(0, 8);
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 function formatLocalTimestamp(value) {
@@ -599,8 +684,7 @@ function splitFilter(value) {
 
 function getEntryDurationMs(entry) {
   const details = entry?.details || {};
-  const durations = [details.totalDurationMs, details.durationMs, details.modelDurationMs, details.sendDurationMs, details.generationDurationMs]
-    .map(Number)
+  const durations = durationKeys.map((key) => Number(details[key]))
     .filter((value) => Number.isFinite(value) && value >= 0);
   return durations.length > 0 ? Math.max(...durations) : 0;
 }
@@ -656,6 +740,13 @@ function renderSummary(entries, options) {
       ? `耗时样本 ${color(String(durations.length), "cyan", options)}，P95 ${color(formatMs(p95), colorForDuration(p95), options)}，最慢 ${color(formatMs(durations.at(-1)), colorForDuration(durations.at(-1)), options)}`
       : null
   ].filter(Boolean);
+  if (options.layout === "card" && !options.json) {
+    const title = "── 日志摘要 ";
+    return [
+      color(`${title}${"─".repeat(Math.max(4, Math.min(options.width, 72) - displayWidth(title)))}`, "brightWhite", options),
+      ...sections.map((section) => `  ${section}`)
+    ].join("\n");
+  }
   const summary = `${color("日志摘要", "brightWhite", options)}：${sections.join("；")}`;
   if (options.json) {
     return JSON.stringify({ summary, total: entries.length, traces: traces.size, byLevel, byCategory, byEngine, byOperation, byOutcome, p95Ms: p95 || null });
@@ -665,7 +756,8 @@ function renderSummary(entries, options) {
 
 function color(text, colorName, options) {
   if (options.plain) return text;
-  return `${colors[colorName] || ""}${text}${colors.reset}`;
+  const codes = (Array.isArray(colorName) ? colorName : [colorName]).map((name) => colors[name] || "").join("");
+  return `${codes}${text}${colors.reset}`;
 }
 
 function usage() {
@@ -692,7 +784,10 @@ function usage() {
   --slow [MS]             只看耗时不少于 MS 毫秒的记录（默认 1000）
 
 显示
-  --verbose               显示全部字段（默认）
+  --pretty                卡片布局：按日期分隔、链路色条、按终端宽度换行（终端默认）
+  --oneline               每条一行（管道和重定向默认，便于 grep）
+  --width N               卡片布局的换行宽度（默认取终端列数）
+  --verbose               连值为 否/0 的次要字段也显示（默认省略）
   --compact               只显示关键字段，并隐藏调试和普通信息日志
   --all                   配合 --compact 时也显示普通信息日志
   --summary               末尾追加统计摘要

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   analyzeQqConversationIntent,
+  createQqCqCodePattern,
   decodeQqHtmlEntities,
   extractQqRichMessageContent,
   formatQqConversationIntent,
@@ -72,4 +73,20 @@ test("treats an empty at-plus-reply as a quoted continuation instead of a bare p
   const prompt = formatQqCurrentMessagePrompt(event, "");
   assert.match(prompt, /直接理解并回应引用内容/);
   assert.doesNotMatch(prompt, /只 @ 了你/);
+});
+
+test("CQ code pattern spans values that carry literal brackets", () => {
+  const sticker = "[CQ:image,summary=[动画表情],file=8DD.jpg,sub_type=1,url=https://m.test/d?appid=1407&rkey=abc]";
+  const text = `前 ${sticker} 后 [CQ:face,id=14] [CQ:image,file=x.jpg] [CQ:record,file=v.amr]`;
+  assert.equal(
+    text
+      .replace(createQqCqCodePattern("image"), "[图片]")
+      .replace(createQqCqCodePattern("face"), "[表情]")
+      .replace(createQqCqCodePattern("record|voice|audio"), "[语音]"),
+    "前 [图片] 后 [表情] [图片] [语音]"
+  );
+  // An unbalanced value still removes the whole code instead of nothing.
+  assert.equal("[CQ:image,summary=[坏,file=y]!".replace(createQqCqCodePattern("image"), "[图片]"), "[图片]!");
+  assert.equal("[CQ:IMAGE,file=z]".replace(createQqCqCodePattern("image", "gi"), "[图片]"), "[图片]");
+  assert.equal("[CQ:at,qq=1]".replace(createQqCqCodePattern("image"), ""), "[CQ:at,qq=1]");
 });

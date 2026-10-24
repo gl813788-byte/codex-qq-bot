@@ -29,7 +29,7 @@ import {
   isValidReasoningEffort,
   isValidReasoningSummary
 } from "./app/qq-codex-runtime-settings.js";
-import { createLogger } from "./logger.js";
+import { createLogChangeGate, createLogger } from "./logger.js";
 import { buildLogsResponse } from "./log-api.js";
 import { importOptionalModule } from "./optional-modules.js";
 import { defaultQqPublicCommands, getQqCommand, qqCommandCatalog } from "./qq-command-catalog.js";
@@ -215,6 +215,7 @@ import {
 } from "./qq-inbound-files.js";
 import {
   analyzeQqConversationIntent,
+  createQqCqCodePattern,
   extractQqUrls,
   extractQqRichMessageContent,
   formatQqConversationIntent,
@@ -560,6 +561,7 @@ const logger = createLogger({
   consoleOutput: logConsoleOutput,
   consoleLevels: logConsoleLevels
 });
+const semanticLayerLogGate = createLogChangeGate();
 const codexModelCatalog = createCodexModelCatalog({
   codexPath: codexCliPath,
   envProvider: () => buildCodexChildEnv()
@@ -2250,15 +2252,21 @@ async function syncQqSemanticMemoryLayer(layer) {
   if (!items) return { ok: false, skipped: true, reason: "unknown layer" };
   try {
     const result = await unifiedMemory.replaceSemanticLayer(layer, items);
-    logger.debug("QQ semantic memory layer synchronized", {
-      operation: "memory.semantic_sync",
-      layer,
-      count: items.length,
-      outcome: result?.ok ? "synchronized" : "skipped",
-      reason: result?.reason
-    }, "memory");
+    const outcome = result?.ok ? "synchronized" : "skipped";
+    // Layers resync after nearly every message; an unchanged result is noise
+    // that would push real events out of the rotated history.
+    if (semanticLayerLogGate.changed(layer, `${outcome}:${items.length}:${result?.reason || ""}`)) {
+      logger.debug("QQ semantic memory layer synchronized", {
+        operation: "memory.semantic_sync",
+        layer,
+        count: items.length,
+        outcome,
+        reason: result?.reason
+      }, "memory");
+    }
     return result;
   } catch (error) {
+    semanticLayerLogGate.forget(layer);
     logger.warn("Unable to synchronize QQ semantic memory layer", {
       operation: "memory.semantic_sync",
       layer,
@@ -4117,10 +4125,10 @@ function isQqPrivateEvent(event) {
 
 function stripMentionText(text) {
   let value = String(text || "")
-    .replace(/\[CQ:file,[^\]]+\]/gi, "")
-    .replace(/\[CQ:image,[^\]]+\]/g, "")
-    .replace(/\[CQ:(?:record|voice|audio),[^\]]+\]/g, "")
-    .replace(/\[CQ:face,[^\]]+\]/g, "")
+    .replace(createQqCqCodePattern("file", "gi"), "")
+    .replace(createQqCqCodePattern("image"), "")
+    .replace(createQqCqCodePattern("record|voice|audio"), "")
+    .replace(createQqCqCodePattern("face"), "")
     .replace(/\[CQ:reply,[^\]]+\]/g, "")
     .replace(/\[CQ:at,[^\]]+\]/g, "");
   for (const alias of assistantMentionAliases) {
@@ -4140,10 +4148,10 @@ function escapeRegExp(value) {
 
 function normalizeQqDisplayText(text) {
   return String(text || "")
-    .replace(/\[CQ:file,[^\]]+\]/gi, "[文件]")
-    .replace(/\[CQ:image,[^\]]+\]/g, "[图片]")
-    .replace(/\[CQ:(?:record|voice|audio),[^\]]+\]/g, "[语音]")
-    .replace(/\[CQ:face,[^\]]+\]/g, "[表情]")
+    .replace(createQqCqCodePattern("file", "gi"), "[文件]")
+    .replace(createQqCqCodePattern("image"), "[图片]")
+    .replace(createQqCqCodePattern("record|voice|audio"), "[语音]")
+    .replace(createQqCqCodePattern("face"), "[表情]")
     .replace(/\[CQ:reply,[^\]]+\]/g, "")
     .replace(/\[CQ:at,qq=\d+(?:,name=([^\]]+))?[^\]]*\]/g, (_, name) => name ? `@${name}` : "@群友")
     .replace(/\s+/g, " ")

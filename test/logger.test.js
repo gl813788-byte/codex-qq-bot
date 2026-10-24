@@ -3,7 +3,8 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createLogger, normalizeEntry, readLogEntries, summarizeLogEntries } from "../src/logger.js";
+import { createLogChangeGate, createLogger, normalizeEntry, readLogEntries, summarizeLogEntries } from "../src/logger.js";
+import { writeFile } from "node:fs/promises";
 
 test("logger stores detailed debug entries by default and still supports an explicit higher threshold", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "codex-qq-logger-"));
@@ -148,4 +149,40 @@ test("logger correlates child entries and supports diagnostic filters and summar
     lastAt: tracedEntries[1].ts,
     duration: { sampleCount: 2, p50Ms: 12, p95Ms: 2400, maxMs: 2400 }
   });
+});
+
+test("log reads filter the whole retained history, not the tail of each file", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-qq-logger-history-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = join(directory, "hub.jsonl");
+  const noise = (index) => JSON.stringify({ ts: new Date(Date.UTC(2026, 9, 2, 0, 0, index)).toISOString(), level: "debug", category: "memory", message: "noise", details: { pad: "x".repeat(400) } });
+  const older = [JSON.stringify({ ts: "2026-10-01T00:00:00.000Z", level: "success", category: "agent", message: "older agent turn", details: {} })];
+  for (let index = 0; index < 3000; index += 1) older.push(noise(index));
+  await writeFile(`${filePath}.1`, `${older.join("\n")}\n`, "utf8");
+  await writeFile(filePath, `${Array.from({ length: 50 }, (_, index) => noise(4000 + index)).join("\n")}\n`, "utf8");
+
+  const entries = await readLogEntries(filePath, { limit: 5, category: "agent" });
+  assert.deepEqual(entries.map((entry) => entry.message), ["older agent turn"]);
+  const visible = await readLogEntries(filePath, { limit: 1, match: (entry) => entry.level !== "debug" });
+  assert.deepEqual(visible.map((entry) => entry.message), ["older agent turn"]);
+});
+
+test("log change gate logs repeating events only when their signature changes", () => {
+  const gate = createLogChangeGate({ maxKeys: 2 });
+  assert.equal(gate.changed("short-term", "synchronized:0"), true);
+  assert.equal(gate.changed("short-term", "synchronized:0"), false);
+  assert.equal(gate.changed("short-term", "synchronized:1"), true);
+  gate.forget("short-term");
+  assert.equal(gate.changed("short-term", "synchronized:1"), true);
+  gate.changed("knowledge", "a");
+  gate.changed("impression", "b");
+  // The oldest key is evicted beyond maxKeys and logs again.
+  assert.equal(gate.changed("short-term", "synchronized:1"), true);
+});
+
+test("URL redaction is idempotent and keeps the closing bracket of a CQ code", () => {
+  const text = "[CQ:image,file=a.jpg,url=https://x.test/a?appid=1&rkey=SIGNED] 好";
+  const once = normalizeEntry({ details: { text } }).details.text;
+  assert.equal(once, "[CQ:image,file=a.jpg,url=https://x.test/a?appid=1&rkey=[redacted]] 好");
+  assert.equal(normalizeEntry({ details: { text: once } }).details.text, once);
 });

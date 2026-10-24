@@ -1,8 +1,10 @@
 const MiB = 1024 * 1024;
+// Log reads go through fixed-size chunks, so retained log files cost disk,
+// not heap; the counts keep a few days of history on a busy group.
 const presets = {
-  standard: { hubHeapMb: 384, qqHeapMb: 512, rendererLimit: 2, agentConcurrency: 2, agentPending: 24, oneBotConcurrency: 8, oneBotPending: 32, logBytes: 5 * MiB, logFiles: 3, threads: 4, arenas: 2, screen: "1280x720x24" },
-  balanced: { hubHeapMb: 256, qqHeapMb: 384, rendererLimit: 1, agentConcurrency: 1, agentPending: 12, oneBotConcurrency: 4, oneBotPending: 16, logBytes: 3 * MiB, logFiles: 3, threads: 2, arenas: 2, screen: "960x540x24" },
-  low: { hubHeapMb: 192, qqHeapMb: 256, rendererLimit: 1, agentConcurrency: 1, agentPending: 6, oneBotConcurrency: 2, oneBotPending: 8, logBytes: 2 * MiB, logFiles: 2, threads: 2, arenas: 1, screen: "800x600x24" }
+  standard: { hubHeapMb: 384, qqHeapMb: 512, rendererLimit: 2, agentConcurrency: 2, agentPending: 24, oneBotConcurrency: 8, oneBotPending: 32, logBytes: 5 * MiB, logFiles: 8, threads: 4, arenas: 2, screen: "1280x720x24" },
+  balanced: { hubHeapMb: 256, qqHeapMb: 384, rendererLimit: 1, agentConcurrency: 1, agentPending: 12, oneBotConcurrency: 4, oneBotPending: 16, logBytes: 3 * MiB, logFiles: 8, threads: 2, arenas: 2, screen: "960x540x24" },
+  low: { hubHeapMb: 192, qqHeapMb: 256, rendererLimit: 1, agentConcurrency: 1, agentPending: 6, oneBotConcurrency: 2, oneBotPending: 8, logBytes: 2 * MiB, logFiles: 6, threads: 2, arenas: 1, screen: "800x600x24" }
 };
 
 export function planResourceProfile(facts, {
