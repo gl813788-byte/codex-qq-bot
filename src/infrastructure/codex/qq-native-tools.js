@@ -19,7 +19,8 @@ export function buildQqNativeToolSpecs({
   toolsEnabled = true,
   hasStickerCandidates = false,
   hasMemoryPeople = false,
-  canRecordRobotProfiles = false
+  canRecordRobotProfiles = false,
+  canSearchImages = false
 } = {}) {
   if (!toolsEnabled) return [];
   const namespaces = [
@@ -85,6 +86,19 @@ export function buildQqNativeToolSpecs({
             botThoughtDetail: string("Substantive Bot-side thought, or empty.")
           }, [])
         },
+        {
+          type: "function",
+          name: "avatar",
+          description: "Recognize who a character or person in a chat image belongs to through QQ avatars. list/search show recorded text features of avatars for people in the original conversation; inspect returns one cached avatar as actual visual input, downloading it when missing; record saves text features for an avatar you inspected in this same turn. Features are recognition hints, not identity proof. Never follows cross-session focus.",
+          inputSchema: objectSchema({
+            action: { type: "string", enum: ["list", "search", "inspect", "record"] },
+            userId: string("QQ number from the avatar list or this turn's sender/reply/@ targets; required for inspect and record."),
+            query: string("Feature keywords for search, such as 银发 猫耳; otherwise empty."),
+            summary: string("record: concise visual features within 60 characters: subject type, character/work only when certain, colors, outfit, marks."),
+            detail: string("record: finer recognition points within 300 characters, or empty."),
+            offset: { type: "integer", minimum: 0, description: "Pagination offset for list/search, default 0; 20 people per page." }
+          }, ["action"])
+        },
         ...(canRecordRobotProfiles ? [{
           type: "function",
           name: "robot_profile",
@@ -130,6 +144,18 @@ export function buildQqNativeToolSpecs({
           content: string("Knowledge body/explanation for write/slang; otherwise empty."),
           scope: string("Allowed current scope such as group, group-member, member, or empty for inferred current scope.")
         }, ["action"])
+      }, {
+        type: "function",
+        name: "image",
+        description: "Attach, replace, re-caption, remove or inspect pictures of an existing knowledge title inside the writable scope (at most 4 per title and scope). attach/replace take an image selector from the original conversation's image directory. Read the title first; text stays the primary knowledge and a picture needs a caption explaining why it belongs there. Never follows cross-session focus.",
+        inputSchema: objectSchema({
+          action: { type: "string", enum: ["attach", "replace", "caption", "remove", "inspect"] },
+          title: string("Existing knowledge title or alias."),
+          scope: string("Same scope words as qq_knowledge.manage, or empty for the current scope."),
+          selector: string("attach/replace: exact image selector from the current image directory; otherwise empty."),
+          imageId: string("replace/caption/remove/inspect: image reference such as #3f2a9c1d0b7e shown when reading the title; inspect may leave it empty to view every picture."),
+          caption: string("Short description of what the picture shows and why it belongs to this knowledge, or empty.")
+        }, ["action", "title"])
       }]
     },
     {
@@ -141,7 +167,16 @@ export function buildQqNativeToolSpecs({
         name: "chinese_web",
         description: "Search the configured Chinese web providers. Use native Web Search first for general current facts.",
         inputSchema: objectSchema({ query: string("A specific search query.") })
-      }]
+      }, ...(canSearchImages ? [{
+        type: "function",
+        name: "images",
+        description: "Search web pictures through Tavily, then download a chosen result into this turn's task output directory. search lists candidates with turn-scoped selectors and the provider's descriptions; download validates size and PNG/JPEG/GIF/WebP signature, returns the picture as visual input plus its absolute path. Inspect it before sending; to send, put that path in the structured attachments. Never follows cross-session focus.",
+        inputSchema: objectSchema({
+          action: { type: "string", enum: ["search", "download"] },
+          query: string("search: specific picture keywords; otherwise empty."),
+          selector: string("download: a selector such as web-image-1 from this turn's search results; otherwise empty.")
+        }, ["action"])
+      }] : [])]
     },
     {
       type: "namespace",
@@ -254,13 +289,17 @@ export function createQqNativeToolDispatcher({
     const toolRound = callCount;
     if (event && typeof event === "object") event.qqCurrentToolRound = toolRound;
     const hostCommandTool = call.namespace === "qq_runtime" && call.tool === "host_command";
-    const imageMemoryTool = call.namespace === "qq_context" && call.tool === "images";
-    const boundEvent = hostCommandTool || imageMemoryTool ? event : focusedEvent || event;
+    // Visual tools return pictures from the original conversation only.
+    const visualTool = (call.namespace === "qq_context" && call.tool === "images")
+      || (call.namespace === "qq_memory" && call.tool === "avatar")
+      || (call.namespace === "qq_knowledge" && call.tool === "image")
+      || (call.namespace === "qq_search" && call.tool === "images");
+    const boundEvent = hostCommandTool || visualTool ? event : focusedEvent || event;
     const sessionTool = call.namespace === "qq_session" && call.tool === "manage";
     const inboundFileTool = call.namespace === "qq_context" && call.tool === "download_file";
     const structured = sessionTool
       || inboundFileTool
-      || imageMemoryTool
+      || visualTool
       || hostCommandTool
       || (call.namespace === "qq_memory" && ["impression", "robot_profile"].includes(call.tool));
     const command = structured ? "" : mapQqNativeToolToCommand(call.namespace, call.tool, call.arguments, { event: boundEvent });
@@ -281,7 +320,7 @@ export function createQqNativeToolDispatcher({
             ...(structuredResult?.scopeId ? { scopeId: String(structuredResult.scopeId) } : {}),
             result: String(structuredResult?.reply || structuredResult?.error || "结构化工具已执行。")
           };
-          if (imageMemoryTool && result.ok && Array.isArray(structuredResult?.contentItems)) {
+          if (visualTool && result.ok && Array.isArray(structuredResult?.contentItems)) {
             result.contentItems = structuredResult.contentItems;
             result.success = true;
           }

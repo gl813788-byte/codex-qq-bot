@@ -50,6 +50,15 @@ export const qqManualAiTaskCatalog = [
     description: "审核一个到期的低频黑话，先初筛再由主模型终审"
   },
   {
+    id: "avatar-features",
+    label: "头像特征",
+    icon: "🖼️",
+    scope: "optional",
+    aliases: ["avatar-features", "avatar", "avatars", "头像特征", "头像", "头像描述", "头像识别"],
+    usage: "/AI任务 [强制] 头像特征 [全部]",
+    description: "查看尚未描述或已更换的 QQ 头像并记录识图用文字特征；在群里只处理本群成员，全部=连续处理多批"
+  },
+  {
     id: "all",
     label: "全部适用任务",
     icon: "🚀",
@@ -81,11 +90,13 @@ export function parseQqManualAiTaskCommand(value) {
   const withoutForce = optionsTail
     .replace(/(?:^|\s)(?:强制|立即|force)(?=\s|$)/ig, " ")
     .trim();
+  // "全部" after these task names means their full mode, not the "all" task.
+  const fullModeTask = /^(聊天总结|聊天记录|总结聊天|总结记录|头像特征|头像|头像描述|头像识别)\s+全部$/i;
   const fullHistory = /(?:^|\s)(?:全部记录|完整记录|全部历史|完整历史|full)(?:\s|$)/i.test(withoutForce)
-    || /^(?:聊天总结|聊天记录|总结聊天|总结记录)\s+全部$/i.test(withoutForce);
+    || fullModeTask.test(withoutForce);
   const taskText = withoutForce
     .replace(/(?:^|\s)(?:全部记录|完整记录|全部历史|完整历史|full)(?=\s|$)/ig, " ")
-    .replace(/^(聊天总结|聊天记录|总结聊天|总结记录)\s+全部$/i, "$1")
+    .replace(fullModeTask, "$1")
     .trim();
   const taskId = normalizeQqManualAiTaskId(taskText);
   return taskId
@@ -114,7 +125,7 @@ export function validateQqManualAiTaskRequest({
   const normalizedScopeId = task.scope === "global"
     ? ""
     : normalizeQqManualAiTaskScope(scopeId, { currentScopeId });
-  if (task.scope !== "global" && !normalizedScopeId) {
+  if (task.scope !== "global" && task.scope !== "optional" && !normalizedScopeId) {
     return { ok: false, status: 400, error: "this AI task requires a QQ group id or private:<QQ id>" };
   }
   if (task.scope === "group" && normalizedScopeId.startsWith("private:")) {
@@ -211,6 +222,9 @@ function formatQqManualAiTaskOutcome(result) {
   }
   if (result.taskId === "knowledge-review") {
     return `“${result.title || "知识条目"}”已${result.decision === "deleted" ? "删除" : "保留"}。`;
+  }
+  if (result.taskId === "avatar-features") {
+    return `${result.batchCount > 1 ? `分 ${result.batchCount} 批` : "本批"}查看 ${result.attemptedCount || 0} 个头像，记录 ${result.describedCount || 0} 个文字特征${result.remainingCount ? `，还有 ${result.remainingCount} 个待处理` : ""}。`;
   }
   return "";
 }

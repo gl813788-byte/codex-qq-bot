@@ -140,11 +140,26 @@ npm run ncc -- ai-run all 群号 --full
 npm run ncc -- ai-run all 群号 --force --background
 ```
 
-支持 `chat-summary`（聊天总结与知识提取）、`scope-summary`（当前范围的人设证据/记忆总结）、`style-review`（群风格复盘）、`global-persona`（全局人设刷新）、`knowledge-review`（到期低频黑话的双模型审核）和 `all`。QQ 中使用 `/AI任务 任务名`；`/AI任务 强制 任务名` 显式开启强制执行。
+支持 `chat-summary`（聊天总结与知识提取）、`scope-summary`（当前范围的人设证据/记忆总结）、`style-review`（群风格复盘）、`global-persona`（全局人设刷新）、`knowledge-review`（到期低频黑话的双模型审核）、`avatar-features`（为尚无文字特征或已更换的 QQ 头像记录特征；可选群号或 `private:QQ号` 范围只处理这些人，`--full` 最多连续处理 20 批，强制模式会重试已暂停的头像）和 `all`。QQ 中使用 `/AI任务 任务名`；`/AI任务 强制 任务名` 显式开启强制执行。
 
 普通手动运行会跳过自动周期的“尚未到期”，但仍遵守任务本身的常规数据门槛。`--force` / “强制”还会跳过冷却与常规样本门槛；它不会绕过 QQ 主人/菜单权限、群白名单、本机回环 API 限制、并发锁、OneBot 身份或完全没有数据的保护。知识强制审核只扩大候选范围，仍严格执行“兴趣模型初筛 → 主模型终审 → 活动/内容变更保护”，绝不直接删除。任务真实调用当前 QQ 模型并使用既有任务超时；Hub 必须正在运行。
 
 新增 `--background` 可与 `--force`、`--full` 独立组合；QQ 对应 `/AI任务 强制 后台 全部`，本机管理 API 对应 `background: true`。后台提交立即返回 HTTP 202 和任务编号，表示已受理、尚未完成；用 `/AI任务`、`ncc ai-tasks` 或 `/api/qq/ai-tasks` 的 `jobs` 查看最近执行状态，具体结果写入既有总结/记忆和日志。任务记录仅保留当前 Hub 进程最近 50 项，重启后不自动重放手动任务。
+
+### 头像记忆
+
+两套 NCC 都能直接操作人物头像记忆；Hub 必须正在运行，写操作同样走只限本机回环的管理 API：
+
+```bash
+npm run ncc -- avatars                                   # 数量、刷新队列和下载失败原因
+npm run ncc -- avatars refresh 群号                      # 把该群出现过的人加入头像下载队列
+npm run ncc -- avatars refresh --qq QQ号,QQ号 --force    # 忽略 3 天复查间隔，立即重新下载
+npm run ncc -- avatars describe                          # 对所有已知人物处理一批描述
+npm run ncc -- avatars describe 群号 --all               # 对一个群最多连续处理 20 批
+npm run ncc -- avatars describe --qq QQ号 --force        # 需要时先下载，再重新描述
+```
+
+与 `ai-run` 一样，裸数字表示群范围；个人用 `--qq` 指定。refresh 只把下载加入单线程、间隔执行的后台队列并立即返回；describe 运行 `avatar-features` 任务，也支持 `--background`。两套菜单都有“头像识别”入口。对应 API：`GET /api/qq/avatars` 查看状态，`POST /api/qq/avatars` 提交 `{"action":"refresh","scopeId","userIds","force"}`；描述走 `POST /api/qq/ai-tasks`，`taskId: "avatar-features"`，可选 `scopeId`、`userIds`、`fullHistory`、`force` 和 `background`。
 
 Agent 的 `qq_runtime.configure` 调用任何 AI 任务时自动采用后台提交，避免聊天轮次占住唯一模型名额并同步等待另一轮总结。两种引擎都拒绝工具内同步嵌套模型调用，错误代码为 `CODEX_NESTED_TURN_BLOCKED`；后台任务仍使用原并发限制、同任务锁、权限和任务时限。
 

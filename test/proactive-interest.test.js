@@ -201,7 +201,7 @@ function proactiveState(timeoutMs = 1500, overrides = {}) {
       messageCountByGroupId: {},
       judge: {
         enabled: true,
-        model: "test/streaming-model",
+        model: overrides.model ?? "test/streaming-model",
         baseUrl: "https://openrouter.test/api/v1",
         timeoutMs,
         minInterest: 20,
@@ -1003,4 +1003,60 @@ test("private proactive judge receives the contact's labeled activity from other
   assert.match(requestBody.messages[0].content, /它不是私聊里发生的事/);
   assert.doesNotMatch(requestBody.messages[0].content, /\nnull\n|^null|null$/);
   assert.equal(JSON.parse(requestBody.messages[1].content).crossSessionContext.aboutSender[0].selector, "group:20002");
+});
+
+test("the interest judge sees attached pictures and falls back to text when a model rejects images", async () => {
+  const { createQqInterestVisionCapabilityCache } = await import("../src/qq-enhancer/interest-vision.js");
+  const cache = createQqInterestVisionCapabilityCache();
+  const images = [{ dataUrl: "data:image/jpeg;base64,AAAA", origin: "当前消息", sender: "小明", at: null }];
+  let loads = 0;
+  const bodies = [];
+  const helpers = (fetch) => ({
+    openRouterApiKey: "configured-for-test",
+    interestVision: { mode: "auto", cache },
+    loadJudgeImages: async () => { loads += 1; return images; },
+    fetch
+  });
+
+  const seen = await shouldProactivelyReplyToQq(event, proactiveState(), helpers(async (_url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return jsonJudgeResponse();
+  }));
+  assert.equal(seen.ok, true);
+  assert.equal(seen.modelJudge.visionImageCount, 1);
+  const multimodal = bodies[0].messages[1].content;
+  assert.equal(multimodal[0].type, "text");
+  assert.deepEqual(JSON.parse(multimodal[0].text).attachedImages, [{ index: 1, origin: "当前消息", sender: "小明", at: null }]);
+  assert.deepEqual(multimodal[1], { type: "image_url", image_url: { url: "data:image/jpeg;base64,AAAA" } });
+  assert.match(bodies[0].messages[0].content, /【图片】/);
+
+  // A text-only model: one rejected image request, then the same attempt as text.
+  const model = "text-only-model";
+  bodies.length = 0;
+  const rejected = await shouldProactivelyReplyToQq(event, proactiveState(1500, { model }), helpers(async (_url, init) => {
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    if (Array.isArray(body.messages[1].content)) {
+      return new Response(JSON.stringify({ error: { message: "No endpoints found that support image input" } }), { status: 404 });
+    }
+    return jsonJudgeResponse();
+  }));
+  assert.equal(rejected.ok, true);
+  assert.equal(bodies.length, 2);
+  assert.equal(typeof bodies[1].messages[1].content, "string");
+  assert.equal(rejected.modelJudge.visionFallback, true);
+  assert.equal(rejected.modelJudge.visionImageCount, 0);
+  assert.equal(rejected.modelJudge.formatRetryCount, 0);
+
+  // Remembered: no picture preparation for that model any more.
+  const loadsBefore = loads;
+  await shouldProactivelyReplyToQq(event, proactiveState(1500, { model }), helpers(async () => jsonJudgeResponse()));
+  assert.equal(loads, loadsBefore);
+
+  const off = await shouldProactivelyReplyToQq(event, proactiveState(), {
+    ...helpers(async () => jsonJudgeResponse()),
+    interestVision: { mode: "off", cache }
+  });
+  assert.equal(off.ok, true);
+  assert.equal(loads, loadsBefore);
 });

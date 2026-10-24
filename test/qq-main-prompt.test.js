@@ -110,6 +110,10 @@ test("tool guide describes native tools and server-bound permissions", () => {
   assert.match(ordinary, /不要把其他会话的内容说成当前会话里发生的事/);
   assert.match(ordinary, /要看指定对话时用 sessions 填群名、私聊对象、QQ 号或 selector/);
   assert.match(ordinary, /qq_knowledge\.manage/);
+  assert.match(ordinary, /qq_memory\.avatar：人物印象里的头像记忆/);
+  assert.match(ordinary, /record 只能在本轮 inspect 过该头像后/);
+  assert.match(ordinary, /不等于本人照片/);
+  assert.match(ordinary, /qq_knowledge\.image：为已有知识标题添加、替换、改说明、移除或查看配图/);
   assert.match(ordinary, /原生 Web Search/);
   assert.match(ordinary, /原始 callId 的服务端绑定上下文/);
   assert.doesNotMatch(ordinary, /qq_runtime\.configure/);

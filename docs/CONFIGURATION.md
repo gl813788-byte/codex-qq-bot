@@ -187,7 +187,7 @@ The Hub classifies each Codex task and scales its base deadline by the current r
 
 ### Manual AI task execution options
 
-`--force` bypasses cooldown/sample thresholds; the new `--background` option immediately returns a job id and uses the existing model queue; `--full` uses the full history limit. These options are independent and may be combined as `ncc ai-run all GROUP_ID --force --background --full`; QQ uses `/AI任务 强制 后台 全部 完整历史`. The management API accepts boolean fields `force`, `background`, and `fullHistory`. Agent tools always submit AI tasks in the background; this deadlock prevention rule requires no additional environment configuration.
+`--force` bypasses cooldown/sample thresholds; the new `--background` option immediately returns a job id and uses the existing model queue; `--full` uses the full history limit. These options are independent and may be combined as `ncc ai-run all GROUP_ID --force --background --full`; QQ uses `/AI任务 强制 后台 全部 完整历史`. The management API accepts boolean fields `force`, `background`, and `fullHistory`. For `avatar-features`, the scope is optional, `fullHistory`/`--full` means up to 20 consecutive batches, and an optional `userIds` list (or `ncc avatars describe --qq`) names individual people. Agent tools always submit AI tasks in the background; this deadlock prevention rule requires no additional environment configuration.
 
 ### AI engine (Codex / Claude Code)
 
@@ -230,10 +230,11 @@ Use the same token on both sides. Without one, the webhook trusts only requests 
 | `..._JUDGE_API_KEY` | empty | Credential for the `custom` provider |
 | `..._JUDGE_BASE_URL` | empty | OpenAI-compatible API root for the `custom` provider |
 | `..._JUDGE_TIMEOUT_MS` | `6500` | Streaming idle timeout |
+| `..._JUDGE_VISION` | `auto` | Whether the ordinary interest gate also receives up to two small JPEG previews of pictures in the judged messages: `auto` tries once per provider/model and falls back to text-only (remembered until restart) when the provider rejects image input, `on` always tries, `off` never sends pictures. Pictures go to the configured third-party interest provider |
 | `CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES` | `20971520` | QQ image limit, 20 MiB by default |
 | `CODEX_REMOTE_CONTACT_QQ_COMPRESSED_IMAGE_MAX_EDGE` | `1600` | Compressed inspection's longest edge, bounded 256–4096 px; automatic startup selects 1280/1600/2048 according to Hub memory |
 | `CODEX_REMOTE_CONTACT_QQ_FILE_MAX_BYTES` | `52428800` | Per-file limit for model-selected inbound QQ downloads; bounded to 1 MiB–1 GiB |
-| `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | Safe-download mode; `proxy-compatible` additionally permits DNS names mapped into proxy Fake-IP range `198.18.0.0/15`, while literal private IPs and other reserved ranges stay blocked |
+| `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | Safe-download mode; `proxy-compatible` additionally permits DNS names mapped into proxy Fake-IP range `198.18.0.0/15`, while literal private IPs and other reserved ranges stay blocked. QQ avatar downloads for person memory follow the same mode |
 | `CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR` | `|||` | Multi-bubble separator |
 | `..._BUBBLE_SEND_DELAY_MS` | `650` | Base inter-bubble delay |
 | `..._BUBBLE_MAX_CHARS` | `900` | Safe character limit per QQ message, bounded 200–4000 |

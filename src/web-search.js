@@ -376,7 +376,62 @@ export function createWebSearch({
     }
   }
 
-  return { search, buildProviderPlan };
+  // Tavily returns related pictures alongside its results. Only http(s) URLs
+  // are kept; downloading and validation happen in the caller.
+  async function searchImages(query, { maxResults = 8 } = {}) {
+    const text = config.normalizeQuery(query).slice(0, 400);
+    if (!text) return [];
+    if (!config.tavilyApiKey) throw new Error("Tavily API key is not configured");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+    try {
+      const response = await fetchImpl("https://api.tavily.com/search", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "content-type": "application/json",
+          "authorization": `Bearer ${config.tavilyApiKey}`
+        },
+        body: JSON.stringify({
+          query: text,
+          search_depth: "basic",
+          max_results: 5,
+          include_answer: false,
+          include_images: true,
+          include_image_descriptions: true
+        })
+      });
+      if (!response.ok) throw new Error(`tavily returned HTTP ${response.status}`);
+      const data = JSON.parse(await readResponseText(response));
+      return normalizeTavilyImages(data?.images).slice(0, Math.max(1, Math.min(20, Number(maxResults) || 8)));
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  return { search, buildProviderPlan, searchImages, hasImageSearch: () => Boolean(config.tavilyApiKey) };
+}
+
+export function normalizeTavilyImages(images) {
+  const seen = new Set();
+  return (Array.isArray(images) ? images : []).flatMap((item) => {
+    const url = String(typeof item === "string" ? item : item?.url || "").trim();
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return [];
+    }
+    if (!["http:", "https:"].includes(parsed.protocol) || url.length > 2048 || seen.has(url)) return [];
+    seen.add(url);
+    const description = typeof item === "object" && item ? String(item.description || "") : "";
+    return [{
+      url,
+      host: parsed.hostname,
+      description: description.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 300),
+      source: "tavily"
+    }];
+  });
 }
 
 export function chooseWebSearchProvider({ provider = "auto", hasTavilyKey = false } = {}) {

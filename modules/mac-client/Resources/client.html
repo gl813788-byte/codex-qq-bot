@@ -286,6 +286,7 @@
                 <div id="memoryTabs" class="segmented" role="tablist" aria-label="记忆类型" data-i18n-aria-label="memoryType">
                   <button id="memoryTabUnified" class="active" type="button" role="tab" aria-selected="true" aria-controls="memoryView" tabindex="0" data-memory-tab="unified" data-i18n="unified">统一记忆</button>
                   <button id="memoryTabQq" type="button" role="tab" aria-selected="false" aria-controls="memoryView" tabindex="-1" data-memory-tab="qq">QQ</button>
+                  <button id="memoryTabPeople" type="button" role="tab" aria-selected="false" aria-controls="memoryView" tabindex="-1" data-memory-tab="people" data-i18n="memoryPeople">人物</button>
                 </div>
                 <label class="search-field grow">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg>
@@ -475,6 +476,20 @@
           <label class="field knowledge-member-field" hidden><span data-i18n="knowledgeUserName">成员名称</span><input id="knowledgeUserName" maxlength="100" /></label>
         </div>
         <div class="modal-actions"><button class="button ghost" type="button" data-close-knowledge-editor data-i18n="cancel">取消</button><button id="saveKnowledge" class="button primary" type="submit" data-i18n="saveKnowledge">保存知识</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="knowledgeImageDialog" class="modal" aria-labelledby="knowledgeImageTitle">
+      <form id="knowledgeImageForm" class="modal-body">
+        <input id="knowledgeImageEntryId" type="hidden" />
+        <input id="knowledgeImageVariantId" type="hidden" />
+        <input id="knowledgeImageId" type="hidden" />
+        <header class="modal-head"><h2 id="knowledgeImageTitle" data-i18n="knowledgeImageAdd">添加配图</h2><button class="icon-button" type="button" data-close-knowledge-image aria-label="关闭" data-i18n-aria-label="close">×</button></header>
+        <div id="knowledgeImagePreview" class="knowledge-image-preview"></div>
+        <label class="field"><span id="knowledgeImageFileLabel" data-i18n="knowledgeImageFile">图片文件</span><input id="knowledgeImageFile" type="file" accept="image/png,image/jpeg,image/gif,image/webp" /></label>
+        <p class="field-note" data-i18n="knowledgeImageFileHint">PNG、JPEG、GIF 或 WebP，不超过 4 MB。</p>
+        <label class="field"><span data-i18n="knowledgeImageCaption">图片说明</span><textarea id="knowledgeImageCaption" rows="3" maxlength="120" placeholder="这张图是什么、为什么属于这条知识" data-i18n-placeholder="knowledgeImageCaptionHint"></textarea></label>
+        <div class="modal-actions"><button class="button ghost" type="button" data-close-knowledge-image data-i18n="cancel">取消</button><button id="saveKnowledgeImage" class="button primary" type="submit" data-i18n="saveKnowledgeImage">保存配图</button></div>
       </form>
     </dialog>
 

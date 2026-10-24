@@ -193,6 +193,32 @@ refactor with a behavior change.
   Duplicate call ids must not replenish credits; unknown images, text and
   unfinished frames remain bounded. Cover large/multiple image echoes and
   exhausted credits when changing the NDJSON reader or tool-result path.
+- Person impressions carry QQ avatar memory. A single-worker bounded queue
+  downloads a speaker's avatar through the safe-fetch policy (2 MiB, 3-day
+  recheck, failure backoff) into the content-addressed
+  `data/qq-memory-images/` store. Text features are the default evidence and
+  bind to the exact described image id; a changed avatar moves old features
+  into bounded history. Background description is one read-only, tool-free
+  vision turn per batch (at most 6, every 30 minutes, `avatar-features` AI
+  task); two failed attempts park an avatar until it changes. Never infer a
+  real person's identity or sensitive attributes, and never treat an avatar
+  match as a photo of that person.
+- `qq_search.images` exists only with a Tavily key and web lookup enabled.
+  Only URLs from this turn's search results can be downloaded, through the
+  safe-fetch policy, into the task output directory; keep the signature/size
+  checks and the inspect-before-send guidance. Sending still goes through
+  validated structured attachments.
+- `qq_memory.avatar` and `qq_knowledge.image` are visual tools bound to the
+  original conversation like `qq_context.images`. Avatar candidates follow
+  person-impression visibility (group members seen there plus quoted/@/named
+  people; a private chat exposes only the contact and named people). `record`
+  requires an `inspect` of the same avatar in the same turn. Knowledge
+  pictures (at most 4 per scoped variant) come only from the current image
+  directory, follow knowledge write scopes, and survive text edits. Every
+  memory-image read revalidates size, signature and hash; prune only
+  unreferenced files older than one hour and only when both owning stores
+  loaded safely. Proxy fake-IP machines need
+  `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE=proxy-compatible` for avatars.
 
 ### Proactive interest
 
@@ -222,6 +248,12 @@ refactor with a behavior change.
   real context, it has no worthwhile response, is unwilling to continue, or
   safety requires silence. Do not silently revoke approval in Hub routing before
   the main model receives the turn.
+- The ordinary judge may see at most two pictures from the judged messages as
+  small JPEG previews prepared lazily right before the provider call (10-second
+  budget, optional on failure). `..._JUDGE_VISION=auto` tries once per
+  provider/model, resends the same judgment as text on an image rejection
+  without spending the format retry, and remembers that model; `off` sends no
+  pictures. A picture alone never justifies approval.
 - Ordinary group and private-outreach judges may receive bounded cross-session
   material from `src/qq-cross-session-search.js`: the sender's recent messages
   in other sessions plus semantically related records, each labeled with its
@@ -242,7 +274,9 @@ refactor with a behavior change.
 - Keep these paths observable through structured operations:
   `interest.follow_up_batch`, `learning.language_statistics`,
   `learning.style_review`, `memory.scope_summary`,
-  `memory.knowledge_update`, and `memory.person_promotion`. Language-statistics
+  `memory.knowledge_update`, `memory.person_promotion`,
+  `memory.avatar_refresh`, `memory.avatar_features`,
+  `memory.knowledge_image`, and `memory.image_prune`. Language-statistics
   logs are low-noise checkpoints, contain counts/ratios rather than copied chat
   or inferred meaning, and fire when frequent candidates change or every 25
   text messages. Preserve stable English `message` values for JSON/API
@@ -339,6 +373,7 @@ Important state includes:
   and delivery failures
 - `data/qq-conversation-memory.json`: scoped social impressions
 - `data/qq-knowledge-base.json`: titled scoped long-term knowledge
+- `data/qq-memory-images/`: content-addressed avatars and knowledge pictures
 - `data/qq-personas.json` and `data/qq-self-persona.json`: adaptive behavior and
   generated self-persona
 - `data/qq-codex-sessions.json`: bounded scope-to-thread mappings
@@ -390,6 +425,7 @@ Common machine-controller intent:
 | Stop NapCat and its Xvfb session | `ncc stop-napcat` |
 | Start Hub only | `ncc hub` |
 | Show one-shot startup resource profile | `ncc resources` |
+| Avatar memory status / refresh / describe | `ncc avatars` / `ncc avatars refresh [GROUP]` / `ncc avatars describe [GROUP] [--all]` |
 | Logs | `ncc logs` or `ncc logs --compact` |
 | One engine's agent logs | `ncc logs --category agent --engine claude` |
 | Stop Hub | `ncc stop-hub` |

@@ -106,3 +106,19 @@ test("task center and QQ menu use readable visual sections", () => {
   assert.match(administratorMenu, /身份：Bot 管理员/);
   assert.match(administratorMenu, /\/Bot管理员/);
 });
+
+test("the avatar task accepts an optional scope and a full multi-batch mode", () => {
+  assert.equal(normalizeQqManualAiTaskId("头像特征"), "avatar-features");
+  assert.deepEqual(parseQqManualAiTaskCommand("/AI任务 头像特征 全部"), {
+    action: "run",
+    taskId: "avatar-features",
+    fullHistory: true,
+    force: false
+  });
+  assert.equal(parseQqManualAiTaskCommand("/AI任务 全部").taskId, "all");
+  assert.equal(validateQqManualAiTaskRequest({ taskId: "avatar-features" }).scopeId, "");
+  assert.equal(validateQqManualAiTaskRequest({
+    taskId: "avatar-features", currentScopeId: "123456", allowedGroups: ["123456"]
+  }).scopeId, "123456");
+  assert.equal(validateQqManualAiTaskRequest({ taskId: "avatar-features", scopeId: "999999", allowedGroups: ["123456"] }).status, 403);
+});
