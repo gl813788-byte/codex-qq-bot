@@ -624,10 +624,14 @@ ai_task_menu() {
     3) task_id="style-review" ;;
     4) task_id="global-persona" ;;
     5) task_id="knowledge-review" ;;
-    6) task_id="all" ;;
+    6) task_id="avatar-features" ;;
+    7) task_id="all" ;;
   esac
   local scope_id="" force_arg=""
-  if [[ "$task_id" != "global-persona" && "$task_id" != "knowledge-review" ]]; then
+  if [[ "$task_id" == "avatar-features" ]]; then
+    printf '范围（群号或 private:QQ号，直接回车=全部人物）：'
+    read -r scope_id || true
+  elif [[ "$task_id" != "global-persona" && "$task_id" != "knowledge-review" ]]; then
     printf '范围（群号或 private:QQ号）：'
     read -r scope_id || true
   fi
@@ -635,6 +639,122 @@ ai_task_menu() {
     force_arg="--force"
   fi
   run_ai_task "$task_id" "$scope_id" "$force_arg"
+  pause
+}
+
+# Avatar memory: status, manual refresh, and manual description through the
+# avatar-features AI task. A bare number is a group id, like ai-run scopes;
+# individual people are named with --qq.
+avatar_command() {
+  command -v curl >/dev/null 2>&1 || die "缺少 curl，无法连接 Hub。"
+  need_node
+  local action="${1:-status}" scope_id="" user_ids="" force="false" all="false" background="false" arg payload
+  shift $(( $# > 0 ? 1 : 0 ))
+  while [ "$#" -gt 0 ]; do
+    arg="$1"
+    case "$arg" in
+      --qq) [ "$#" -ge 2 ] || die "--qq 需要 QQ 号。"; shift; user_ids="${user_ids:+$user_ids,}$1" ;;
+      --qq=*) user_ids="${user_ids:+$user_ids,}${arg#--qq=}" ;;
+      --force|-f|强制) force="true" ;;
+      --all|--full|全部) all="true" ;;
+      --background|后台) background="true" ;;
+      --*) die "未知头像参数：$arg" ;;
+      *) [ -z "$scope_id" ] || die "只能指定一个范围（群号或 private:QQ号）；个人请用 --qq。"; scope_id="$arg" ;;
+    esac
+    shift
+  done
+  case "$action" in
+    status|状态)
+      curl -fsS --max-time 5 "${HUB_URL%/}/api/qq/avatars" | node -e '
+        let raw = "";
+        process.stdin.setEncoding("utf8");
+        process.stdin.on("data", (chunk) => raw += chunk);
+        process.stdin.on("end", () => {
+          const data = JSON.parse(raw);
+          console.log("QQ 头像记忆");
+          console.log("===========");
+          console.log(`人物：${data.people}，已获取头像：${data.fetched}`);
+          console.log(`已描述：${data.described}，已换头像待更新：${data.stale}，待描述：${data.pending}，已暂停：${data.parked}`);
+          console.log(`下载失败中：${data.failing}${Object.keys(data.errors || {}).length ? `（${Object.entries(data.errors).map(([code, count]) => `${code}×${count}`).join("、")}）` : ""}`);
+          console.log(`刷新队列：${data.refreshPending}，描述任务：${data.describing ? "运行中" : "空闲"}，安全下载模式：${data.safeFetchMode}`);
+          console.log(`最近描述：${data.lastDescribedAt || "无"}`);
+          console.log("刷新：ncc avatars refresh [群号|private:QQ号] [--qq QQ号,...] [--force]");
+          console.log("描述：ncc avatars describe [群号|private:QQ号] [--qq QQ号,...] [--all] [--force] [--background]");
+        });
+      '
+      ;;
+    refresh|刷新)
+      payload="$(SCOPE_ID="$scope_id" USER_IDS="$user_ids" FORCE="$force" node -e '
+        const body = { action: "refresh", force: process.env.FORCE === "true" };
+        if (process.env.SCOPE_ID) body.scopeId = process.env.SCOPE_ID;
+        if (process.env.USER_IDS) body.userIds = process.env.USER_IDS;
+        process.stdout.write(JSON.stringify(body));
+      ')"
+      curl -sS --max-time 30 -X POST "${HUB_URL%/}/api/qq/avatars" -H 'content-type: application/json' -d "$payload" | node -e '
+        let raw = "";
+        process.stdin.setEncoding("utf8");
+        process.stdin.on("data", (chunk) => raw += chunk);
+        process.stdin.on("end", () => {
+          const data = JSON.parse(raw);
+          if (!data.ok) { console.log(`未执行：${data.error || "未知原因"}`); process.exitCode = 1; return; }
+          console.log(`已选中 ${data.selected} 人，加入下载队列 ${data.queued} 人，未到复查时间跳过 ${data.skipped} 人${data.unknown ? `，未知 QQ ${data.unknown} 个` : ""}。`);
+          console.log(`队列中待下载：${data.pending}。下载在后台进行，可用 ncc avatars 查看进度。`);
+        });
+      '
+      ;;
+    describe|描述)
+      payload="$(SCOPE_ID="$scope_id" USER_IDS="$user_ids" FORCE="$force" ALL="$all" BACKGROUND="$background" node -e '
+        const body = {
+          taskId: "avatar-features",
+          force: process.env.FORCE === "true",
+          fullHistory: process.env.ALL === "true",
+          background: process.env.BACKGROUND === "true"
+        };
+        if (process.env.SCOPE_ID) body.scopeId = process.env.SCOPE_ID;
+        if (process.env.USER_IDS) body.userIds = process.env.USER_IDS;
+        process.stdout.write(JSON.stringify(body));
+      ')"
+      curl -sS --max-time 3600 -X POST "${HUB_URL%/}/api/qq/ai-tasks" -H 'content-type: application/json' -d "$payload" | node -e '
+        let raw = "";
+        process.stdin.setEncoding("utf8");
+        process.stdin.on("data", (chunk) => raw += chunk);
+        process.stdin.on("end", () => {
+          const data = JSON.parse(raw);
+          if (data.accepted) { console.log(`头像描述已提交后台，任务编号：${data.jobId}`); return; }
+          if (!data.ok) { console.log(`未执行：${data.reason || data.error || "没有满足条件的头像"}`); process.exitCode = 1; return; }
+          console.log(`完成：${data.batchCount} 批，查看 ${data.attemptedCount} 个头像，记录 ${data.describedCount} 个特征${data.fetchedCount ? `，先下载 ${data.fetchedCount} 个头像` : ""}。`);
+          if (data.remainingCount) console.log(`还有 ${data.remainingCount} 个待处理，可再次运行或加 --all。`);
+          if (data.reason) console.log(`提示：${data.reason}`);
+        });
+      '
+      ;;
+    *) die "用法：ncc avatars [status|refresh|describe] [群号|private:QQ号] [--qq QQ号,...] [--force] [--all] [--background]" ;;
+  esac
+}
+
+avatar_menu() {
+  avatar_command status || true
+  printf '\n1) 刷新头像  2) 描述头像特征  直接回车返回：'
+  local choice scope_id="" user_ids="" args=()
+  read -r choice || true
+  case "${choice:-}" in
+    1|2) ;;
+    *) return ;;
+  esac
+  printf '范围（群号或 private:QQ号，直接回车=全部人物）：'
+  read -r scope_id || true
+  printf '指定 QQ 号（多个用逗号分隔，直接回车跳过）：'
+  read -r user_ids || true
+  [ -n "${scope_id:-}" ] && args+=("$scope_id")
+  [ -n "${user_ids:-}" ] && args+=(--qq "$user_ids")
+  if [ "$choice" = "1" ]; then
+    ask_yes_no "是否忽略 3 天复查间隔，全部重新下载？" "N" && args+=(--force)
+    avatar_command refresh "${args[@]}" || true
+  else
+    ask_yes_no "是否连续处理多批（最多 20 批）？" "N" && args+=(--all)
+    ask_yes_no "是否强制（重试已暂停头像；指定 QQ 时重新描述）？" "N" && args+=(--force)
+    avatar_command describe "${args[@]}" || true
+  fi
   pause
 }
 
@@ -786,6 +906,7 @@ Codex QQ Bot 控制中心（ncc）
 12) AI 手动任务中心
 13) 切换 AI 引擎（Codex / Claude Code）
 14) Claude Code 登录 / 鉴权测试
+15) 头像识别（刷新 / 描述头像特征）
 0) 退出
 MENU
     printf '\n请选择：'
@@ -805,6 +926,7 @@ MENU
       12) ai_task_menu ;;
       13) engine_menu ;;
       14) claude_menu ;;
+      15) avatar_menu ;;
       0|q|quit|exit) break ;;
       *) log "未知选项。"; pause ;;
     esac
@@ -831,6 +953,7 @@ case "${1:-menu}" in
   session-mode) set_session_mode "${2:-}" "${3:-}" ;;
   ai-tasks|ai-task) show_ai_tasks ;;
   ai-run) shift; run_ai_task "$@" ;;
+  avatars|avatar) shift; avatar_command "$@" ;;
   branding) branding_menu ;;
   search-config) search_config ;;
   start) start_hub ;;
@@ -839,9 +962,10 @@ case "${1:-menu}" in
   logs) shift; print_logs "$@" ;;
   help|-h|--help)
     cat <<EOF
-用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full] [--background]|branding|search-config|start|open|logs]
+用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full] [--background]|avatars [status|refresh|describe]|branding|search-config|start|open|logs]
 首次直接运行 ncc：自动检测环境、安装依赖、验证并填写配置；完成后再运行为常规功能菜单。
 资源检测：ncc resources [--json] 预览本机 CPU、内存和启动预算；每次启动自动重新检测。
+头像识别：ncc avatars [status] | refresh [群号|private:QQ号] [--qq QQ号,...] [--force] | describe [群号|private:QQ号] [--qq QQ号,...] [--all] [--force] [--background]
 安装中断后重新运行同一个 ncc，会验证并复用已完成的源码、环境、npm 依赖阶段。
 日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
 项目目录：$PROJECT_DIR
@@ -849,7 +973,7 @@ EOF
     ;;
   *)
     cat <<EOF
-用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full] [--background]|branding|search-config|start|open|logs]
+用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full] [--background]|avatars [status|refresh|describe]|branding|search-config|start|open|logs]
 日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
 项目目录：$PROJECT_DIR
 EOF

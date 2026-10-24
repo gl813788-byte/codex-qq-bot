@@ -255,3 +255,34 @@ test("native tool observer receives safe failure metadata without changing the r
   assert.equal(toolEvents[0].errorCode, "unknown_tool");
   assert.equal(Object.hasOwn(toolEvents[0], "arguments"), false);
 });
+
+test("avatar and knowledge picture tools are structured visual tools bound to the original conversation", async () => {
+  const event = { groupId: "g1", isOwner: true };
+  const focused = { groupId: "g2", isOwner: true };
+  const visual = [{ type: "inputText", text: "avatar" }, { type: "inputImage", imageUrl: "data:image/jpeg;base64,AAAA" }];
+  const seen = [];
+  const dispatch = createQqNativeToolDispatcher({
+    event,
+    executeCommand: async () => { assert.fail("visual memory tools must be structured"); },
+    executeStructured: async (call, bound) => {
+      if (call.namespace === "qq_session") return { ok: true, scopeEvent: focused };
+      seen.push(`${call.namespace}.${call.tool}`);
+      assert.equal(bound, event);
+      return { ok: true, reply: "shown", contentItems: visual };
+    }
+  });
+  await dispatch({ namespace: "qq_session", tool: "manage", arguments: { action: "select" }, callId: "focus" });
+  const avatar = await dispatch({ namespace: "qq_memory", tool: "avatar", arguments: { action: "inspect", userId: "10001" }, callId: "avatar" });
+  const picture = await dispatch({ namespace: "qq_knowledge", tool: "image", arguments: { action: "inspect", title: "猫猫拳" }, callId: "picture" });
+  assert.deepEqual(normalizeDynamicToolResult(avatar), { success: true, contentItems: visual });
+  assert.deepEqual(normalizeDynamicToolResult(picture), { success: true, contentItems: visual });
+  assert.deepEqual(seen, ["qq_memory.avatar", "qq_knowledge.image"]);
+
+  const specs = buildQqNativeToolSpecs();
+  const avatarSpec = specs.find((item) => item.name === "qq_memory").tools.find((tool) => tool.name === "avatar");
+  assert.deepEqual(avatarSpec.inputSchema.properties.action.enum, ["list", "search", "inspect", "record"]);
+  assert.deepEqual(avatarSpec.inputSchema.required, ["action"]);
+  const imageSpec = specs.find((item) => item.name === "qq_knowledge").tools.find((tool) => tool.name === "image");
+  assert.deepEqual(imageSpec.inputSchema.properties.action.enum, ["attach", "replace", "caption", "remove", "inspect"]);
+  assert.deepEqual(imageSpec.inputSchema.required, ["action", "title"]);
+});

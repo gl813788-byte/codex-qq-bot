@@ -38,6 +38,11 @@
 | `src/qq-enhancer/compress-image.js` | 有界本地图片压缩 | 首帧 JPEG 预览、解码资源限制和临时快照清理 |
 | `src/qq-enhancer/` | 可选 QQ 回复增强 | 图片、主动兴趣、回复风格 |
 | `src/qq-enhancer/context-images.js` + `src/app/qq-image-memory-tool.js` | 图片短期引用与按需重看 | 5 分钟或 20 条原始消息窗口、同范围图片目录、活动任务 input 校验与视觉工具结果 |
+| `src/qq-memory-image-store.js` | 记忆图片存储 | 头像与知识配图共用：内容哈希寻址、原子写入、每次读取重验大小/签名/哈希、导出到任务 input、只清理自身创建且无引用的旧文件 |
+| `src/qq-avatar-memory.js` + `src/app/qq-avatar-memory-tool.js` | 人物头像记忆 | 头像记录与复查退避、文字特征只绑定实际描述过的图片、会话范围候选、含图提示词、后台批量描述的提示词/Schema/解析、有界下载与单线程刷新队列、手动刷新/描述的目标选择与状态汇总，以及 `qq_memory.avatar` 的看图后才可记录规则 |
+| `src/app/qq-knowledge-image-tool.js` | 知识配图工具 | `qq_knowledge.image` 的读写范围、图片目录 selector 导入、添加/替换/改说明/移除/查看；纯数据变更在 `src/qq-knowledge-base.js`，网页上传校验在 `src/dashboard-knowledge-base.js` |
+| `src/qq-enhancer/interest-vision.js` | 兴趣模型看图 | 看图模式（auto/on/off）、按厂商/模型记住是否支持图片、图片拒绝识别、被判断消息的有界选图与多模态消息内容 |
+| `src/app/qq-web-image-tool.js` | 联网搜图工具 | `qq_search.images` 的本轮 selector、下载到任务 output、签名校验与预览；Tavily 图片请求在 `src/web-search.js` |
 | `src/qq-main-prompt.js` | 主模型提示词边界 | 角色、执行顺序、主动任务和按需工具目录 |
 | `src/qq-proactive-pipeline.js` | 主动聊天双模型契约 | 普通接话、冷群话题/水群和主动私聊的兴趣批准凭据与主模型必经校验 |
 | `src/qq-proactive-cycle-state.js` | 普通兴趣内存周期状态 | pending 消息计数、Bot 确认送达后的重置，以及作废送达前执行中 judge 且保留后续消息 |
@@ -123,7 +128,7 @@
 - **QQ 上下文：**连续复读压缩后，总会完整发送一段连续的近期窗口（群普通 20 条、群明确触发 30 条、群扩展 48 条；私聊 30 条、扩展 60 条）。语义筛选只处理保留记录中更早的部分，并同时覆盖人类与 Bot 消息。当前正文、引用和融合追问组成同一查询，也供短期记忆、知识、印象和统一记忆召回复用。
 - **QQ 投递：**主模型从完整上下文自行判断闲聊或实质任务；解题、代码、写作、总结及其短续答以完成任务为长度依据，不受闲聊字数建议限制。投递前，`src/qq-reply-chunks.js` 把超过单条安全字符上限的正文优先按段落/句子边界拆成多条有序气泡，避免把完整答案硬裁到 900 字或用一条超限消息发送。多人融合轮把有界参与者交给主模型，每位候选人都能通过结构化 `reply` 对象被选择引用或艾特；缺少或无效目标时安全回退为普通回复。旧目标 marker 会先从结构化可见正文中清掉，再进入拟人风格保护。闲聊字数预算只是提示词建议：该保护只会去掉模板化开场白或把短回复拆成气泡，绝不丢弃模型写出的内容。单人轮仍沿用基于关系距离的引用/艾特/普通回复策略。OneBot 每个气泡结果都会形成投递回执，只有成功文本进入“已发送”记忆，失败项单独保留给下一轮主模型。
 - **模型职责：**已配置的 OpenRouter、DeepSeek 或自定义 OpenAI 兼容兴趣模型是后台轻量判定与杂项初筛面，厂商适配集中在 `src/interest-model-provider.js`；密钥只在环境配置中，厂商/模型选择可持久化。兴趣模型只处理有界触发、分类、风险标注、简单审核，以及 Bot 回复后同一人的冻结批次是否真实承接上一轮；Codex 主模型负责聊天、总结、工具检索、选题、词语/标点范围含义标注、知识提取、复杂推理和最终回复。词语、短语和标点的所有语境含义统一进入现有范围黑话 variant；语言画像只保存结构用法和对黑话条目的引用。
-- **存储：**设置、记忆和社交状态保存在本地文件。`data/settings.json` 通过 `src/infrastructure/storage/settings-repository.js` 加载和原子替换，纯快照包含全部 Codex 原生运行参数。QQ scope 到 Codex thread 的映射单独原子写入 `data/qq-codex-sessions.json`，不复制 Codex 线程正文。`qq-knowledge-base` 在格式错误时保留原文件并切换只读保护；其他记忆存储继续按小步抽取。
+- **存储：**设置、记忆和社交状态保存在本地文件。`data/settings.json` 通过 `src/infrastructure/storage/settings-repository.js` 加载和原子替换，纯快照包含全部 Codex 原生运行参数。QQ scope 到 Codex thread 的映射单独原子写入 `data/qq-codex-sessions.json`，不复制 Codex 线程正文。`qq-knowledge-base` 在格式错误时保留原文件并切换只读保护；其他记忆存储继续按小步抽取。 头像与知识配图存放在 `data/qq-memory-images/`，记录里只保存图片 ID；只有人物印象和知识库都安全加载时才清理无引用文件。
 - **周期与手动任务：**`src/wall-clock-scheduler.js` 只负责唤醒领域检查；到期时间仍保存在对应领域数据中。普通兴趣周期与短期记忆写入 `data/qq-memory.json`，知识频率复核时钟写入 `data/qq-knowledge-base.json`，自适应/人格时钟继续留在 persona 文件。启动和 QQ 通道恢复时只立即补做一轮，完成时刻成为下一周期的新起点。`/api/qq/ai-tasks`、QQ `/AI任务` 与 NCC 复用同一套总结/复盘函数、范围校验和并发锁；强制模式只跳过调度与常规样本条件。知识低频复核无论自动还是手动都先通过 `qq-enhancer` 的兴趣模型结构化通道做有界初筛，再启动 Codex 主模型读取完整证据终审。
 
 ## 新增功能的步骤

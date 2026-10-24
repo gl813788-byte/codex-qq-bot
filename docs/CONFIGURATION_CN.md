@@ -189,7 +189,7 @@ Hub 会先识别 Codex 任务类型，再把上表的任务基础时限按当前
 
 ### 手动 AI 任务执行参数
 
-`--force` 跳过冷却/样本门槛；新增 `--background` 立即返回任务编号，交给原模型队列执行；`--full` 使用完整历史上限。三者独立，可组合为 `ncc ai-run all 群号 --force --background --full`，QQ 对应 `/AI任务 强制 后台 全部 完整历史`。管理 API 使用布尔字段 `force`、`background`、`fullHistory`。Agent 工具发起 AI 任务时始终后台提交；该防死锁规则不需要额外环境配置。
+`--force` 跳过冷却/样本门槛；新增 `--background` 立即返回任务编号，交给原模型队列执行；`--full` 使用完整历史上限。三者独立，可组合为 `ncc ai-run all 群号 --force --background --full`，QQ 对应 `/AI任务 强制 后台 全部 完整历史`。管理 API 使用布尔字段 `force`、`background`、`fullHistory`。`avatar-features` 的范围可省略，`fullHistory`/`--full` 表示最多连续 20 批，可选的 `userIds` 列表（或 `ncc avatars describe --qq`）指定个人。Agent 工具发起 AI 任务时始终后台提交；该防死锁规则不需要额外环境配置。
 
 ### AI 引擎（Codex / Claude Code）
 
@@ -232,10 +232,11 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 | `..._JUDGE_API_KEY` | 空 | `custom` 厂商的 key |
 | `..._JUDGE_BASE_URL` | 空 | `custom` 厂商的 OpenAI 兼容 API 根地址 |
 | `..._JUDGE_TIMEOUT_MS` | `6500` | judge 流式空闲超时 |
+| `..._JUDGE_VISION` | `auto` | 普通兴趣闸门是否也看被判断消息里的图片（最多 2 张、缩成小 JPEG 预览）：`auto` 对每个厂商/模型先试一次，厂商拒绝图片输入时改为纯文字并记住到重启，`on` 总是尝试，`off` 从不发送图片。图片会发给所配置的第三方兴趣模型服务 |
 | `CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES` | `20971520` | QQ 图片上限，默认 20 MiB |
 | `CODEX_REMOTE_CONTACT_QQ_COMPRESSED_IMAGE_MAX_EDGE` | `1600` | 压缩读取的最长边，范围 256–4096 像素；自动启动按 Hub 内存选择 1280/1600/2048 |
 | `CODEX_REMOTE_CONTACT_QQ_FILE_MAX_BYTES` | `52428800` | 模型按需下载入站 QQ 文件的单文件上限，范围 1 MiB–1 GiB |
-| `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | 安全下载模式；`proxy-compatible` 仅额外允许域名解析到 `198.18.0.0/15` 代理 Fake-IP，仍拦截字面私网 IP 和其他保留地址 |
+| `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | 安全下载模式；`proxy-compatible` 仅额外允许域名解析到 `198.18.0.0/15` 代理 Fake-IP，仍拦截字面私网 IP 和其他保留地址。人物头像下载同样遵守该模式 |
 | `CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR` | `|||` | 多气泡分隔符 |
 | `..._BUBBLE_SEND_DELAY_MS` | `650` | 气泡间基础延迟 |
 | `..._BUBBLE_MAX_CHARS` | `900` | 单条 QQ 消息的安全字符上限，范围 200–4000 |

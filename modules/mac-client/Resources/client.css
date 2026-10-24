@@ -672,6 +672,25 @@ details.info-block[open] > summary::after { transform: rotate(90deg); }
 .state-card h3 { font-size: 13px; margin-bottom: 4px; }
 .state-card p { color: var(--text-2); font-size: 13px; overflow-wrap: anywhere; }
 
+/* ---------- People and memory images ---------- */
+.people-view { display: grid; gap: 14px; }
+.people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 10px; }
+.person-card { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.memory-image { display: block; object-fit: cover; border: 1px solid var(--border); background: var(--bg-sunken); }
+.memory-image.failed { opacity: 0.4; }
+.person-avatar .memory-image { width: 64px; height: 64px; border-radius: 50%; }
+.person-body { display: grid; gap: 8px; min-width: 0; }
+.person-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.person-head strong { font-size: 14px; overflow-wrap: anywhere; }
+.person-head .chip { margin-left: auto; }
+.person-id { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.person-section h4 { margin-bottom: 2px; color: var(--muted); font-size: 12px; }
+.person-section p { font-size: 13px; overflow-wrap: anywhere; }
+.person-section .person-detail { color: var(--text-2); }
+.person-section details summary { color: var(--accent-text); font-size: 12px; cursor: pointer; }
+.person-meta { color: var(--faint); font-size: 12px; }
+.people-more { justify-self: center; }
+
 /* ---------- Knowledge ---------- */
 .knowledge-workspace { display: grid; grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1.1fr); gap: 16px; align-items: start; }
 .knowledge-index { display: grid; gap: 14px; position: sticky; top: 76px; }
@@ -732,6 +751,17 @@ details.info-block[open] > summary::after { transform: rotate(90deg); }
 .inspector footer { color: var(--faint); font-size: 12px; }
 .inspector-empty { display: grid; place-items: center; min-height: 240px; padding: 20px; border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--muted); text-align: center; font-size: 13px; }
 .knowledge-empty { display: grid; gap: 8px; justify-items: center; padding: 32px 16px; border: 1px dashed var(--border-strong); border-radius: var(--radius); text-align: center; }
+.section-title-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.inspector section .section-title-row h4 { margin-bottom: 0; }
+.section-title-row .muted { font-size: 12px; }
+.knowledge-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.knowledge-image { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.knowledge-image .memory-image { width: 100%; aspect-ratio: 1 / 1; border-radius: var(--radius-xs); object-fit: contain; }
+.knowledge-image figcaption { color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }
+.knowledge-image-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.knowledge-image-preview:empty { display: none; }
+.knowledge-image-preview .memory-image { max-width: 100%; max-height: 240px; margin: 0 auto; border-radius: var(--radius-sm); object-fit: contain; }
+.field-note { margin-top: -8px; color: var(--muted); font-size: 12px; }
 .knowledge-empty p { color: var(--muted); font-size: 13px; }
 
 /* ---------- Logs ---------- */

@@ -1,10 +1,14 @@
 import {
+  applyQqKnowledgeImageChange,
   applyQqKnowledgePatches,
   normalizeQqKnowledgeBase
 } from "./qq-knowledge-base.js";
+import { detectQqImageMimeType } from "./qq-memory-image-store.js";
 
 const validKinds = new Set(["note", "slang"]);
 const validScopeTypes = new Set(["global", "group", "member", "group-member"]);
+const imageActions = { "attach-image": "attach", "replace-image": "replace", "caption-image": "caption", "remove-image": "remove" };
+export const dashboardKnowledgeImageMaxBytes = 4 * 1024 * 1024;
 
 export class DashboardKnowledgeConflictError extends Error {
   constructor(message) {
@@ -76,6 +80,58 @@ export function applyDashboardKnowledgeMutation(store, body, { at = Date.now() }
     action: applied.action,
     entry: saved.entry,
     variant: saved.variant
+  };
+}
+
+export function isDashboardKnowledgeImageAction(value) {
+  return Object.hasOwn(imageActions, cleanText(value, 20).toLowerCase());
+}
+
+// Decode a browser upload. Only base64 data URLs whose bytes carry a real
+// PNG/JPEG/GIF/WebP signature are accepted.
+export function parseDashboardKnowledgeImageUpload(value, { maxBytes = dashboardKnowledgeImageMaxBytes } = {}) {
+  const match = String(value || "").match(/^data:image\/(?:png|jpeg|jpg|gif|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
+  if (!match) throw new TypeError("image must be a base64 PNG, JPEG, GIF or WebP data URL");
+  if (Math.floor(match[1].length * 3 / 4) > maxBytes + 2) throw new RangeError("image is too large");
+  const data = Buffer.from(match[1], "base64");
+  if (!data.length || data.length > maxBytes) throw new RangeError("image is too large");
+  if (!detectQqImageMimeType(data)) throw new TypeError("image content is not a supported picture");
+  return data;
+}
+
+export function applyDashboardKnowledgeImageMutation(store, body, { image = null, at = Date.now() } = {}) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new TypeError("knowledge image mutation body must be an object");
+  }
+  const action = imageActions[cleanText(body.action, 20).toLowerCase()];
+  if (!action) throw new TypeError("knowledge image action must be attach-image, replace-image, caption-image or remove-image");
+  const current = normalizeQqKnowledgeBase(store);
+  const original = resolveOriginal(current, body);
+  if (!original) throw new TypeError("entryId and variantId are required for knowledge images");
+  if (["attach", "replace"].includes(action) && !image) throw new TypeError("an uploaded image is required");
+  const result = applyQqKnowledgeImageChange(current, {
+    entryId: original.entry.id,
+    variantId: original.variant.id,
+    action,
+    image,
+    imageId: cleanText(body.imageId, 70),
+    caption: body.caption == null && action !== "caption" ? undefined : cleanText(body.caption, 120),
+    source: "dashboard",
+    at
+  });
+  if (!result.changed) {
+    if (result.reason === "image_not_found") throw new DashboardKnowledgeConflictError("the knowledge image changed or was removed; refresh and try again");
+    if (result.reason === "image_limit") throw new RangeError("a knowledge variant can hold at most 4 images");
+    if (result.reason === "duplicate_image") throw new TypeError("this image is already attached");
+    throw new TypeError(`knowledge image mutation was rejected: ${result.reason}`);
+  }
+  return {
+    store: result.store,
+    changed: true,
+    action: `${action}-image`,
+    entry: result.entry,
+    variant: result.variant,
+    image: result.image
   };
 }
 

@@ -12,7 +12,7 @@ const assetRoutes = new Map([
 
 const securityHeaders = {
   "cache-control": "no-cache",
-  "content-security-policy": "default-src 'self'; base-uri 'none'; connect-src 'self' http://127.0.0.1:* http://localhost:*; font-src 'self' data:; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'",
+  "content-security-policy": "default-src 'self'; base-uri 'none'; connect-src 'self' http://127.0.0.1:* http://localhost:*; font-src 'self' data:; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; object-src 'none'; script-src 'self'; style-src 'self'",
   "cross-origin-resource-policy": "same-origin",
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",

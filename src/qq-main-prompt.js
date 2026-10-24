@@ -166,7 +166,8 @@ export function formatQqMainToolGuide({
   replyStickerCandidates = [],
   inboundFileSummary = "",
   memoryPeople = [],
-  robotProfileCandidates = []
+  robotProfileCandidates = [],
+  canSearchImages = false
 } = {}) {
   const actionRelevant = /(?:拍一拍|点赞|好友申请|加群|入群|群邀请|申请|QQ\s*空间|空间|动态|评论|ban|封禁|拉黑|禁言|踢人)/i.test(String(messageText || "")) || pokeEvent;
   const candidates = Array.isArray(replyStickerCandidates) ? replyStickerCandidates : [];
@@ -184,8 +185,13 @@ export function formatQqMainToolGuide({
     "- qq_context.history：读当前会话最近消息或数值范围；关键词或 userId 搜索会同时检索其他可访问会话，每条结果标明来源会话（群名/私聊对象、selector、行号、时间、发送者）。想了解正在对话的人或某个话题在别处的讨论时可主动搜索；要看指定对话时用 sessions 填群名、私聊对象、QQ 号或 selector（可多个）。引用时说明出处，不要把其他会话的内容说成当前会话里发生的事。",
     "- qq_context.images：列出本段对话可选图片，或按 selector 重新读取一张原图作为视觉输入；作用域固定为本轮原始会话。",
     "- qq_memory：检索、覆盖或标记短期记忆，按候选 QQ 号读取人物详情，并在确有新证据时用 impression 暂存当前范围/人物印象。",
+    "- qq_memory.avatar：人物印象里的头像记忆。list/search 查看本会话成员 QQ 头像的文字特征；inspect 读取某人当前头像原图作为视觉输入；record 只能在本轮 inspect 过该头像后写入或校正文字特征。辨认聊天图片里的角色属于谁时先比对文字特征，不确定再看头像原图；与头像一致只说明是对方头像里的形象，不等于本人照片。",
     "- qq_knowledge.manage：按稳定标题搜索、查看和覆盖长期知识。",
+    "- qq_knowledge.image：为已有知识标题添加、替换、改说明、移除或查看配图（每个标题每个范围最多 4 张），配图取自本段对话图片目录的 selector。只在图片本身对以后理解这条知识有价值时配图（如梗图原图、示意图、表情包出处），并写清说明；知识正文仍是主体。",
     "- 最新资料优先使用原生 Web Search；中文来源不足时用 qq_search.chinese_web。",
+    canSearchImages
+      ? "- qq_search.images：对方想要一张图（找图、表情包、壁纸、示意图、某物长什么样）时搜索网络图片；search 只给出候选和服务商描述，必须 download 后实际看过图片、确认符合要求，再把返回的绝对路径放进结构化 attachments 发送。不合适就换一张或如实说明，不要发送看不清或不相关的图。"
+      : null,
     isOwner || isBotAdmin
       ? "- qq_runtime.configure 可查看或调整下一轮模型、思考强度、会话模式和 Hub 参数；调用 AI任务 时始终后台提交，强制执行用“AI任务 强制 后台 任务名”。工具返回任务编号只代表已提交，不能声称总结已完成；任务状态在 AI 任务中心与日志中查看。qq_runtime.summarize 可把有界聊天历史交给当前 Agent 自己总结，不能同步启动嵌套 Agent。"
       : null,

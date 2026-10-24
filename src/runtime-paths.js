@@ -32,6 +32,7 @@ export function createRuntimePaths({
     qqPersonasPath: join(dataDir, "qq-personas.json"),
     qqSelfPersonaPath: join(dataDir, "qq-self-persona.json"),
     qqConversationMemoryPath: join(dataDir, "qq-conversation-memory.json"),
+    qqMemoryImagesDir: join(dataDir, "qq-memory-images"),
     qqCodexSessionsPath: join(dataDir, "qq-codex-sessions.json"),
     qqStickerLabelsPath: join(dataDir, "qq-sticker-labels.json"),
     qqStickerInventoryPath: join(dataDir, "qq-sticker-inventory.json"),

@@ -136,11 +136,26 @@ npm run ncc -- ai-run all GROUP_ID --full
 npm run ncc -- ai-run all GROUP_ID --force --background
 ```
 
-Tasks are `chat-summary` (chat summary plus knowledge extraction), `scope-summary` (scope persona-evidence/memory summary), `style-review` (group style review), `global-persona` (global persona refresh), `knowledge-review` (two-model review of a due low-frequency slang item), and `all`. In QQ, send `/AI任务 TASK`; `/AI任务 强制 TASK` explicitly selects force mode.
+Tasks are `chat-summary` (chat summary plus knowledge extraction), `scope-summary` (scope persona-evidence/memory summary), `style-review` (group style review), `global-persona` (global persona refresh), `knowledge-review` (two-model review of a due low-frequency slang item), `avatar-features` (describe QQ avatars that have no text features or changed; an optional group or `private:QQ_ID` scope limits it to those people, `--full` processes up to 20 consecutive batches, and force retries parked avatars), and `all`. In QQ, send `/AI任务 TASK`; `/AI任务 强制 TASK` explicitly selects force mode.
 
 A normal manual run bypasses the automatic schedule's due-time gate while retaining normal task data thresholds. `--force` additionally bypasses cooldown and normal sample thresholds. It never bypasses QQ owner/menu permissions, group allowlists, the loopback API restriction, concurrency locks, OneBot identity, or the requirement for actual data. A forced knowledge review only broadens candidate selection and still follows interest-model triage, main-model final review, and stale-change guards; it never deletes directly. These tasks use the current QQ model and existing task deadlines, and require a running Hub.
 
 The new `--background` option combines independently with `--force` and `--full`; QQ uses `/AI任务 强制 后台 全部`, and the local management API accepts `background: true`. Background submission immediately returns HTTP 202 and a job id: accepted does not mean completed. Inspect recent job states through `/AI任务`, `ncc ai-tasks`, or `jobs` in `/api/qq/ai-tasks`; actual results use the existing summary/memory and log paths. The current Hub process retains the latest 50 job records; restarting does not replay manual jobs.
+
+### Avatar memory
+
+Both NCC surfaces expose the person-avatar memory directly; the Hub must be running and the write commands use the same loopback-only management API:
+
+```bash
+npm run ncc -- avatars                                   # counts, refresh queue, download errors
+npm run ncc -- avatars refresh GROUP_ID                  # queue avatars of people seen in a group
+npm run ncc -- avatars refresh --qq QQ_ID,QQ_ID --force  # re-download now, ignoring the 3-day recheck
+npm run ncc -- avatars describe                          # one description batch for every known person
+npm run ncc -- avatars describe GROUP_ID --all           # up to 20 batches for one group
+npm run ncc -- avatars describe --qq QQ_ID --force       # fetch if needed, then describe again
+```
+
+A bare number is a group scope, as in `ai-run`; individual people use `--qq`. Refresh only queues downloads (single worker, spaced out) and returns immediately; `describe` runs the `avatar-features` task and accepts `--background`. Both menus include an avatar entry. The API is `GET /api/qq/avatars` for status and `POST /api/qq/avatars` with `{"action":"refresh","scopeId","userIds","force"}`; describing goes through `POST /api/qq/ai-tasks` with `taskId: "avatar-features"` plus optional `scopeId`, `userIds`, `fullHistory`, `force` and `background`.
 
 Agent calls to AI tasks through `qq_runtime.configure` automatically submit in the background, preventing a reply from holding the only model slot while synchronously waiting for a summary. Both engines reject synchronous nested model calls from tools with `CODEX_NESTED_TURN_BLOCKED`; background work still uses the original concurrency limiter, task locks, permissions, and deadlines.
 

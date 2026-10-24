@@ -6,6 +6,7 @@ import {
   getDefaultInterestModelBaseUrl,
   normalizeInterestModelProvider
 } from "../interest-model-provider.js";
+import { normalizeQqInterestVisionMode } from "../qq-enhancer/interest-vision.js";
 
 export function createEnvironmentConfig(env = process.env) {
   const oneBotMaxConcurrency = boundedInteger(
@@ -157,6 +158,7 @@ export function createEnvironmentConfig(env = process.env) {
     defaultQqProactiveJudgeModel,
     qqProactiveJudgeModel: env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_MODEL || defaultQqProactiveJudgeModel,
     qqProactiveJudgeTimeoutMs: numberOrDefault(env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_TIMEOUT_MS, 6_500),
+    qqProactiveJudgeVision: normalizeQqInterestVisionMode(env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_VISION),
     qqProactiveJudgeMinInterest: 20,
     qqSelfPersonaScopeInitialMessages: boundedInteger(env.CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_SCOPE_INITIAL_MESSAGES, {
       defaultValue: 64,

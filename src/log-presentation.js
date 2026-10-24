@@ -9,6 +9,7 @@ const messageTranslationsZh = Object.freeze({
   "Dashboard LAN access updated": "仪表盘局域网访问设置已更新",
   "Dashboard Bot settings updated": "网页端 Bot 设置已更新",
   "Dashboard QQ knowledge updated": "网页端 QQ 知识库已更新",
+  "Dashboard QQ knowledge image updated": "网页端 QQ 知识库配图已更新",
   "Dashboard public tunnel started": "仪表盘公网临时访问已启动",
   "Dashboard public tunnel updated": "仪表盘公网临时访问设置已更新",
   "Unable to restore dashboard public tunnel": "恢复仪表盘公网临时访问失败",
@@ -37,6 +38,17 @@ const messageTranslationsZh = Object.freeze({
   "QQ knowledge deletion review failed": "QQ 黑话删除审核失败",
   "QQ knowledge deletion review completed": "QQ 黑话删除审核完成",
   "QQ knowledge entry deleted": "QQ 知识库内容已删除",
+  "QQ knowledge image updated": "QQ 知识库配图已更新",
+  "QQ avatar refreshed": "QQ 头像已刷新",
+  "QQ avatar refresh failed": "QQ 头像刷新失败",
+  "QQ avatar refresh queued": "QQ 头像手动刷新已加入队列",
+  "QQ web image tool completed": "QQ 联网搜图工具调用完成",
+  "QQ avatar download blocked by the safe fetch policy": "QQ 头像下载被安全下载策略拦截；使用 Fake-IP 代理时可设置 CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE=proxy-compatible",
+  "QQ avatar features recorded": "QQ 头像特征已记录",
+  "QQ avatar features described": "QQ 头像特征批量描述完成",
+  "QQ avatar feature description failed": "QQ 头像特征描述失败",
+  "QQ memory images pruned": "QQ 记忆图片已清理",
+  "Unable to prune QQ memory images": "清理 QQ 记忆图片失败",
   "Codex model output captured": "Codex 模型输出已记录",
   "Codex generated image imported into QQ task output": "Codex 生成图片已导入 QQ 任务输出",
   "Codex generated image attachment was rejected": "Codex 生成图片附件未通过 QQ 安全校验",
@@ -376,6 +388,24 @@ const detailLabelsZh = Object.freeze({
   items: "变更明细",
   hits: "命中明细",
   removedCount: "删除数",
+  removed: "清理文件数",
+  referenced: "仍被引用的图片数",
+  featureStatus: "头像特征状态",
+  safeFetchMode: "安全下载模式",
+  hint: "提示",
+  failureCount: "连续失败次数",
+  attemptedCount: "本批头像数",
+  describedCount: "已记录特征数",
+  batchCount: "处理批次数",
+  remainingCount: "剩余待处理数",
+  fetchedCount: "新获取头像数",
+  avatarSelectedCount: "选中人数",
+  avatarQueuedCount: "加入刷新队列数",
+  avatarSkippedCount: "未到复查时间跳过数",
+  judgeVisionMode: "兴趣模型看图模式",
+  webImageCandidateCount: "本轮搜图候选数",
+  judgeVisionImageCount: "兴趣模型附图数",
+  judgeVisionFallback: "因模型不支持图片改为纯文字",
   previousCount: "原有数量",
   entryCount: "当前数量",
   scopeCount: "范围数",
@@ -783,7 +813,9 @@ const detailValuesZh = Object.freeze({
     "fusion-buffer": "进入追问融合缓冲", "fuse-and-steer": "融合后补充当前回答",
     "fuse-and-restart": "融合后截断并续答",
     "fuse-before-send": "发送前统一融合", "interest-batch": "连续对话兴趣合批",
-    "extend-quiet-window": "达到条数上限后重新等待静默", "semantic-search": "语义搜索"
+    "extend-quiet-window": "达到条数上限后重新等待静默", "semantic-search": "语义搜索",
+    attach: "添加图片", replace: "替换图片", caption: "修改图片说明", remove: "移除图片", download: "下载",
+    "attach-image": "添加图片", "replace-image": "替换图片", "caption-image": "修改图片说明", "remove-image": "移除图片"
   },
   operation: {
     list: "列出", search: "搜索", view: "查看", status: "查看状态", add: "添加", edit: "修改", delete: "删除", clear: "清空",
@@ -796,7 +828,9 @@ const detailValuesZh = Object.freeze({
     "learning.global_persona": "全局人设更新", "memory.scope_summary": "范围记忆总结",
     "memory.person_promotion": "深刻人物印象统一记忆", "memory.semantic_sync": "语义记忆同步",
     "memory.knowledge_load": "知识库加载", "memory.knowledge_update": "知识库更新",
-    "memory.knowledge_query": "知识库查询", "memory.slang_usage": "黑话出现频率记录"
+    "memory.knowledge_query": "知识库查询", "memory.slang_usage": "黑话出现频率记录",
+    "memory.avatar_refresh": "头像刷新", "memory.avatar_features": "头像特征记录",
+    "memory.knowledge_image": "知识库配图", "memory.image_prune": "记忆图片清理", "search.images": "联网搜图"
   },
   outcome: {
     loaded: "已加载", created: "已新建", updated: "已更新", rejected: "已拒绝", unchanged: "无变化", recorded: "已记录",
@@ -809,7 +843,8 @@ const detailValuesZh = Object.freeze({
     frozen: "已冻结并关闭入口", extended: "已延长静默等待", fallback: "已使用降级结果",
     synchronized: "已同步", skipped: "已跳过", initialized: "已初始化",
     sent: "已发送", ignored: "已忽略", silent: "主动沉默", command: "指令已处理",
-    delivered: "已送达", busy: "繁忙"
+    delivered: "已送达", busy: "繁忙", changed: "头像已更换", empty: "没有新特征", removed: "已清理",
+    policy_blocked: "被安全下载策略拦截"
   },
   layer: {
     "short-term": "短期记忆", impression: "印象记忆", knowledge: "长期知识", unified: "统一记忆",
@@ -848,8 +883,13 @@ const detailValuesZh = Object.freeze({
     "qq-command": "QQ 手动任务", "qq-command-force": "QQ 强制任务",
     "management-api": "NCC 手动任务", "management-api-force": "NCC 强制任务",
     "manual-scope-summary": "手动范围总结", manual: "手动执行", "manual-force": "强制执行",
-    initial: "初次加载", periodic: "周期任务", "fused-follow-up": "融合追问", "manual-chat-summary": "手动聊天总结"
+    initial: "初次加载", periodic: "周期任务", "fused-follow-up": "融合追问", "manual-chat-summary": "手动聊天总结",
+    agent: "主模型", background: "后台任务"
   },
+  featureStatus: { described: "已记录", stale: "已换头像待更新", pending: "待描述", unavailable: "头像未获取" },
+  safeFetchMode: { strict: "严格", "proxy-compatible": "代理兼容" },
+  judgeVisionMode: { auto: "自动检测", on: "始终附图", off: "关闭" },
+  hint: { "proxy-fake-ip": "代理 Fake-IP 环境需启用 proxy-compatible" },
   kind: { slang: "黑话", note: "普通知识", unknown: "未知" },
   type: {
     global: "全局", group: "群", member: "人物", "group-member": "群内人物", current: "当前范围",

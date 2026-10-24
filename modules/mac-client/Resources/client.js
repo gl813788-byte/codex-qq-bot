@@ -54,6 +54,8 @@ const translations = {
     unifiedEntries: "统一摘要", handoffs: "交接", ideas: "点子", projects: "项目", todos: "待办", notes: "记录", recentState: "近期状态", latestHandoff: "最近交接", noState: "暂无近期状态", updated: "更新于 {time}",
     autoSkillMemory: "Skill 回看后写入", autoSkillHint: "桌面 Skill 调用记忆后自动沉淀", manualHandoff: "允许手动交接", manualHandoffHint: "允许 /交接 指令写入摘要",
     shortTermMemory: "短期记忆", recentMessages: "最近消息", roleUser: "用户", roleAssistant: "助手", publicMemory: "公共长期记忆", personas: "群友画像", conversationImpressions: "对话印象", impressionBrief: "印象简述", impressionDetail: "印象详述", thoughtBrief: "感想简述", thoughtDetail: "感想详述", recentTopic: "近期话题", recentInteraction: "近期互动",
+    memoryPeople: "人物", peopleTotal: "人物", peopleWithAvatar: "已获取头像", peopleDescribed: "头像已描述", peoplePending: "待描述头像", noPeople: "还没有人物印象或头像记录。", showMorePeople: "显示更多（还有 {count} 位）",
+    avatarFeatures: "头像特征", avatarStatusDescribed: "特征已记录", avatarStatusStale: "已换头像，待更新", avatarStatusPending: "待描述", avatarStatusUnavailable: "头像未获取", avatarPreviousFeatures: "曾用头像", avatarFetchedAt: "头像获取于 {time}", avatarAlt: "{name} 的头像", avatarDescribedMeta: "{source} · {time}", avatarSourceAgent: "主模型记录", avatarSourceBackground: "后台任务记录", avatarSourceDashboard: "网页记录", personImpression: "人物印象", personImpressionDetail: "完整印象", robotTag: "机器人", personMessages: "{count} 条消息",
     knowledgeTitles: "知识标题", knowledgeVariants: "范围解释", knowledgeSlang: "黑话", knowledgeReviews: "审查记录",
     knowledgeSearch: "搜索标题、含义、群或成员", knowledgeKind: "知识类型", knowledgeAllKinds: "全部类型", knowledgeKindSlang: "黑话", knowledgeKindNote: "知识", knowledgeScope: "适用范围", knowledgeAllScopes: "全部范围", knowledgeGlobal: "全局", knowledgeGroup: "群", knowledgeMember: "成员", knowledgeGroupMember: "群内成员", knowledgeSortLabel: "排序方式", knowledgeSortUpdated: "最近更新", knowledgeSortFrequency: "出现频率", knowledgeSortTitle: "标题", newKnowledge: "新建知识",
     knowledgeAll: "全部知识", knowledgeNotes: "普通知识", knowledgePendingReview: "待审查", knowledgeResults: "{count} 个标题", knowledgeNoEntries: "没有符合条件的知识。", knowledgeEmptyHint: "知识会随总结自动写入，也可以在这里手动添加。", knowledgeCreateFirst: "添加第一条知识", knowledgeNoSelection: "从列表中选择一条知识，查看含义、范围与出现记录。",
@@ -61,6 +63,7 @@ const translations = {
     editKnowledge: "编辑", deleteKnowledge: "删除", deleteKnowledgeTitle: "删除这条知识", deleteKnowledgeMessage: "确定删除“{value}”在当前范围内的解释吗？其他群或成员的解释不受影响。", knowledgeDeleted: "知识已删除", knowledgeSaved: "知识已保存",
     knowledgeEditorTitleNew: "新建知识", knowledgeEditorTitleEdit: "编辑知识", knowledgeScopeType: "适用范围", knowledgeTitleField: "标题 / 词语", knowledgeContent: "含义 / 内容", knowledgeAliasesHint: "多个别名用逗号分隔", knowledgeGroupId: "群 QQ 号", knowledgeGroupName: "群名称", knowledgeUserId: "成员 QQ 号", knowledgeUserName: "成员名称", saveKnowledge: "保存知识",
     knowledgeHitValue: "{count} 次", knowledgeOccurrenceMessage: "{sender} · {time}", knowledgeReviewDecision: "{decision} · {time}", knowledgeScopeGlobal: "全部会话", knowledgeScopeGroup: "{name} · 群 {id}", knowledgeScopeMember: "{name} · QQ {id}", knowledgeScopeGroupMember: "{group}（{groupId}）中的 {user}（{userId}）", knowledgeSourceCount: "{count} 条来源", knowledgeUpdated: "更新于 {time}", knowledgeContextBefore: "上文", knowledgeContextAfter: "下文", knowledgeUnknownName: "未命名",
+    knowledgeImages: "配图", knowledgeImageAdd: "添加配图", knowledgeImageEdit: "编辑配图", knowledgeImageFile: "图片文件", knowledgeImageReplaceFile: "替换为新图片（可选）", knowledgeImageFileHint: "PNG、JPEG、GIF 或 WebP，不超过 4 MB。", knowledgeImageCaption: "图片说明", knowledgeImageCaptionHint: "这张图是什么、为什么属于这条知识", saveKnowledgeImage: "保存配图", knowledgeImageSaved: "配图已保存", knowledgeImageRemoved: "配图已移除", editKnowledgeImage: "编辑", removeKnowledgeImage: "移除", removeKnowledgeImageTitle: "移除配图", removeKnowledgeImageMessage: "确定从“{value}”移除这张配图吗？", knowledgeImageLimit: "每条知识每个范围最多 4 张配图", knowledgeImageRequired: "请选择一张图片", knowledgeImageTooLarge: "图片超过 4 MB", knowledgeNoImages: "还没有配图。", knowledgeImageCount: "{count} 张图", noCaption: "无说明",
     level: "级别", allLevels: "全部级别", category: "模块", allCategories: "全部模块", engineFilter: "AI 引擎", allEngines: "全部引擎", search: "搜索", logSearchHint: "消息、Trace、群或发送者", slowThreshold: "慢请求", noLimit: "不限", visibleLogCount: "显示条数", resetFilter: "重置", applyFilter: "筛选", filterApplied: "筛选已应用",
     structuredLogs: "实时日志", waitingLogs: "等待日志", matchedLogs: "显示 {visible} 条 · 共匹配 {matched} 条", liveConnected: "实时连接", livePaused: "已暂停", liveError: "连接异常", liveRefresh: "实时刷新", followLatest: "跟随最新", expandDetails: "展开详情", liveLogStream: "实时日志", noLogs: "没有符合筛选条件的日志。",
     totalLogs: "日志总数", traces: "链路", p95Latency: "P95 耗时", maxLatency: "最慢耗时", engineLogs: "{engine} {count} 条", viewJson: "查看 JSON",
@@ -127,6 +130,8 @@ const translations = {
     unifiedEntries: "Unified summaries", handoffs: "Handoffs", ideas: "Ideas", projects: "Projects", todos: "Todos", notes: "Notes", recentState: "Recent state", latestHandoff: "Latest handoff", noState: "No recent state", updated: "Updated {time}",
     autoSkillMemory: "Write after Skill recall", autoSkillHint: "Persist useful context after a desktop Skill recall", manualHandoff: "Allow manual handoff", manualHandoffHint: "Allow /handoff to write a summary",
     shortTermMemory: "Short-term memory", recentMessages: "Recent messages", roleUser: "User", roleAssistant: "Assistant", publicMemory: "Public long-term memory", personas: "Personas", conversationImpressions: "Conversation impressions", impressionBrief: "Impression brief", impressionDetail: "Impression detail", thoughtBrief: "Thought brief", thoughtDetail: "Thought detail", recentTopic: "Recent topic", recentInteraction: "Recent interaction",
+    memoryPeople: "People", peopleTotal: "People", peopleWithAvatar: "Avatars fetched", peopleDescribed: "Avatars described", peoplePending: "Awaiting description", noPeople: "No person impressions or avatars yet.", showMorePeople: "Show more ({count} left)",
+    avatarFeatures: "Avatar features", avatarStatusDescribed: "Features recorded", avatarStatusStale: "Avatar changed, update pending", avatarStatusPending: "Awaiting description", avatarStatusUnavailable: "Avatar not fetched", avatarPreviousFeatures: "Previous avatars", avatarFetchedAt: "Avatar fetched {time}", avatarAlt: "Avatar of {name}", avatarDescribedMeta: "{source} · {time}", avatarSourceAgent: "Recorded by main model", avatarSourceBackground: "Recorded by background task", avatarSourceDashboard: "Recorded on dashboard", personImpression: "Impression", personImpressionDetail: "Full impression", robotTag: "Robot", personMessages: "{count} messages",
     knowledgeTitles: "Titles", knowledgeVariants: "Scoped meanings", knowledgeSlang: "Slang", knowledgeReviews: "Reviews",
     knowledgeSearch: "Search titles, meanings, groups or members", knowledgeKind: "Type", knowledgeAllKinds: "All types", knowledgeKindSlang: "Slang", knowledgeKindNote: "Note", knowledgeScope: "Scope", knowledgeAllScopes: "All scopes", knowledgeGlobal: "Global", knowledgeGroup: "Group", knowledgeMember: "Member", knowledgeGroupMember: "Member in group", knowledgeSortLabel: "Sort", knowledgeSortUpdated: "Recently updated", knowledgeSortFrequency: "Frequency", knowledgeSortTitle: "Title", newKnowledge: "New knowledge",
     knowledgeAll: "All knowledge", knowledgeNotes: "Notes", knowledgePendingReview: "Pending review", knowledgeResults: "{count} titles", knowledgeNoEntries: "No knowledge matches these filters.", knowledgeEmptyHint: "Knowledge is written with summaries, or you can add it here.", knowledgeCreateFirst: "Add the first item", knowledgeNoSelection: "Select an item to see its meaning, scope and occurrences.",
@@ -134,6 +139,7 @@ const translations = {
     editKnowledge: "Edit", deleteKnowledge: "Delete", deleteKnowledgeTitle: "Delete this knowledge", deleteKnowledgeMessage: "Delete the meaning of “{value}” in this scope? Other groups and members keep theirs.", knowledgeDeleted: "Knowledge deleted", knowledgeSaved: "Knowledge saved",
     knowledgeEditorTitleNew: "New knowledge", knowledgeEditorTitleEdit: "Edit knowledge", knowledgeScopeType: "Scope", knowledgeTitleField: "Title / term", knowledgeContent: "Meaning / content", knowledgeAliasesHint: "Separate aliases with commas", knowledgeGroupId: "Group QQ ID", knowledgeGroupName: "Group name", knowledgeUserId: "Member QQ ID", knowledgeUserName: "Member name", saveKnowledge: "Save",
     knowledgeHitValue: "{count} hits", knowledgeOccurrenceMessage: "{sender} · {time}", knowledgeReviewDecision: "{decision} · {time}", knowledgeScopeGlobal: "All conversations", knowledgeScopeGroup: "{name} · group {id}", knowledgeScopeMember: "{name} · QQ {id}", knowledgeScopeGroupMember: "{user} ({userId}) in {group} ({groupId})", knowledgeSourceCount: "{count} sources", knowledgeUpdated: "Updated {time}", knowledgeContextBefore: "Before", knowledgeContextAfter: "After", knowledgeUnknownName: "Unnamed",
+    knowledgeImages: "Images", knowledgeImageAdd: "Add image", knowledgeImageEdit: "Edit image", knowledgeImageFile: "Image file", knowledgeImageReplaceFile: "Replace with a new image (optional)", knowledgeImageFileHint: "PNG, JPEG, GIF or WebP, up to 4 MB.", knowledgeImageCaption: "Caption", knowledgeImageCaptionHint: "What the picture shows and why it belongs here", saveKnowledgeImage: "Save image", knowledgeImageSaved: "Image saved", knowledgeImageRemoved: "Image removed", editKnowledgeImage: "Edit", removeKnowledgeImage: "Remove", removeKnowledgeImageTitle: "Remove image", removeKnowledgeImageMessage: "Remove this image from “{value}”?", knowledgeImageLimit: "Up to 4 images per knowledge scope", knowledgeImageRequired: "Choose an image", knowledgeImageTooLarge: "The image exceeds 4 MB", knowledgeNoImages: "No images yet.", knowledgeImageCount: "{count} images", noCaption: "No caption",
     level: "Level", allLevels: "All levels", category: "Module", allCategories: "All modules", engineFilter: "AI engine", allEngines: "All engines", search: "Search", logSearchHint: "Message, trace, group or sender", slowThreshold: "Slow", noLimit: "Any", visibleLogCount: "Rows", resetFilter: "Reset", applyFilter: "Apply", filterApplied: "Filter applied",
     structuredLogs: "Live logs", waitingLogs: "Waiting for logs", matchedLogs: "Showing {visible} of {matched} matches", liveConnected: "Live", livePaused: "Paused", liveError: "Connection error", liveRefresh: "Live refresh", followLatest: "Follow latest", expandDetails: "Expand details", liveLogStream: "Live log stream", noLogs: "No logs match these filters.",
     totalLogs: "Total logs", traces: "Traces", p95Latency: "P95 latency", maxLatency: "Slowest", engineLogs: "{engine} {count}", viewJson: "View JSON",
@@ -169,7 +175,8 @@ const app = (() => {
     maintenance: null,
     memory: null,
     logs: null,
-    activeMemoryTab: restoredUiState.activeMemoryTab === "qq" ? "qq" : "unified",
+    activeMemoryTab: ["qq", "people"].includes(restoredUiState.activeMemoryTab) ? restoredUiState.activeMemoryTab : "unified",
+    peopleLimit: 60,
     memoryQuery: restoredUiState.memoryQuery || "",
     knowledgeQuery: restoredUiState.knowledgeQuery || "",
     knowledgeKind: ["all", "slang", "note"].includes(restoredUiState.knowledgeKind) ? restoredUiState.knowledgeKind : "all",
@@ -232,7 +239,7 @@ function loadDashboardUiState() {
       liveLogs: parsed.liveLogs !== false,
       logFollow: parsed.logFollow !== false,
       logExpand: parsed.logExpand === true,
-      activeMemoryTab: parsed.activeMemoryTab === "qq" ? "qq" : "unified",
+      activeMemoryTab: ["qq", "people"].includes(parsed.activeMemoryTab) ? parsed.activeMemoryTab : "unified",
       memoryQuery: boundedUiText(parsed.memoryQuery, 200),
       knowledgeQuery: boundedUiText(parsed.knowledgeQuery, 240),
       knowledgeKind: ["all", "slang", "note"].includes(parsed.knowledgeKind) ? parsed.knowledgeKind : "all",
@@ -1355,8 +1362,105 @@ function renderMemory() {
     button.tabIndex = active ? 0 : -1;
     if (active) $("#memoryView").setAttribute("aria-labelledby", button.id);
   });
-  const html = app.activeMemoryTab === "unified" ? renderUnifiedMemory(app.memory.unified || {}) : renderQqMemory(app.memory.qq || {});
+  const html = app.activeMemoryTab === "unified"
+    ? renderUnifiedMemory(app.memory.unified || {})
+    : app.activeMemoryTab === "people"
+      ? renderPeopleMemory(app.memory.qq?.conversationMemory?.people || [])
+      : renderQqMemory(app.memory.qq || {});
   $("#memoryView").innerHTML = html || emptyState(t("noMemory"));
+  hydrateMemoryImages($("#memoryView"));
+}
+
+// Person impressions with the QQ avatar the Bot recognizes people by.
+function renderPeopleMemory(people) {
+  const query = app.memoryQuery.trim().toLowerCase();
+  const matches = query
+    ? people.filter((person) => [
+      person.displayName, person.userId, ...(person.aliases || []), person.impressionSummary, person.impressionDetail,
+      person.avatar?.features?.summary, person.avatar?.features?.detail, ...(person.avatar?.history || []).map((item) => item.summary)
+    ].join(" ").toLowerCase().includes(query))
+    : people;
+  const count = (status) => people.filter((person) => person.avatar?.status === status).length;
+  const metrics = [
+    { label: t("peopleTotal"), value: formatNumber(people.length), icon: icons.channels },
+    { label: t("peopleWithAvatar"), value: formatNumber(people.filter((person) => person.avatar?.imageId).length), icon: icons.knowledge },
+    { label: t("peopleDescribed"), value: formatNumber(count("described")), icon: icons.shieldCheck },
+    { label: t("peoplePending"), value: formatNumber(count("pending") + count("stale")), icon: icons.clock }
+  ];
+  const visible = matches.slice(0, app.peopleLimit);
+  return `<div class="people-view">
+    <div class="stat-row">${metrics.map(statCard).join("")}</div>
+    ${visible.length ? `<div class="people-grid">${visible.map(renderPersonCard).join("")}</div>` : emptyState(t("noPeople"))}
+    ${matches.length > visible.length ? `<button class="button ghost people-more" type="button" data-more-people>${escapeHtml(t("showMorePeople", { count: matches.length - visible.length }))}</button>` : ""}
+  </div>`;
+}
+
+function renderPersonCard(person) {
+  const avatar = person.avatar || {};
+  const features = avatar.features || {};
+  const status = { described: ["ok", "avatarStatusDescribed"], stale: ["warn", "avatarStatusStale"], pending: ["", "avatarStatusPending"], unavailable: ["", "avatarStatusUnavailable"] }[avatar.status] || ["", "avatarStatusUnavailable"];
+  const sources = { agent: "avatarSourceAgent", background: "avatarSourceBackground", dashboard: "avatarSourceDashboard" };
+  const name = person.displayName || `QQ ${person.userId}`;
+  const impressionDetail = person.impressionDetail && person.impressionDetail !== person.impressionSummary ? person.impressionDetail : "";
+  return `<article class="person-card">
+    <div class="person-avatar">${memoryImageMarkup(avatar.imageId, { alt: t("avatarAlt", { name }) })}</div>
+    <div class="person-body">
+      <header class="person-head"><strong>${escapeHtml(name)}</strong><span class="person-id">QQ ${escapeHtml(person.userId)}</span>${person.isRobot ? `<span class="kind-tag">${escapeHtml(t("robotTag"))}</span>` : ""}<span class="chip ${status[0]}">${escapeHtml(t(status[1]))}</span></header>
+      ${features.summary ? `<section class="person-section"><h4>${escapeHtml(t("avatarFeatures"))}</h4><p>${escapeHtml(features.summary)}</p>${features.detail ? `<p class="person-detail">${escapeHtml(features.detail)}</p>` : ""}<span class="person-meta">${escapeHtml(t("avatarDescribedMeta", { source: t(sources[features.source] || "avatarSourceAgent"), time: formatTime(features.describedAt) }))}</span></section>` : ""}
+      ${(avatar.history || []).length ? `<section class="person-section"><h4>${escapeHtml(t("avatarPreviousFeatures"))}</h4>${avatar.history.slice().reverse().map((item) => `<p class="person-detail">${escapeHtml(item.summary)}</p>`).join("")}</section>` : ""}
+      ${person.impressionSummary ? `<section class="person-section"><h4>${escapeHtml(t("personImpression"))}</h4><p>${escapeHtml(person.impressionSummary)}</p>${impressionDetail ? `<details><summary>${escapeHtml(t("personImpressionDetail"))}</summary><p class="person-detail">${escapeHtml(impressionDetail)}</p></details>` : ""}</section>` : ""}
+      <footer class="person-meta">${escapeHtml([t("personMessages", { count: formatNumber(person.messageCount || 0) }), person.updatedAt ? t("updated", { time: formatTime(person.updatedAt) }) : "", avatar.fetchedAt ? t("avatarFetchedAt", { time: formatTime(avatar.fetchedAt) }) : ""].filter(Boolean).join(" · "))}</footer>
+    </div>
+  </article>`;
+}
+
+// Memory pictures need the API token, so they are fetched and shown through
+// short-lived blob URLs instead of direct <img src> requests.
+const memoryImageUrls = new Map();
+const memoryImageLimit = 400;
+
+function memoryImageMarkup(imageId, { alt = "" } = {}) {
+  if (!/^[a-f0-9]{64}$/.test(String(imageId || ""))) return `<span class="memory-image placeholder" aria-hidden="true"></span>`;
+  const cached = memoryImageUrls.get(imageId);
+  return `<img class="memory-image" data-memory-image="${imageId}" alt="${escapeHtml(alt)}"${typeof cached === "string" ? ` src="${cached}"` : ""} decoding="async" />`;
+}
+
+function hydrateMemoryImages(root) {
+  $$("img[data-memory-image]:not([src])", root).forEach((image) => {
+    void loadMemoryImage(image.dataset.memoryImage).then((url) => {
+      if (url) image.src = url;
+      else image.classList.add("failed");
+    });
+  });
+}
+
+async function loadMemoryImage(imageId) {
+  const cached = memoryImageUrls.get(imageId);
+  if (cached) return cached;
+  const pending = fetchMemoryImage(imageId).then((url) => {
+    memoryImageUrls.set(imageId, url);
+    while (memoryImageUrls.size > memoryImageLimit) {
+      const [oldestId, oldest] = memoryImageUrls.entries().next().value;
+      memoryImageUrls.delete(oldestId);
+      if (typeof oldest === "string") URL.revokeObjectURL(oldest);
+    }
+    return url;
+  }).catch(() => {
+    memoryImageUrls.delete(imageId);
+    return "";
+  });
+  memoryImageUrls.set(imageId, pending);
+  return pending;
+}
+
+async function fetchMemoryImage(imageId) {
+  const headers = new Headers();
+  if (app.apiToken) headers.set("authorization", `Bearer ${app.apiToken}`);
+  const response = await fetch(`${HUB}/api/qq/memory-images/${imageId}`, { headers, credentials: "same-origin" });
+  if (!response.ok) throw new Error(`${t("requestFailed")} (${response.status})`);
+  const blob = await response.blob();
+  if (!/^image\/(png|jpeg|gif|webp)$/.test(blob.type)) throw new Error("unsupported image");
+  return URL.createObjectURL(blob);
 }
 
 function renderUnifiedMemory(memory) {
@@ -1546,6 +1650,7 @@ function renderKnowledge() {
   renderKnowledgeIndex(allEntries, variants);
   renderKnowledgeList(entries, selected);
   renderKnowledgeInspector(selected.entry, selected.variant, reviews);
+  hydrateMemoryImages($("#knowledgeInspector"));
 }
 
 function renderKnowledgeIndex(entries, variants) {
@@ -1578,7 +1683,7 @@ function renderKnowledgeList(entries, selected) {
       <span class="knowledge-card-top"><span class="kind-tag ${escapeHtml(entry.kind)}">${escapeHtml(entry.kind === "slang" ? t("knowledgeKindSlang") : t("knowledgeKindNote"))}</span><time>${escapeHtml(formatRelative(entry.updatedAt))}</time></span>
       <strong>${escapeHtml(entry.title)}</strong>
       <p>${escapeHtml(variants[0]?.content || "")}</p>
-      <span class="knowledge-card-foot"><span>${scopes.map((scope) => `<span class="kind-tag">${escapeHtml(scope)}</span>`).join("")}</span><span>${escapeHtml(t("knowledgeHitValue", { count: knowledgeEntryHits(entry) }))}</span></span>
+      <span class="knowledge-card-foot"><span>${scopes.map((scope) => `<span class="kind-tag">${escapeHtml(scope)}</span>`).join("")}</span><span>${knowledgeEntryImageCount(entry) ? `${escapeHtml(t("knowledgeImageCount", { count: knowledgeEntryImageCount(entry) }))} · ` : ""}${escapeHtml(t("knowledgeHitValue", { count: knowledgeEntryHits(entry) }))}</span></span>
     </button>`;
   }).join("")}</div>`);
 }
@@ -1599,6 +1704,7 @@ function renderKnowledgeInspector(entry, variant, reviewHistory) {
     </header>
     ${(entry.variants || []).length > 1 ? `<div class="variant-tabs" aria-label="${escapeHtml(t("knowledgeVariants"))}">${entry.variants.map((item) => `<button class="${item.id === variant.id ? "active" : ""}" type="button" data-knowledge-entry="${escapeHtml(entry.id)}" data-knowledge-variant="${escapeHtml(item.id)}">${escapeHtml(knowledgeScopeName(item.scope?.type))}</button>`).join("")}</div>` : ""}
     <section><h4>${escapeHtml(t("knowledgeDefinition"))}</h4><p class="definition">${escapeHtml(variant.content)}</p></section>
+    ${renderKnowledgeImages(entry, variant)}
     <section><h4>${escapeHtml(t("knowledgeScope"))}</h4><p>${escapeHtml(knowledgeScopeLabel(variant.scope))}</p></section>
     <section><h4>${escapeHtml(t("knowledgeStatistics"))}</h4>
       <div class="stat-pair"><div><strong>${escapeHtml(formatNumber(usage.hitCount || 0))}</strong><span>${escapeHtml(t("knowledgeHitCount"))}</span></div><div><strong>${escapeHtml(usage.lastSeenAt ? formatRelative(usage.lastSeenAt) : "—")}</strong><span>${escapeHtml(t("knowledgeLastSeen"))}</span></div></div>
@@ -1609,6 +1715,91 @@ function renderKnowledgeInspector(entry, variant, reviewHistory) {
     <section><h4>${escapeHtml(t("knowledgeReviewState"))}</h4>${review ? `<p><strong>${escapeHtml(t("knowledgeReviewDecision", { decision: review.decision, time: formatTime(review.reviewedAt) }))}</strong></p><p>${escapeHtml(review.reason || t("knowledgeReviewHealthy"))}</p>` : `<p>${escapeHtml(t("knowledgeReviewHealthy"))}</p>`}</section>
     <footer>${escapeHtml(t("knowledgeUpdated", { time: formatTime(variant.updatedAt) }))} · ${escapeHtml(t("knowledgeSourceCount", { count: variant.sources?.length || 0 }))}</footer>
   </article>`);
+}
+
+function renderKnowledgeImages(entry, variant) {
+  const images = variant.images || [];
+  const ids = `data-image-entry="${escapeHtml(entry.id)}" data-image-variant="${escapeHtml(variant.id)}"`;
+  return `<section class="knowledge-images-section">
+    <div class="section-title-row"><h4>${escapeHtml(t("knowledgeImages"))}</h4>${images.length < 4
+      ? `<button class="button small ghost" type="button" data-add-knowledge-image ${ids}>${escapeHtml(t("knowledgeImageAdd"))}</button>`
+      : `<span class="muted">${escapeHtml(t("knowledgeImageLimit"))}</span>`}</div>
+    ${images.length ? `<div class="knowledge-images">${images.map((image) => `<figure class="knowledge-image">
+      ${memoryImageMarkup(image.id, { alt: image.caption || entry.title })}
+      <figcaption>${escapeHtml(image.caption || t("noCaption"))}</figcaption>
+      <div class="knowledge-image-actions"><button class="button small ghost" type="button" data-edit-knowledge-image="${escapeHtml(image.id)}" ${ids}>${escapeHtml(t("editKnowledgeImage"))}</button><button class="button small ghost text-danger" type="button" data-remove-knowledge-image="${escapeHtml(image.id)}" ${ids}>${escapeHtml(t("removeKnowledgeImage"))}</button></div>
+    </figure>`).join("")}</div>` : `<p class="muted">${escapeHtml(t("knowledgeNoImages"))}</p>`}
+  </section>`;
+}
+
+function knowledgeEntryImageCount(entry) {
+  return (entry.visibleVariants || entry.variants || []).reduce((sum, variant) => sum + (variant.images?.length || 0), 0);
+}
+
+function openKnowledgeImageDialog(entryId, variantId, imageId = "") {
+  const found = findKnowledgeVariant(entryId, variantId);
+  if (!found) return;
+  const image = imageId ? (found.variant.images || []).find((item) => item.id === imageId) : null;
+  $("#knowledgeImageForm").reset();
+  $("#knowledgeImageEntryId").value = found.entry.id;
+  $("#knowledgeImageVariantId").value = found.variant.id;
+  $("#knowledgeImageId").value = image?.id || "";
+  $("#knowledgeImageCaption").value = image?.caption || "";
+  $("#knowledgeImageTitle").textContent = t(image ? "knowledgeImageEdit" : "knowledgeImageAdd");
+  $("#knowledgeImageFileLabel").textContent = t(image ? "knowledgeImageReplaceFile" : "knowledgeImageFile");
+  setHtml($("#knowledgeImagePreview"), image ? memoryImageMarkup(image.id, { alt: image.caption || found.entry.title }) : "");
+  hydrateMemoryImages($("#knowledgeImagePreview"));
+  $("#knowledgeImageDialog").showModal();
+}
+
+function previewKnowledgeImageFile(file) {
+  const preview = $("#knowledgeImagePreview");
+  preview.querySelectorAll("img[data-local-preview]").forEach((image) => URL.revokeObjectURL(image.src));
+  if (!file) return;
+  const image = document.createElement("img");
+  image.className = "memory-image";
+  image.dataset.localPreview = "1";
+  image.alt = file.name;
+  image.src = URL.createObjectURL(file);
+  preview.replaceChildren(image);
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error(t("requestFailed")));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function submitKnowledgeImage(control) {
+  const imageId = $("#knowledgeImageId").value;
+  const file = $("#knowledgeImageFile").files?.[0] || null;
+  if (!file && !imageId) { showToast(t("knowledgeImageRequired"), "error"); return; }
+  if (file && file.size > 4 * 1024 * 1024) { showToast(t("knowledgeImageTooLarge"), "error"); return; }
+  const body = {
+    action: file ? (imageId ? "replace-image" : "attach-image") : "caption-image",
+    entryId: $("#knowledgeImageEntryId").value,
+    variantId: $("#knowledgeImageVariantId").value,
+    imageId: imageId || undefined,
+    caption: $("#knowledgeImageCaption").value,
+    dataUrl: file ? await readFileAsDataUrl(file) : undefined
+  };
+  const response = await mutate(() => api("/api/qq/knowledge/images", { method: "POST", body: JSON.stringify(body) }), { control, success: t("knowledgeImageSaved"), busyKey: "knowledge" }).catch(() => null);
+  if (!response) return;
+  app.memory = response;
+  $("#knowledgeImageDialog").close();
+  renderKnowledge();
+}
+
+async function removeKnowledgeImage(entryId, variantId, imageId, control) {
+  const found = findKnowledgeVariant(entryId, variantId);
+  if (!found || !await confirmAction(t("removeKnowledgeImageTitle"), t("removeKnowledgeImageMessage", { value: found.entry.title }))) return;
+  const response = await mutate(() => api("/api/qq/knowledge/images", { method: "POST", body: JSON.stringify({ action: "remove-image", entryId, variantId, imageId }) }), { control, success: t("knowledgeImageRemoved"), busyKey: "knowledge" }).catch(() => null);
+  if (!response) return;
+  app.memory = response;
+  renderKnowledge();
 }
 
 function renderKnowledgeFrequency(occurrences) {
@@ -2157,6 +2348,13 @@ document.addEventListener("click", async (event) => {
     renderKnowledge();
     return;
   }
+  const addKnowledgeImage = event.target.closest("[data-add-knowledge-image]");
+  if (addKnowledgeImage) { openKnowledgeImageDialog(addKnowledgeImage.dataset.imageEntry, addKnowledgeImage.dataset.imageVariant); return; }
+  const editKnowledgeImage = event.target.closest("[data-edit-knowledge-image]");
+  if (editKnowledgeImage) { openKnowledgeImageDialog(editKnowledgeImage.dataset.imageEntry, editKnowledgeImage.dataset.imageVariant, editKnowledgeImage.dataset.editKnowledgeImage); return; }
+  const removeImage = event.target.closest("[data-remove-knowledge-image]");
+  if (removeImage) { await removeKnowledgeImage(removeImage.dataset.imageEntry, removeImage.dataset.imageVariant, removeImage.dataset.removeKnowledgeImage, removeImage); return; }
+  if (event.target.closest("[data-more-people]")) { app.peopleLimit += 60; renderMemory(); return; }
   const editKnowledge = event.target.closest("[data-edit-knowledge]");
   if (editKnowledge) { openKnowledgeEditor(editKnowledge.dataset.editKnowledge, editKnowledge.dataset.knowledgeVariant); return; }
   const removeKnowledge = event.target.closest("[data-delete-knowledge]");
@@ -2283,6 +2481,13 @@ $("#knowledgeSort").addEventListener("change", (event) => { app.knowledgeSort = 
 $("#knowledgeScopeType").addEventListener("change", syncKnowledgeEditorScope);
 $("#knowledgeEditorDialog").addEventListener("click", (event) => { if (event.target === event.currentTarget) event.currentTarget.close(); });
 $$("[data-close-knowledge-editor]").forEach((button) => button.addEventListener("click", () => $("#knowledgeEditorDialog").close()));
+$("#knowledgeImageDialog").addEventListener("click", (event) => { if (event.target === event.currentTarget) event.currentTarget.close(); });
+$$("[data-close-knowledge-image]").forEach((button) => button.addEventListener("click", () => $("#knowledgeImageDialog").close()));
+$("#knowledgeImageFile").addEventListener("change", (event) => previewKnowledgeImageFile(event.target.files?.[0] || null));
+$("#knowledgeImageForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await submitKnowledgeImage(event.submitter);
+});
 $("#knowledgeEditorForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const entryId = $("#knowledgeEntryId").value;

@@ -7,6 +7,7 @@ import {
   normalizeQqRobotCommands,
   normalizeQqRobotProfile
 } from "./qq-robot-profile.js";
+import { createEmptyQqAvatarRecord, getQqAvatarFeatureStatus, normalizeQqAvatarRecord } from "./qq-avatar-memory.js";
 
 const markerPattern = /\[\[qq_memory:(\{[^\n]*?\})\]\]/g;
 const anyMarkerPattern = /\[\[qq_memory:[\s\S]*?\]\]/g;
@@ -386,6 +387,37 @@ export function listQqConversationMemoryProfiles(memory) {
   return profiles;
 }
 
+// Dashboard view of cross-group person impressions with their avatar record.
+export function listQqConversationPeopleSnapshot(memory, { limit = 300 } = {}) {
+  const state = ensureMemory(memory);
+  return Object.entries(state.people)
+    .map(([userId, person]) => ({ userId, person, avatar: normalizeQqAvatarRecord(person?.avatar) }))
+    .filter(({ person, avatar }) => avatar.imageId || avatar.features.summary || person?.impressionSummary || person?.impressionDetail)
+    .sort((left, right) => (Date.parse(right.person.updatedAt || "") || 0) - (Date.parse(left.person.updatedAt || "") || 0))
+    .slice(0, Math.max(1, Math.min(2_000, Number(limit) || 300)))
+    .map(({ userId, person, avatar }) => ({
+      userId,
+      displayName: person.aliases?.at(-1) || `QQ ${userId}`,
+      aliases: collectVisibleAliases(person),
+      groupIds: [...(person.groupIds || [])],
+      messageCount: Number(person.messageCount || 0),
+      updatedAt: person.updatedAt || null,
+      isRobot: normalizeQqRobotProfile(person.robotProfile).isRobot,
+      impressionSummary: person.impressionSummary || "",
+      impressionDetail: person.impressionDetail || "",
+      avatar: {
+        imageId: avatar.imageId,
+        mimeType: avatar.mimeType,
+        fetchedAt: avatar.fetchedAt,
+        changedAt: avatar.changedAt,
+        status: getQqAvatarFeatureStatus(avatar),
+        lastError: avatar.lastError,
+        features: { ...avatar.features },
+        history: avatar.history.map((item) => ({ ...item }))
+      }
+    }));
+}
+
 export function summarizeQqConversationMemory(memory) {
   const state = ensureMemory(memory);
   return {
@@ -599,6 +631,19 @@ export function updateQqConversationRobotProfile(memory, event, {
     reason: changed ? "updated" : "insufficient_evidence",
     profile: normalizeQqRobotProfile(state.people[id]?.robotProfile)
   };
+}
+
+// Avatar records belong to the cross-group person impression. The updater
+// receives the normalized record and returns the next one.
+export function updateQqConversationPersonAvatar(memory, userId, update, { now = () => new Date() } = {}) {
+  const state = ensureMemory(memory);
+  const id = String(userId || "").trim();
+  if (!/^\d{4,20}$/.test(id) || typeof update !== "function") return { memory: state, ok: false, reason: "invalid_user_id" };
+  const person = getGlobalPerson(state, id, "", "");
+  if (!person) return { memory: state, ok: false, reason: "person_unavailable" };
+  person.avatar = normalizeQqAvatarRecord(update(normalizeQqAvatarRecord(person.avatar)));
+  state.updatedAt = now().toISOString();
+  return { memory: state, ok: true, avatar: person.avatar };
 }
 
 function ensureMemory(memory) {
@@ -930,6 +975,7 @@ function createGlobalPerson(userId) {
     impressionSummary: "",
     impressionDetail: "",
     robotProfile: createEmptyQqRobotProfile(),
+    avatar: createEmptyQqAvatarRecord(),
     descriptionUpdatedAt: null,
     unifiedMemory: createEmptyUnifiedMemoryPromotion()
   };
@@ -956,6 +1002,7 @@ function normalizeGlobalPeople(people) {
     person.aliases = collectVisibleAliases(person);
     normalizeDescriptionFields(person, "impression");
     person.robotProfile = normalizeQqRobotProfile(person.robotProfile);
+    person.avatar = normalizeQqAvatarRecord(person.avatar);
     person.unifiedMemory = normalizeUnifiedMemoryPromotion(person.unifiedMemory);
     people[userId] = person;
   }
