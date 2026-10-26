@@ -290,6 +290,10 @@ refactor with a behavior change.
   source session. Load it lazily only before a provider call, keep it optional
   on failure, and never include third-party private chats in background judges.
 - Cold-group and private-outreach results retain their activity-staleness guards.
+  Persist each check's pre-judgment human-message watermark; without newer human
+  messages, cooldown expiry, Bot activity and restarts must not call the provider
+  again. Preserve human messages arriving during judgment; legacy state falls
+  back to the previous check time.
   A decline, provider failure, invalid structure, missing credential, or missing
   two-model approval never starts visible proactive chat.
 - Interest-model output must not contain a reply draft or style instructions.

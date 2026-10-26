@@ -273,6 +273,7 @@ export function getQqAdaptiveColdProactivePlan(signals = {}, {
   const lastBotAt = Date.parse(group.lastBotReplyAt || "");
   const latestActivityAt = Date.parse(lastActivityAt || "");
   const lastCheckAt = Date.parse(group.lastColdProactiveCheckAt || "");
+  const lastJudgedHumanAt = Date.parse(group.lastColdProactiveJudgedHumanAt || group.lastColdProactiveCheckAt || "");
   const idleHoursByActivity = { high: 4, typical: 6, low: 10, unknown: 8 };
   const unansweredBotStreak = Math.max(
     boundedNumber(group.unansweredBotStreak),
@@ -295,6 +296,7 @@ export function getQqAdaptiveColdProactivePlan(signals = {}, {
   const base = {
     idleHoursRequired,
     idleHours: idleMs == null ? null : round(idleMs / 3_600_000),
+    lastHumanAt: Number.isFinite(lastHumanAt) ? new Date(lastHumanAt).toISOString() : null,
     lastActivityAt: Number.isFinite(resolvedLastActivityAt) ? new Date(resolvedLastActivityAt).toISOString() : null,
     thresholdReachedAt: Number.isFinite(resolvedLastActivityAt)
       ? new Date(resolvedLastActivityAt + idleMsRequired).toISOString()
@@ -324,6 +326,9 @@ export function getQqAdaptiveColdProactivePlan(signals = {}, {
       reason: "cold_check_cooldown",
       nextCheckAt: new Date(lastCheckAt + checkCooldownMs).toISOString()
     };
+  }
+  if (Number.isFinite(lastJudgedHumanAt) && lastHumanAt <= lastJudgedHumanAt) {
+    return { ...base, eligible: false, reason: "no_new_human_messages", nextCheckAt: null };
   }
   if (idleMs == null || idleMs < idleMsRequired) {
     return { ...base, eligible: false, reason: "group_not_cold", nextCheckAt: base.thresholdReachedAt };
@@ -356,6 +361,7 @@ export function getQqAdaptivePrivateProactivePlan(signals = {}, {
   const lastBotAt = Date.parse(contact.lastBotReplyAt || "");
   const latestAt = Date.parse(lastActivityAt || "");
   const lastCheckAt = Date.parse(contact.lastPrivateProactiveCheckAt || "");
+  const lastJudgedHumanAt = Date.parse(contact.lastPrivateProactiveJudgedHumanAt || contact.lastPrivateProactiveCheckAt || "");
   const lastProactiveAt = Date.parse(contact.lastPrivateProactiveAt || "");
   const resolvedLastActivityAt = Number.isFinite(latestAt)
     ? latestAt
@@ -432,17 +438,23 @@ export function getQqAdaptivePrivateProactivePlan(signals = {}, {
   if (Number.isFinite(lastCheckAt) && currentAt.getTime() - lastCheckAt < checkCooldownMs) {
     return { ...base, eligible: false, reason: "private_check_cooldown", nextCheckAt: new Date(lastCheckAt + checkCooldownMs).toISOString() };
   }
+  if (Number.isFinite(lastJudgedHumanAt) && lastHumanAt <= lastJudgedHumanAt) {
+    return { ...base, eligible: false, reason: "no_new_human_messages", nextCheckAt: null };
+  }
   return { ...base, eligible: true, reason: `private_${phase}_candidate`, nextCheckAt: currentAt.toISOString() };
 }
 
 export function markQqAdaptivePrivateProactiveCheck(container, {
   at = Date.now(),
-  sent = false
+  sent = false,
+  lastHumanAt
 } = {}) {
   if (!container) return false;
   const learning = ensureQqAdaptiveLearning(container);
   const observedAt = resolveObservedAt({}, at).toISOString();
   learning.lastPrivateProactiveCheckAt = observedAt;
+  // Use the pre-judge snapshot so human activity during the request stays pending.
+  learning.lastPrivateProactiveJudgedHumanAt = validIsoDate(lastHumanAt || learning.lastMessageAt);
   if (sent) learning.lastPrivateProactiveAt = observedAt;
   return true;
 }
@@ -491,12 +503,14 @@ export function deriveQqLearnedSocialHours(hourCounts = [], sampleSize = 0, {
 
 export function markQqAdaptiveColdProactiveCheck(group, {
   at = Date.now(),
-  sent = false
+  sent = false,
+  lastHumanAt
 } = {}) {
   if (!group) return false;
   const learning = ensureQqAdaptiveLearning(group);
   const observedAt = resolveObservedAt({}, at).toISOString();
   learning.lastColdProactiveCheckAt = observedAt;
+  learning.lastColdProactiveJudgedHumanAt = validIsoDate(lastHumanAt || learning.lastMessageAt);
   if (sent) {
     learning.lastColdProactiveAt = observedAt;
     learning.coldProactiveAwaitingHuman = true;
@@ -702,10 +716,12 @@ function createQqAdaptiveLearning() {
     styleHumanSampleSize: 0,
     styleBotSampleSize: 0,
     lastColdProactiveCheckAt: null,
+    lastColdProactiveJudgedHumanAt: null,
     lastColdProactiveAt: null,
     coldProactiveAwaitingHuman: false,
     unansweredBotStreak: 0,
     lastPrivateProactiveCheckAt: null,
+    lastPrivateProactiveJudgedHumanAt: null,
     lastPrivateProactiveAt: null
   };
 }
@@ -745,7 +761,7 @@ function normalizeQqAdaptiveLearning(value) {
   base.punctuationMessages = normalizeQqLanguageCountRecord(source.punctuationMessages, { type: "punctuation" });
   base.phraseOccurrences = normalizeQqLanguageCountRecord(source.phraseOccurrences, { type: "phrase" });
   base.phraseMessages = normalizeQqLanguageCountRecord(source.phraseMessages, { type: "phrase" });
-  for (const key of ["firstSeenAt", "lastMessageAt", "firstPokeAt", "lastPokeAt", "interruptionTrackingStartedAt", "lastBotReplyAt", "botTrackingStartedAt", "lastStyleReviewAt", "styleReviewWindowStartedAt", "lastColdProactiveCheckAt", "lastColdProactiveAt", "lastPrivateProactiveCheckAt", "lastPrivateProactiveAt"]) {
+  for (const key of ["firstSeenAt", "lastMessageAt", "firstPokeAt", "lastPokeAt", "interruptionTrackingStartedAt", "lastBotReplyAt", "botTrackingStartedAt", "lastStyleReviewAt", "styleReviewWindowStartedAt", "lastColdProactiveCheckAt", "lastColdProactiveJudgedHumanAt", "lastColdProactiveAt", "lastPrivateProactiveCheckAt", "lastPrivateProactiveJudgedHumanAt", "lastPrivateProactiveAt"]) {
     base[key] = validIsoDate(source[key]);
   }
   base.lastSenderId = normalizeId(source.lastSenderId);
@@ -931,10 +947,12 @@ function summarizeLearning(learning, currentHour, { confidenceAt }) {
     styleBotSampleSize: learning.styleBotSampleSize,
     lastBotReplyAt: learning.lastBotReplyAt,
     lastColdProactiveCheckAt: learning.lastColdProactiveCheckAt,
+    lastColdProactiveJudgedHumanAt: learning.lastColdProactiveJudgedHumanAt,
     lastColdProactiveAt: learning.lastColdProactiveAt,
     coldProactiveAwaitingHuman: learning.coldProactiveAwaitingHuman,
     unansweredBotStreak: learning.unansweredBotStreak,
     lastPrivateProactiveCheckAt: learning.lastPrivateProactiveCheckAt,
+    lastPrivateProactiveJudgedHumanAt: learning.lastPrivateProactiveJudgedHumanAt,
     lastPrivateProactiveAt: learning.lastPrivateProactiveAt
   };
 }

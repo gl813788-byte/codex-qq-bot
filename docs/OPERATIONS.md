@@ -167,6 +167,8 @@ If the machine was off past a deadline, only one overdue run is performed. A res
 
 A confirmed delivered Bot bubble clears the group's pre-delivery ordinary-interest pending cycle, so cadence and minute timing restart only from later human messages. An in-flight old judge is superseded without consuming those later messages; human activity alone does not supersede an already-approved ordinary judge.
 
+Cold-group and private-outreach checks persist the pre-judgment human-message watermark in `data/qq-personas.json`. Without a newer human message, `no_new_human_messages` blocks another provider call even after cooldown or restart; Bot messages do not count. Existing state falls back to the previous check time. Inspect the `interest` logs for this reason when an idle conversation correctly stays quiet.
+
 ## Acceptance checks
 
 ```bash

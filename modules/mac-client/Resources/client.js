@@ -1311,6 +1311,7 @@ function formatActivityLevel(value) {
 function formatAdaptiveReason(value) {
   const zh = {
     learning_sample_low: "学习样本不足", outside_social_hours: "不在开放时段", no_human_context: "缺少真人上下文",
+    no_new_human_messages: "没有新的真人消息，跳过兴趣判定",
     awaiting_human_after_cold_proactive: "等待真人接话", cold_check_cooldown: "判断冷却中", group_not_cold: "尚未达到沉默时长",
     bot_spoke_recently: "Bot 最近说过话", cold_group_time_due: "已到判断时间", ordinary_interest_pending: "普通兴趣消息待判断",
     reply_queue_pending: "回复队列处理中", reply_generation_active: "正在生成回复", activity_high: "群当前高活跃",
@@ -1320,6 +1321,7 @@ function formatAdaptiveReason(value) {
   };
   const en = {
     learning_sample_low: "learning sample is low", outside_social_hours: "outside allowed hours", no_human_context: "no human context",
+    no_new_human_messages: "no new human messages; interest judgment skipped",
     awaiting_human_after_cold_proactive: "waiting for a human", cold_check_cooldown: "decision cooldown", group_not_cold: "quiet threshold not reached",
     bot_spoke_recently: "Bot spoke recently", cold_group_time_due: "ready for a decision", ordinary_interest_pending: "ordinary interest pending",
     reply_queue_pending: "reply queue pending", reply_generation_active: "reply generation active", activity_high: "high activity now",

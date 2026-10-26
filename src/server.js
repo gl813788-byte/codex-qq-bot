@@ -5353,7 +5353,7 @@ async function runQqColdGroupInterestCheck() {
       : { ok: false, reason: "interest model judge is disabled", fallback: false };
     logQqColdGroupTopicStartJudge(event, topicStartJudge, plan);
     if (!topicStartJudge.ok || topicStartJudge.value?.shouldStart !== true) {
-      markQqAdaptiveColdProactiveCheck(group, { at: Date.now(), sent: false });
+      markQqAdaptiveColdProactiveCheck(group, { at: Date.now(), sent: false, lastHumanAt: plan.lastHumanAt });
       await saveQqPersonas();
       return;
     }
@@ -5407,6 +5407,7 @@ async function runQqColdGroupInterestCheck() {
     });
     markQqAdaptiveColdProactiveCheck(group, {
       at: Date.now(),
+      lastHumanAt: plan.lastHumanAt,
       sent: Boolean(record.reply && record.send?.ok !== false && !record.error && !record.decision?.superseded)
     });
     await saveQqPersonas();
@@ -5482,7 +5483,7 @@ async function runQqPrivateInterestCheck() {
       : { ok: false, reason: "interest model judge is disabled", fallback: false };
     logQqPrivateProactiveStartJudge(event, privateStartJudge, plan, spontaneityRoll);
     if (!privateStartJudge.ok || privateStartJudge.value?.shouldStart !== true) {
-      markQqAdaptivePrivateProactiveCheck(contact, { at: Date.now() });
+      markQqAdaptivePrivateProactiveCheck(contact, { at: Date.now(), lastHumanAt: plan.lastHumanAt });
       await saveQqPersonas();
       return;
     }
@@ -5527,6 +5528,7 @@ async function runQqPrivateInterestCheck() {
     });
     markQqAdaptivePrivateProactiveCheck(contact, {
       at: Date.now(),
+      lastHumanAt: plan.lastHumanAt,
       sent: Boolean(record.reply && record.send?.ok !== false && !record.error && !record.decision?.superseded)
     });
     await saveQqPersonas();
