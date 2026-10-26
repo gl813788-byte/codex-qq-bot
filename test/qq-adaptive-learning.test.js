@@ -352,6 +352,72 @@ test("private proactive interest is U-shaped and unanswered messages lower proba
   assert.ok(suppressed.nextCheckAfterMs > short.nextCheckAfterMs);
 });
 
+for (const [kind, getPlan, markCheck, checkKey, judgedHumanKey] of [
+  ["cold-group", getQqAdaptiveColdProactivePlan, markQqAdaptiveColdProactiveCheck,
+    "lastColdProactiveCheckAt", "lastColdProactiveJudgedHumanAt"],
+  ["private", getQqAdaptivePrivateProactivePlan, markQqAdaptivePrivateProactiveCheck,
+    "lastPrivateProactiveCheckAt", "lastPrivateProactiveJudgedHumanAt"]
+]) {
+  const now = Date.UTC(2026, 6, 10, 4);
+  const dayMs = 24 * 60 * 60 * 1000;
+  const lastHumanAt = new Date(now - 3 * dayMs).toISOString();
+  const signalsAt = (container, at) => buildQqAdaptiveLearningSignals(container, null, { now: at });
+  const makeContainer = () => {
+    const container = {};
+    const learning = ensureQqAdaptiveLearning(container);
+    learning.sampleCount = 80;
+    learning.lastMessageAt = lastHumanAt;
+    return container;
+  };
+
+  test(`${kind} interest does not rejudge unchanged human context after cooldown or restart`, () => {
+    for (const sent of [false, true]) {
+      let container = makeContainer();
+      const plan = getPlan(signalsAt(container, now), { now });
+      assert.equal(plan.eligible, true);
+      assert.equal(plan.lastHumanAt, lastHumanAt);
+      markCheck(container, { at: now, sent, lastHumanAt: plan.lastHumanAt });
+
+      // Persisted rejection/failure and successful outreach all consume the same evidence.
+      container = JSON.parse(JSON.stringify(container));
+      const future = now + 10 * dayMs;
+      recordQqAdaptiveBotReply(container, {}, { senderId: "67890" }, "Bot message", {
+        at: now + dayMs
+      });
+      const unchanged = getPlan(signalsAt(container, future), { now: future });
+      assert.equal(unchanged.eligible, false);
+      assert.equal(unchanged.reason, "no_new_human_messages");
+      assert.equal(unchanged.nextCheckAt, null);
+      assert.equal(ensureQqAdaptiveLearning(container)[judgedHumanKey], lastHumanAt);
+
+      recordQqAdaptiveHumanMessage(container, {}, humanEvent(0), { at: future });
+      const due = future + dayMs;
+      assert.equal(getPlan(signalsAt(container, due), { now: due }).eligible, true);
+    }
+  });
+
+  test(`${kind} interest keeps human messages arriving during a judgment eligible`, () => {
+    const container = makeContainer();
+    const started = getPlan(signalsAt(container, now), { now });
+    recordQqAdaptiveHumanMessage(container, {}, humanEvent(0), { at: now + 1_000 });
+    markCheck(container, { at: now + 2_000, lastHumanAt: started.lastHumanAt });
+    const future = now + 3 * dayMs;
+    assert.equal(getPlan(signalsAt(container, future), { now: future }).eligible, true);
+    assert.equal(ensureQqAdaptiveLearning(container)[judgedHumanKey], lastHumanAt);
+  });
+
+  test(`${kind} interest uses the previous check as a legacy evidence watermark`, () => {
+    const container = makeContainer();
+    container.adaptive[checkKey] = new Date(now - dayMs).toISOString();
+    const plan = getPlan(signalsAt(container, now), { now });
+    assert.equal(plan.eligible, false);
+    assert.equal(plan.reason, "no_new_human_messages");
+    recordQqAdaptiveHumanMessage(container, {}, humanEvent(0), { at: now });
+    const future = now + 3 * dayMs;
+    assert.equal(getPlan(signalsAt(container, future), { now: future }).eligible, true);
+  });
+}
+
 test("exposes detailed safe group-level learning parameters for the dashboard", () => {
   const group = {};
   const member = {};
