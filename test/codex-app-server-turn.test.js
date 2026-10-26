@@ -582,3 +582,119 @@ function createFakeAppServer({ resume = "ok", interrupt = "ok" } = {}) {
     }
   };
 }
+
+test("the MCP transport serves QQ tools from a per-turn server instead of dynamic tools", async () => {
+  const server = createFakeAppServer();
+  const calls = [];
+  let started = null;
+  let closed = false;
+  let ready;
+  const readyPromise = new Promise((resolve) => { ready = resolve; });
+  const resultPromise = runCodexAppServerTurn({
+    prompt: "mcp turn",
+    config: { "features.apps": false },
+    toolTransport: "mcp",
+    dynamicTools: [{
+      type: "namespace",
+      name: "qq_sticker",
+      description: "Stickers.",
+      tools: [{
+        type: "function",
+        name: "manage",
+        description: "Search stickers.",
+        inputSchema: { type: "object", properties: {} },
+        annotations: { readOnlyHint: true }
+      }]
+    }],
+    timeoutMs: 5_000,
+    spawnProcess: server.spawn,
+    startToolServer: async (options) => {
+      started = options;
+      return {
+        launch: { command: "/usr/bin/node", args: ["/bridge.mjs"], env: { CODEX_REMOTE_CONTACT_QQ_MCP_SOCKET: "/s.sock" } },
+        close: () => { closed = true; }
+      };
+    },
+    onReady: ready,
+    onDynamicToolCall: async (call) => {
+      calls.push(call);
+      return { ok: true, result: "#3f2a9c 无语猫猫" };
+    }
+  });
+  await readyPromise;
+  assert.deepEqual(started.tools.map((tool) => tool.name), ["qq_sticker__manage"]);
+  assert.deepEqual(started.tools[0].annotations, { readOnlyHint: true });
+  const result = await started.onCall({ namespace: "qq_sticker", tool: "manage", arguments: { action: "search" }, callId: "codex-mcp-1" });
+  assert.equal(result.success, true);
+  assert.equal(calls[0].threadId, "thread-1");
+  assert.equal(calls[0].turnId, "turn-1");
+  server.complete("done");
+  await resultPromise;
+
+  const threadStart = server.messages.find((message) => message.method === "thread/start");
+  assert.equal(threadStart.params.dynamicTools, undefined);
+  assert.equal(threadStart.params.config["features.apps"], false);
+  assert.deepEqual(threadStart.params.config.mcp_servers.qq, {
+    command: "/usr/bin/node",
+    args: ["/bridge.mjs"],
+    env: { CODEX_REMOTE_CONTACT_QQ_MCP_SOCKET: "/s.sock" },
+    default_tools_approval_mode: "approve",
+    startup_timeout_sec: 30,
+    tool_timeout_sec: 300
+  });
+  assert.equal(closed, true);
+});
+
+test("MCP image results echoed as bare base64 stay inside the image allowance", async () => {
+  const server = createFakeAppServer();
+  const payload = `iVBORw0KGgo${"A".repeat(5 * 1024 * 1024)}`;
+  let started = null;
+  let ready;
+  const readyPromise = new Promise((resolve) => { ready = resolve; });
+  const resultPromise = runCodexAppServerTurn({
+    prompt: "inspect via mcp",
+    toolTransport: "mcp",
+    dynamicTools: [{ type: "function", name: "qq_image", description: "image", inputSchema: { type: "object" } }],
+    timeoutMs: 5_000,
+    spawnProcess: server.spawn,
+    startToolServer: async (options) => {
+      started = options;
+      return { launch: { command: "node", args: [], env: {} }, close() {} };
+    },
+    onReady: ready,
+    onDynamicToolCall: () => ({ contentItems: [{ type: "inputImage", imageUrl: `data:image/png;base64,${payload}` }], success: true })
+  });
+  await readyPromise;
+  await started.onCall({ namespace: "", tool: "qq_image", arguments: {}, callId: "codex-mcp-img" });
+  server.notify({
+    method: "item/completed",
+    params: { item: { id: "mcp-1", type: "mcpToolCall", server: "qq", tool: "qq_image", result: { content: [{ type: "image", data: payload, mimeType: "image/png" }] } } }
+  });
+  server.complete("seen");
+  assert.equal((await resultPromise).finalResponse, "seen");
+});
+
+test("dynamic tools can be deferred and never carry MCP-only annotations", async () => {
+  const server = createFakeAppServer();
+  await runCodexAppServerTurn({
+    prompt: "deferred",
+    deferToolLoading: true,
+    dynamicTools: [{
+      type: "namespace",
+      name: "qq_context",
+      description: "Context.",
+      tools: [{ type: "function", name: "history", description: "History.", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } }]
+    }],
+    timeoutMs: 5_000,
+    spawnProcess: server.spawn,
+    onReady: () => server.complete("ok")
+  });
+  const threadStart = server.messages.find((message) => message.method === "thread/start");
+  assert.deepEqual(threadStart.params.dynamicTools, [{
+    type: "namespace",
+    name: "qq_context",
+    description: "Context.",
+    tools: [{ type: "function", name: "history", description: "History.", inputSchema: { type: "object" }, deferLoading: true }]
+  }]);
+  assert.equal(threadStart.params.config?.mcp_servers, undefined);
+});

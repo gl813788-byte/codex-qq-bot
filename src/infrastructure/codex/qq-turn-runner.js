@@ -7,6 +7,7 @@ import { summarizeProcessDiagnostics } from "../../process-diagnostics.js";
 import { buildQqOperationLogDetails } from "../../qq-operation-log.js";
 import { AGENT_LOG_CATEGORY, getAgentEngine } from "../agent/agent-engines.js";
 import { assertAgentTurnNotNested, runAgentToolCall } from "../agent/agent-tool-context.js";
+import { buildCodexLeanQqConfig } from "./codex-lean-config.js";
 
 // Every difference between the two engines lives in this table (display
 // facts and model selection come from agent-engines.js); the runner below
@@ -18,18 +19,32 @@ const qqAgentEngines = Object.freeze({
     buildEnv: buildIsolatedCodexChildEnv,
     // A Claude session id left in a persistent scope after an engine switch
     // cannot be resumed; Codex starts a fresh thread with full context.
-    canResume: (threadId) => !isClaudeThreadId(threadId)
+    canResume: (threadId) => !isClaudeThreadId(threadId),
+    buildConfig: (config, { leanContext, keepProjectDocs }) => buildCodexLeanQqConfig(config, {
+      enabled: leanContext,
+      keepProjectDocs
+    }),
+    resolveToolTransport: (configured) => configured === "dynamic" ? "dynamic" : "mcp"
   }),
   claude: Object.freeze({
     ...getAgentEngine("claude"),
     runTurn: runClaudeCodeTurn,
     buildEnv: buildIsolatedClaudeChildEnv,
-    canResume: () => true
+    canResume: () => true,
+    // Claude Code always serves QQ tools over MCP and has no Codex config.
+    buildConfig: (config) => config,
+    resolveToolTransport: () => "mcp"
   })
 });
 
 export function selectQqAgentEngine(engine) {
   return qqAgentEngines[getAgentEngine(engine).id];
+}
+
+// The transport that actually carries QQ tools for an engine; persistent
+// session reuse depends on it.
+export function resolveQqAgentToolTransport(engine, configured = "mcp") {
+  return selectQqAgentEngine(engine).resolveToolTransport(configured);
 }
 
 export function createQqCodexTurnRunner({
@@ -40,6 +55,8 @@ export function createQqCodexTurnRunner({
   claudePath = "claude",
   claudeModel = null,
   claudeReasoningEffort = null,
+  toolTransport = "mcp",
+  leanContext = false,
   activeChildren,
   stoppedGenerationIds,
   getReplyScope,
@@ -97,8 +114,14 @@ export function createQqCodexTurnRunner({
           developerInstructions: options.developerInstructions,
           baseInstructions: options.baseInstructions,
           dynamicTools: options.dynamicTools || [],
+          // Both transports defer QQ tool schemas until the model selects one.
+          toolTransport: agent.resolveToolTransport(toolTransport),
+          deferToolLoading: true,
           outputSchema: options.outputSchema || null,
-          config: options.config || null,
+          config: agent.buildConfig(options.config || null, {
+            leanContext: options.leanContext ?? leanContext,
+            keepProjectDocs: Boolean(options.keepProjectDocs)
+          }),
           webSearchMode: options.webSearchMode || null,
           sandbox: options.sandbox || "read-only",
           sandboxPolicy: options.sandboxPolicy || null,

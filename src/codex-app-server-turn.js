@@ -1,5 +1,15 @@
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createProtocolImageBudget } from "./infrastructure/codex/protocol-image-budget.js";
+import {
+  QQ_MCP_SERVER_NAME,
+  buildCodexQqMcpServerConfig,
+  flattenQqDynamicTools,
+  startQqMcpToolServer,
+  toCodexDynamicToolSpecs
+} from "./infrastructure/agent/qq-mcp-tools.js";
 import {
   attachErrorFields,
   createAgentTurnErrors,
@@ -14,6 +24,10 @@ import {
 
 const DEFAULT_MAX_PROTOCOL_BYTES = 8 * 1024 * 1024;
 const errors = createAgentTurnErrors("Codex app-server");
+// "dynamic" registers QQ tools as App Server dynamic tools; "mcp" serves them
+// from a per-turn MCP server, which Codex always defers behind tool search
+// and re-lists on every thread/resume.
+export const CODEX_TOOL_TRANSPORTS = Object.freeze(["dynamic", "mcp"]);
 
 export function runCodexAppServerTurn({
   codexPath = "codex",
@@ -30,6 +44,8 @@ export function runCodexAppServerTurn({
   developerInstructions = null,
   baseInstructions = null,
   dynamicTools = [],
+  toolTransport = "dynamic",
+  deferToolLoading = false,
   outputSchema = null,
   config = null,
   webSearchMode = null,
@@ -48,6 +64,7 @@ export function runCodexAppServerTurn({
   replacementIdleTimeoutMs,
   signal,
   spawnProcess = spawn,
+  startToolServer = startQqMcpToolServer,
   onSpawn,
   onReady,
   onRestarted,
@@ -63,6 +80,13 @@ export function runCodexAppServerTurn({
       reject(errors.abort(signal.reason));
       return;
     }
+
+    const mcpTools = toolTransport === "mcp" ? flattenQqDynamicTools(dynamicTools) : [];
+    const threadDynamicTools = toolTransport === "mcp"
+      ? []
+      : toCodexDynamicToolSpecs(dynamicTools, { deferLoading: deferToolLoading });
+    let toolServer = null;
+    let toolServerDir = null;
 
     let child;
     try {
@@ -130,6 +154,7 @@ export function runCodexAppServerTurn({
       if (error) attachErrorFields(error, { deadlineRenewalCount, stderr });
       rejectPendingRequests(error || errors.inactive());
       supervisor?.terminate();
+      closeToolServer();
       if (error) reject(error);
       else resolve({ ...result, stderr, deadlineRenewalCount });
     };
@@ -156,6 +181,41 @@ export function runCodexAppServerTurn({
     };
 
     const respond = (id, result) => send({ id, result });
+
+    const closeToolServer = () => {
+      try {
+        toolServer?.close();
+      } catch {
+        // The tool server only owns a private socket inside toolServerDir.
+      }
+      toolServer = null;
+      if (toolServerDir) rmSync(toolServerDir, { recursive: true, force: true });
+      toolServerDir = null;
+    };
+
+    // MCP calls reach the same Hub handler as dynamic tool requests; images
+    // they return get the same bounded echo allowance.
+    const callQqToolOverMcp = async (call) => {
+      if (typeof onDynamicToolCall !== "function") {
+        throw errors.protocol(`No handler registered for dynamic tool ${call?.tool || "unknown"}`);
+      }
+      const result = normalizeDynamicToolResult(await onDynamicToolCall({
+        ...call,
+        threadId: call.threadId || threadId,
+        turnId: call.turnId || turnId
+      }));
+      imageBudget.register(result);
+      return result;
+    };
+
+    const buildTurnConfig = () => {
+      if (!toolServer) return config;
+      return {
+        ...(config && typeof config === "object" ? config : {}),
+        // Replacing the whole table also keeps personal MCP servers out of QQ turns.
+        mcp_servers: { [QQ_MCP_SERVER_NAME]: buildCodexQqMcpServerConfig(toolServer.launch) }
+      };
+    };
 
     const respondError = (id, error) => send({
       id,
@@ -444,6 +504,17 @@ export function runCodexAppServerTurn({
           }
         });
         send({ method: "initialized", params: {} });
+        if (mcpTools.length) {
+          toolServerDir = mkdtempSync(join(tmpdir(), "cqb-codex-"));
+          toolServer = await startToolServer({
+            workDir: toolServerDir,
+            tools: mcpTools,
+            onCall: callQqToolOverMcp,
+            getTurn: () => ({ threadId, turnId }),
+            callIdPrefix: "codex-mcp"
+          });
+          if (settled) return;
+        }
         let thread;
         const existingThreadId = String(requestedThreadId || "").trim();
         if (existingThreadId) {
@@ -455,7 +526,7 @@ export function runCodexAppServerTurn({
               reasoningEffort,
               developerInstructions,
               baseInstructions,
-              config,
+              config: buildTurnConfig(),
               webSearchMode,
               sandbox,
               permissions,
@@ -477,8 +548,8 @@ export function runCodexAppServerTurn({
             reasoningEffort,
             developerInstructions,
             baseInstructions,
-            dynamicTools,
-            config,
+            dynamicTools: threadDynamicTools,
+            config: buildTurnConfig(),
             webSearchMode,
             sandbox,
             permissions,

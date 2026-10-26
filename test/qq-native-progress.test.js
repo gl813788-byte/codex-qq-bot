@@ -36,6 +36,16 @@ test("native commentary becomes bounded visible progress while schema envelopes 
     type: "commentary",
     text: '{"status":"reply","text":"[[qq_progress:旧协议]]","bubbles":[],"reply":{"mode":"plain","targetUserId":""},"attachments":[]}'
   }), "");
+  // Current envelopes carry a private inner thought that must never surface.
+  assert.equal(normalizeQqNativeProgress({
+    type: "commentary",
+    text: '{"innerThought":"烦死了不想理他","status":"reply","text":"在查了","bubbles":[],"reply":{"mode":"automatic","targetUserId":""},"attachments":[],"sticker":"","mood":"烦"}'
+  }), "在查了");
+  assert.equal(normalizeQqNativeProgress({
+    type: "commentary",
+    text: '{"innerThought":"嘿嘿","status":"reply","text":"来张图","bubbles":[],"reply":{"mode":"automatic","targetUserId":""},"attachments":[],"sticker":"#3f2a9c","mood":""}'
+  }), "");
+  assert.equal(normalizeQqNativeProgress({ type: "commentary", text: '{"innerThought":"半截' }), "");
   assert.equal(normalizeQqNativeProgress({ type: "commentary", text: "[[qq_progress:旧协议]]" }), "");
   assert.equal(normalizeQqNativeProgress({ type: "commentary", text: '{"tool":"raw output"}' }), "");
 });

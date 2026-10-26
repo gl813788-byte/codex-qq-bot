@@ -110,3 +110,21 @@ test("selects the agent engine and Claude Code defaults from the environment", (
   assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_AGENT_ENGINE: "gemini" }).agentEngine, "codex");
   assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_CLAUDE_EFFORT: "turbo" }).claudeReasoningEffort, null);
 });
+
+test("QQ agent turns default to deferred MCP tools and keep every native Codex feature", () => {
+  const defaults = createEnvironmentConfig({});
+  assert.equal(defaults.agentToolTransport, "mcp");
+  // The bot is also an Agent: trimming native features or the engine prompt is opt-in.
+  assert.equal(defaults.agentLeanContext, false);
+  assert.equal(defaults.qqBaseInstructionsMode, "engine");
+
+  const chatOnly = createEnvironmentConfig({
+    CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT: " Dynamic ",
+    CODEX_REMOTE_CONTACT_AGENT_LEAN_CONTEXT: "1",
+    CODEX_REMOTE_CONTACT_QQ_BASE_INSTRUCTIONS: "QQ"
+  });
+  assert.equal(chatOnly.agentToolTransport, "dynamic");
+  assert.equal(chatOnly.agentLeanContext, true);
+  assert.equal(chatOnly.qqBaseInstructionsMode, "qq");
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT: "grpc" }).agentToolTransport, "mcp");
+});

@@ -45,6 +45,11 @@ const messageTranslationsZh = Object.freeze({
   "QQ web image tool completed": "QQ 联网搜图工具调用完成",
   "QQ avatar download blocked by the safe fetch policy": "QQ 头像下载被安全下载策略拦截；使用 Fake-IP 代理时可设置 CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE=proxy-compatible",
   "QQ avatar features recorded": "QQ 头像特征已记录",
+  "Unable to load QQ bot life state": "加载 Bot 心情与作息状态失败（已保留原文件）",
+  "Unable to save QQ bot life state": "保存 Bot 心情与作息状态失败",
+  "QQ bot inner state recorded": "Bot 内心状态已记录",
+  "QQ bot daily routine generated": "Bot 今日作息已生成",
+  "QQ bot daily routine generation failed": "Bot 今日作息生成失败，一小时后再试",
   "QQ avatar features described": "QQ 头像特征批量描述完成",
   "QQ avatar feature description failed": "QQ 头像特征描述失败",
   "QQ memory images pruned": "QQ 记忆图片已清理",
@@ -404,6 +409,11 @@ const detailLabelsZh = Object.freeze({
   avatarSkippedCount: "未到复查时间跳过数",
   judgeVisionMode: "兴趣模型看图模式",
   webImageCandidateCount: "本轮搜图候选数",
+  thoughtChars: "内心OS字数",
+  moodChanged: "心情是否更新",
+  segmentCount: "作息时段数",
+  routineDate: "作息日期",
+  silentTurn: "本轮是否沉默",
   judgeVisionImageCount: "兴趣模型附图数",
   judgeVisionFallback: "因模型不支持图片改为纯文字",
   previousCount: "原有数量",
@@ -830,7 +840,8 @@ const detailValuesZh = Object.freeze({
     "memory.knowledge_load": "知识库加载", "memory.knowledge_update": "知识库更新",
     "memory.knowledge_query": "知识库查询", "memory.slang_usage": "黑话出现频率记录",
     "memory.avatar_refresh": "头像刷新", "memory.avatar_features": "头像特征记录",
-    "memory.knowledge_image": "知识库配图", "memory.image_prune": "记忆图片清理", "search.images": "联网搜图"
+    "memory.knowledge_image": "知识库配图", "memory.image_prune": "记忆图片清理", "search.images": "联网搜图",
+    "memory.bot_state": "Bot 内心状态", "memory.bot_routine": "Bot 作息规划"
   },
   outcome: {
     loaded: "已加载", created: "已新建", updated: "已更新", rejected: "已拒绝", unchanged: "无变化", recorded: "已记录",

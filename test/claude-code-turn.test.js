@@ -35,8 +35,9 @@ test("public turns get restricted file tools without a shell or WebFetch", () =>
     ephemeral: true
   });
   assert.ok(args.includes("--restricted"));
-  assert.equal(valueAfter(args, "--tools"), "Read,Glob,Grep,Write,Edit,WebSearch");
-  assert.equal(valueAfter(args, "--allowedTools"), "Read,Glob,Grep,Write,Edit,WebSearch,mcp__qq__qq_context__history");
+  // QQ MCP schemas are deferred, so ToolSearch comes with the first MCP tool.
+  assert.equal(valueAfter(args, "--tools"), "Read,Glob,Grep,Write,Edit,WebSearch,ToolSearch");
+  assert.equal(valueAfter(args, "--allowedTools"), "Read,Glob,Grep,Write,Edit,WebSearch,ToolSearch,mcp__qq__qq_context__history");
   assert.equal(valueAfter(args, "--permission-mode"), "dontAsk");
   assert.equal(valueAfter(args, "--permission-prompts"), "none");
   assert.equal(valueAfter(args, "--setting-sources"), "");
@@ -153,6 +154,38 @@ test("runs one turn, returns structured output and forwards only pre-tool text a
   }
 });
 
+test("QQ tools are deferred behind ToolSearch only when the turn has tools", async () => {
+  const claude = createFakeClaude();
+  const bridges = [];
+  const run = (dynamicTools) => runClaudeCodeTurn({
+    prompt: "你好",
+    env: { PATH: "/usr/bin" },
+    dynamicTools,
+    spawnProcess: claude.spawn,
+    startToolBridge: async ({ tools }) => {
+      bridges.push(tools.map((tool) => tool.name));
+      return { mcpConfigPath: "/tmp/fake-mcp.json", close() {} };
+    },
+    onReady: () => {
+      claude.replay(claude.lastUserInput());
+      claude.result({ text: "ok" });
+    }
+  });
+  await run([{
+    type: "namespace",
+    name: "qq_sticker",
+    description: "Stickers.",
+    tools: [{ type: "function", name: "manage", description: "Search.", inputSchema: schema }]
+  }]);
+  assert.deepEqual(bridges, [["qq_sticker__manage"]]);
+  assert.equal(claude.env().ENABLE_TOOL_SEARCH, "true");
+  assert.match(valueAfter(claude.args(), "--allowedTools"), /ToolSearch,mcp__qq__qq_sticker__manage$/);
+
+  await run([]);
+  assert.equal(claude.env().ENABLE_TOOL_SEARCH, undefined);
+  assert.equal(valueAfter(claude.args(), "--tools").includes("ToolSearch"), false);
+});
+
 test("a result that arrives before steered input is consumed does not end the turn", async () => {
   const claude = createFakeClaude();
   let controls;
@@ -258,7 +291,7 @@ test("the per-turn MCP bridge routes QQ tool calls through the Hub handler", asy
     assert.equal(init.result.capabilities.tools !== undefined, true);
     const list = await rpc.request({ id: 2, method: "tools/list", params: {} });
     assert.deepEqual(list.result.tools.map((tool) => tool.name), ["qq_context__history"]);
-    const call = await rpc.request({ id: 3, method: "tools/call", params: { name: "qq_context__history", arguments: { query: "最近 3" } } });
+    const call = await rpc.request({ id: 3, method: "tools/call", params: { name: "qq_context__history", arguments: { query: "最近 3" }, _meta: { callId: "exec-42" } } });
     assert.equal(call.result.isError, false);
     assert.match(call.result.content[0].text, /最近 3 条消息/);
     const unknown = await rpc.request({ id: 4, method: "tools/call", params: { name: "nope", arguments: {} } });
@@ -268,6 +301,8 @@ test("the per-turn MCP bridge routes QQ tool calls through the Hub handler", asy
     assert.equal(calls[0].tool, "history");
     assert.deepEqual(calls[0].arguments, { query: "最近 3" });
     assert.equal(calls[0].turnId, "claude-turn-1");
+    // The engine's own call id reaches the Hub so a retried call is deduplicated.
+    assert.equal(calls[0].callId, "claude-call-exec-42");
   } finally {
     child.kill();
     bridge.close();
@@ -325,10 +360,12 @@ function createFakeClaude({ onSpawn = null } = {}) {
   const inputs = [];
   let child;
   let lastArgs = [];
+  let lastOptions = {};
   const fake = {
     onInterrupt: null,
-    spawn(_command, args) {
+    spawn(_command, args, options = {}) {
       lastArgs = args;
+      lastOptions = options;
       child = new EventEmitter();
       child.stdout = new PassThrough();
       child.stderr = new PassThrough();
@@ -349,6 +386,7 @@ function createFakeClaude({ onSpawn = null } = {}) {
       return child;
     },
     args: () => lastArgs,
+    env: () => lastOptions.env,
     userInputs: () => inputs,
     lastUserInput: () => inputs.at(-1),
     emit(message) {

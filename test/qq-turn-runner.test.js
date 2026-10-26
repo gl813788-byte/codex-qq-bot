@@ -5,6 +5,7 @@ import { runClaudeCodeTurn } from "../src/infrastructure/claude/claude-code-turn
 import { runCodexAppServerTurn } from "../src/codex-app-server-turn.js";
 import { createQqCodexTurnRunner, selectQqAgentEngine } from "../src/infrastructure/codex/qq-turn-runner.js";
 import { runAgentToolCall } from "../src/infrastructure/agent/agent-tool-context.js";
+import { CODEX_LEAN_QQ_FEATURE_OVERRIDES } from "../src/infrastructure/codex/codex-lean-config.js";
 
 const claudeThreadId = "claude:11111111-2222-4333-8444-555555555555";
 
@@ -28,6 +29,23 @@ test("engine table routes Claude Code settings and keeps Claude sessions resumab
   assert.equal(claude.selectModel({ ai, claudeModel: "opus" }), "opus");
   assert.equal(claude.selectReasoningEffort({ ai, claudeReasoningEffort: null }), "low");
   assert.equal(claude.selectReasoningEffort({ ai, claudeReasoningEffort: "high" }), "high");
+});
+
+test("Codex QQ turns get lean config; explicit settings and owner project docs win", () => {
+  const codex = selectQqAgentEngine("codex");
+  const lean = codex.buildConfig(null, { leanContext: true, keepProjectDocs: false });
+  assert.equal(lean["features.browser_use"], false);
+  assert.equal(lean["features.multi_agent"], false);
+  assert.equal(lean["skills.include_instructions"], false);
+  assert.equal(lean.project_doc_max_bytes, 0);
+  // Image generation stays available to QQ replies.
+  assert.equal(Object.hasOwn(lean, "features.image_generation"), false);
+  const owner = codex.buildConfig({ "features.goals": true }, { leanContext: true, keepProjectDocs: true });
+  assert.equal(Object.hasOwn(owner, "project_doc_max_bytes"), false);
+  assert.equal(owner["features.goals"], true);
+  assert.equal(codex.buildConfig(null, { leanContext: false }), null);
+  assert.equal(selectQqAgentEngine("claude").buildConfig(null, { leanContext: true }), null);
+  assert.ok(Object.keys(CODEX_LEAN_QQ_FEATURE_OVERRIDES).length >= 10);
 });
 
 test("every engine's turn log message has a Chinese presentation", () => {

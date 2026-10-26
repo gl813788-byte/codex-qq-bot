@@ -241,7 +241,9 @@ Interactive terminal output uses stable, independent colors for level, category,
 
 ### Codex persistent-session compatibility
 
-Codex 0.158 restores a thread's original dynamic tools on resume. The Hub stores a tool-definition fingerprint and starts a fresh thread with the complete current context when the tool catalog, permission-dependent tool set, or parameter schema changes. Legacy mappings without a fingerprint are safely replaced on the next reply; QQ memory, persona, permissions, and original Codex history remain intact. Unchanged tool catalogs continue to reuse the existing thread.
+With the default MCP transport, Codex lists the QQ tools again whenever `thread/resume` starts the per-turn MCP server, so catalog, permission-dependent tool set and schema changes no longer force a new thread; every MCP catalog shares one transport fingerprint. With `CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT=dynamic`, Codex 0.158+ restores a thread's original dynamic tools on resume, so the Hub stores the exact tool-definition fingerprint and starts a fresh thread with the complete current context when it changes. Switching transport, and legacy mappings without a fingerprint, are replaced once on the next reply; QQ memory, persona, permissions, and original Codex history remain intact. After an App Server upgrade, verify both an unchanged-transport resume and the one-time replacement.
+
+Each Codex QQ turn starts one extra short-lived Node process, the MCP bridge, next to `codex app-server`; it holds only the per-turn socket path and tool list and exits with the turn.
 
 ## Safe Hub restart
 

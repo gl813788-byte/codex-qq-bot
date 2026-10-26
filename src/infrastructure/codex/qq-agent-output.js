@@ -1,11 +1,19 @@
 const obsoleteControlPattern = /\[\[(?:qq_command|qq_menu|qq_done|qq_progress|qq_task_budget|qq_task_continue)(?::[^\]\n]*)?\]\]/gi;
 const legacyReplyTargetPattern = /\[\[qq_reply:[^\]\n]+\]\]/gi;
 
+// Property order is generation order: innerThought comes first so the model
+// forms its first-person reaction before writing anything visible (the
+// structured-output form of DeepSeek's in-character "内心OS" thinking), and
+// mood comes last as the state this exchange leaves behind.
 export const qqAgentOutputSchema = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["status", "text", "bubbles", "reply", "attachments"],
+  required: ["innerThought", "status", "text", "bubbles", "reply", "attachments", "sticker", "mood"],
   properties: {
+    innerThought: {
+      type: "string",
+      description: "Never sent. Your private first-person inner monologue (内心OS) about this moment, within 80 Chinese characters: how you really read the message and the person, how you feel, whether and how you want to respond. No analysis report, rules or tool talk."
+    },
     status: {
       type: "string",
       enum: ["reply", "silent"],
@@ -46,6 +54,14 @@ export const qqAgentOutputSchema = Object.freeze({
           name: { type: "string", description: "Optional display filename; empty for images/default names." }
         }
       }
+    },
+    sticker: {
+      type: "string",
+      description: "Optional sticker to send after the text as its own bubble: a #ref from qq_sticker search results (or an exact sticker name). Empty for none. At most one per turn; with empty text and bubbles it is sent alone."
+    },
+    mood: {
+      type: "string",
+      description: "Your mood after this exchange in 2-8 Chinese characters (e.g. 有点困, 被逗乐了, 烦躁, 好奇), or empty to keep the previous mood. Never put private details here."
     }
   }
 });
@@ -79,6 +95,7 @@ export function parseQqAgentOutput(value, { bubbleSeparator = "|||" } = {}) {
   if ((mode === "quote" || mode === "mention") && targetUserId) {
     directives.push(`[[qq_reply:${mode}:${targetUserId}]]`);
   }
+  const sticker = normalizeStickerSelector(parsed.sticker);
   for (const attachment of Array.isArray(parsed.attachments) ? parsed.attachments.slice(0, 8) : []) {
     const path = normalizeAbsoluteMarkerPath(attachment?.path);
     if (!path) continue;
@@ -91,10 +108,25 @@ export function parseQqAgentOutput(value, { bubbleSeparator = "|||" } = {}) {
       directives.push(`[[qq_file:${path}${name ? `|${name}` : ""}]]`);
     }
   }
+  // The sticker becomes its own final bubble, the way people send one after typing.
+  const separator = String(bubbleSeparator || "|||").trim() || "|||";
+  const visible = sticker
+    ? [text, `[[qq_sticker:${sticker}]]`].filter(Boolean).join(`\n${separator}\n`)
+    : text;
   return {
     structured: true,
-    output: [text, ...directives].filter(Boolean).join("\n").trim(),
+    output: [visible, ...directives].filter(Boolean).join("\n").trim(),
     value: parsed
+  };
+}
+
+// The Bot's private reflection on a structured turn; never delivered.
+export function extractQqAgentInnerState(value) {
+  if (!value || typeof value !== "object") return { innerThought: "", mood: "", silent: false };
+  return {
+    innerThought: String(value.innerThought || "").replace(/\s+/g, " ").trim().slice(0, 240),
+    mood: String(value.mood || "").replace(/\s+/g, " ").trim().slice(0, 24),
+    silent: value.status === "silent"
   };
 }
 
@@ -135,6 +167,10 @@ function normalizeAbsoluteMarkerPath(value) {
   const path = String(value || "").trim();
   if (!path.startsWith("/") || /[\r\n\]]/.test(path)) return "";
   return path;
+}
+
+function normalizeStickerSelector(value) {
+  return String(value || "").replace(/[\[\]\r\n|]+/g, " ").trim().slice(0, 60);
 }
 
 function normalizeAttachmentName(value) {

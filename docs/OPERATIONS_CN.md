@@ -245,7 +245,9 @@ curl -fsS 'http://127.0.0.1:3789/api/logs?scope=private:QQ号&operation=session'
 
 ### Codex 长期会话兼容性
 
-Codex 0.158 在恢复线程时沿用该线程原先的动态工具。Hub 会保存工具定义指纹；工具列表、权限对应的工具集合或参数 Schema 变化时，用完整当前上下文新建线程。升级前没有指纹的旧映射会在下一次回复时安全替换；QQ 记忆、人格、权限和原 Codex 历史均保留。工具未变化的会话继续复用原线程。
+默认的 MCP 传输下，`thread/resume` 拉起本轮 MCP 服务时 Codex 会重新列出 QQ 工具，所以工具列表、权限对应的工具集合或 Schema 变化不再强制新建线程；所有 MCP 工具目录共用一个传输指纹。使用 `CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT=dynamic` 时，Codex 0.158 起恢复线程会沿用原先的动态工具，因此 Hub 保存完整的工具定义指纹，变化时用完整当前上下文新建线程。切换传输方式以及没有指纹的旧映射，会在下一次回复时替换一次；QQ 记忆、人格、权限和原 Codex 历史均保留。App Server 升级后，要同时验证传输不变时的续接和这一次性替换。
+
+每个 Codex QQ 轮次会在 `codex app-server` 旁边多起一个短命的 Node 进程（MCP 桥），它只持有本轮 socket 路径和工具列表，随轮次结束退出。
 
 ## 安全重启 Hub
 

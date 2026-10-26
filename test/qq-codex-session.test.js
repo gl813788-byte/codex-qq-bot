@@ -112,3 +112,19 @@ test("explicit temporary mode wins and new-dialog removal cuts the thread mappin
   store = removeQqCodexSessionThread(store, "100");
   assert.equal(store.threads["100"], undefined);
 });
+
+test("MCP-served tool catalogs keep a persistent thread reusable across catalog changes", async () => {
+  const { fingerprintQqCodexDynamicTools, resolveQqCodexReusableThreadId, QQ_CODEX_SESSION_PROTOCOL_VERSION } = await import("../src/qq-codex-session.js");
+  const toolsA = [{ type: "function", name: "a", description: "a", inputSchema: { type: "object" } }];
+  const toolsB = [{ ...toolsA[0], name: "b" }];
+  const plan = (fingerprint) => ({
+    persistent: true,
+    existingThread: { threadId: "thread-1", protocolVersion: QQ_CODEX_SESSION_PROTOCOL_VERSION, dynamicToolsFingerprint: fingerprint }
+  });
+  const mcp = fingerprintQqCodexDynamicTools(toolsA, { transport: "mcp" });
+  assert.equal(mcp, fingerprintQqCodexDynamicTools(toolsB, { transport: "mcp" }));
+  assert.equal(resolveQqCodexReusableThreadId(plan(mcp), toolsB, { transport: "mcp" }), "thread-1");
+  // A thread created with dynamic tools still carries them, so it is replaced once.
+  assert.equal(resolveQqCodexReusableThreadId(plan(fingerprintQqCodexDynamicTools(toolsA)), toolsA, { transport: "mcp" }), null);
+  assert.equal(resolveQqCodexReusableThreadId(plan(fingerprintQqCodexDynamicTools(toolsA)), toolsB), null);
+});

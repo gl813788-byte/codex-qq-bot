@@ -1,6 +1,9 @@
 const DEFAULT_MAX_MESSAGES = 4;
 const DEFAULT_MAX_CHARS = 160;
 const QQ_AGENT_OUTPUT_KEYS = Object.freeze(["status", "text", "bubbles", "reply", "attachments"]);
+// Private reflection and sticker fields of the current schema; never progress.
+const QQ_AGENT_OUTPUT_OPTIONAL_KEYS = Object.freeze(["innerThought", "sticker", "mood"]);
+const envelopeKeyPattern = /^\{\s*"(?:innerThought|status|text|bubbles|reply|attachments|sticker|mood)"\s*:/i;
 const QQ_REPLY_KEYS = Object.freeze(["mode", "targetUserId"]);
 const QQ_REPLY_MODES = new Set(["automatic", "plain", "quote", "mention"]);
 
@@ -71,16 +74,16 @@ function unwrapStructuredCommentary(value) {
   try {
     parsed = JSON.parse(candidate);
   } catch {
-    return /^\{\s*"(?:status|text|bubbles|reply|attachments)"\s*:/i.test(candidate) ? "" : null;
+    return envelopeKeyPattern.test(candidate) ? "" : null;
   }
   if (!isExactQqAgentOutputEnvelope(parsed)) return "";
-  if (parsed.status !== "reply" || parsed.attachments.length > 0) return "";
+  if (parsed.status !== "reply" || parsed.attachments.length > 0 || String(parsed.sticker || "").trim()) return "";
   const bubbles = parsed.bubbles.map((bubble) => bubble.trim()).filter(Boolean);
   return bubbles.length > 0 ? bubbles.join(" ") : parsed.text.trim();
 }
 
 function isExactQqAgentOutputEnvelope(value) {
-  if (!hasExactKeys(value, QQ_AGENT_OUTPUT_KEYS)) return false;
+  if (!hasEnvelopeKeys(value)) return false;
   if (value.status !== "reply" && value.status !== "silent") return false;
   if (typeof value.text !== "string") return false;
   if (!Array.isArray(value.bubbles) || value.bubbles.length > 24 || !value.bubbles.every((item) => typeof item === "string")) {
@@ -89,6 +92,13 @@ function isExactQqAgentOutputEnvelope(value) {
   if (!hasExactKeys(value.reply, QQ_REPLY_KEYS) || !QQ_REPLY_MODES.has(value.reply.mode)) return false;
   if (typeof value.reply.targetUserId !== "string") return false;
   return Array.isArray(value.attachments);
+}
+
+function hasEnvelopeKeys(value) {
+  if (!isPlainObject(value)) return false;
+  const keys = Object.keys(value);
+  return QQ_AGENT_OUTPUT_KEYS.every((key) => keys.includes(key))
+    && keys.every((key) => QQ_AGENT_OUTPUT_KEYS.includes(key) || QQ_AGENT_OUTPUT_OPTIONAL_KEYS.includes(key));
 }
 
 function hasExactKeys(value, expectedKeys) {
@@ -115,7 +125,7 @@ function looksLikeStructuredFinalOutput(value) {
     const parsed = JSON.parse(candidate);
     return Boolean(parsed && typeof parsed === "object");
   } catch {
-    return /^\{\s*"(?:status|text|bubbles|reply|attachments)"\s*:/i.test(candidate);
+    return envelopeKeyPattern.test(candidate);
   }
 }
 

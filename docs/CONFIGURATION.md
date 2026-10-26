@@ -201,6 +201,16 @@ The Hub classifies each Codex task and scales its base deadline by the current r
 
 With Claude Code, `ai.model`, the reasoning summary, the Codex personality and the service tier have no effect, and quota information only applies to Codex. The task deadlines above still apply, but every turn starts a new `claude -p` process and its cold start counts against the deadline. Claude children inherit only the variables they need to run plus `CODEX_REMOTE_CONTACT_*` markers (except names containing KEY, TOKEN, SECRET, PASSWORD or COOKIE); other Hub secrets are not passed on.
 
+### Agent tools and context
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT` | `mcp` | How Codex receives the Hub's QQ tools: `mcp` serves them from a per-turn MCP server (re-listed on every resume), `dynamic` keeps App Server dynamic tools. Claude Code always uses MCP. Both defer tool schemas until the model searches for a tool |
+| `CODEX_REMOTE_CONTACT_AGENT_LEAN_CONTEXT` | `0` | Opt-in for chat-only deployments: `1` removes connectors, plugins, browser/computer use, sub-agents, goals, the skill catalog and the checkout's AGENTS.md from Codex QQ turns (owner/administrator file tasks keep AGENTS.md) |
+| `CODEX_REMOTE_CONTACT_QQ_BASE_INSTRUCTIONS` | `engine` | `engine` keeps the engine's own system prompt; `qq` swaps in the compact QQ base prompt for QQ replies |
+
+The QQ bot is also a working Agent, so by default every native Codex feature and the engine's own system prompt stay in QQ turns; context is reduced only by deferring the 3–5k-token QQ tool catalog and by keeping the sticker library out of the prompt. Measured on Codex 0.163, a complete QQ reply request costs about 21.5k input tokens with these defaults and about 10.3k with both opt-in switches, which drop native capabilities.
+
 ### OneBot
 
 | Variable | Default | Purpose |
@@ -237,6 +247,9 @@ Use the same token on both sides. Without one, the webhook trusts only requests 
 | `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | Safe-download mode; `proxy-compatible` additionally permits DNS names mapped into proxy Fake-IP range `198.18.0.0/15`, while literal private IPs and other reserved ranges stay blocked. QQ avatar downloads for person memory follow the same mode |
 | `CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR` | `|||` | Multi-bubble separator |
 | `..._BUBBLE_SEND_DELAY_MS` | `650` | Base inter-bubble delay |
+| `CODEX_REMOTE_CONTACT_QQ_TYPING_PACE` | `1` | Follow-up bubbles wait in proportion to their length, like typing (capped at 4.2 s); `0` keeps the fixed learned gap |
+| `CODEX_REMOTE_CONTACT_QQ_TYPING_INDICATOR` | `1` | Private chats show QQ's "typing…" status through NapCat `set_input_status` while a reply is generated; `0` disables it |
+| `CODEX_REMOTE_CONTACT_QQ_DAILY_ROUTINE` | `1` | Plan the Bot's daily routine with one small tool-free model task per routine day (after 05:00, only while the model queue is idle); `0` disables it |
 | `..._BUBBLE_MAX_CHARS` | `900` | Safe character limit per QQ message, bounded 200–4000 |
 | `..._BUBBLE_MAX_COUNT` | `24` | Maximum bubbles per reply, bounded 1–64 |
 

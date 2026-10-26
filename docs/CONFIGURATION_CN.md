@@ -203,6 +203,16 @@ Hub 会先识别 Codex 任务类型，再把上表的任务基础时限按当前
 
 用 Claude Code 时，`ai.model`、推理摘要、Codex 人格和服务档位不生效，额度信息也只对 Codex 有效。任务时限表同样适用，但每轮都会新起一个 `claude -p` 进程，冷启动时间计入时限。Claude 子进程只继承运行必需的变量和 `CODEX_REMOTE_CONTACT_*` 标记（名称里带 KEY、TOKEN、SECRET、PASSWORD、COOKIE 的除外），Hub 的其他密钥不会传进去。
 
+### Agent 工具与上下文
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT` | `mcp` | Codex 获取 Hub QQ 工具的方式：`mcp` 由本轮 MCP 服务提供（每次续接都会重新列出），`dynamic` 继续使用 App Server 动态工具。Claude Code 始终使用 MCP。两种方式都在模型搜索工具之前不加载工具定义 |
+| `CODEX_REMOTE_CONTACT_AGENT_LEAN_CONTEXT` | `0` | 只聊天的部署可选开启：设为 `1` 时从 Codex QQ 轮次中去掉连接器、插件、浏览器/电脑操控、子 Agent、目标、技能目录和仓库 AGENTS.md（主人/管理员文件任务保留 AGENTS.md） |
+| `CODEX_REMOTE_CONTACT_QQ_BASE_INSTRUCTIONS` | `engine` | `engine` 保留引擎自带系统提示词；`qq` 在 QQ 回复中换成精简的 QQ 基础提示 |
+
+QQ Bot 同时也是能真正干活的 Agent，所以默认保留 Codex 的全部原生功能和引擎自带系统提示词；上下文只通过延迟加载 3–5 千 token 的 QQ 工具目录、不把表情包库放进提示词来缩减。在 Codex 0.163 上实测，一次完整的 QQ 回复请求在默认配置下约 2.15 万输入 token，两个可选开关都打开时约 1.03 万，但会去掉原生能力。
+
 ### OneBot
 
 | 变量 | 默认值 | 说明 |
@@ -239,6 +249,9 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 | `CODEX_REMOTE_CONTACT_SAFE_FETCH_MODE` | `strict` | 安全下载模式；`proxy-compatible` 仅额外允许域名解析到 `198.18.0.0/15` 代理 Fake-IP，仍拦截字面私网 IP 和其他保留地址。人物头像下载同样遵守该模式 |
 | `CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR` | `|||` | 多气泡分隔符 |
 | `..._BUBBLE_SEND_DELAY_MS` | `650` | 气泡间基础延迟 |
+| `CODEX_REMOTE_CONTACT_QQ_TYPING_PACE` | `1` | 后续气泡按自身长度等待，像真人打字（最长 4.2 秒）；`0` 保持固定的学习间隔 |
+| `CODEX_REMOTE_CONTACT_QQ_TYPING_INDICATOR` | `1` | 私聊生成回复期间通过 NapCat `set_input_status` 显示 QQ 的“正在输入…”；`0` 关闭 |
+| `CODEX_REMOTE_CONTACT_QQ_DAILY_ROUTINE` | `1` | 每个作息日用一次无工具的小模型任务规划 Bot 的作息（05:00 后、且只在模型队列空闲时）；`0` 关闭 |
 | `..._BUBBLE_MAX_CHARS` | `900` | 单条 QQ 消息的安全字符上限，范围 200–4000 |
 | `..._BUBBLE_MAX_COUNT` | `24` | 一次回复最大气泡数，范围 1–64 |
 
