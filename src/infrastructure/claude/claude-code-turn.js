@@ -1,25 +1,32 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   attachErrorFields,
   createAgentTurnErrors,
   createNdjsonReader,
   createTurnDeadlines,
-  normalizeDynamicToolResult,
   normalizeImagePaths,
   normalizePositiveInteger,
   notifyObserver,
   superviseAgentChild
 } from "../agent/agent-turn-process.js";
+import {
+  QQ_MCP_SERVER_NAME,
+  buildClaudeQqMcpConfig,
+  flattenQqDynamicTools,
+  startQqMcpToolServer,
+  toMcpToolResult
+} from "../agent/qq-mcp-tools.js";
+
+export { flattenQqDynamicTools, toMcpToolResult };
 
 // Claude Code adapter with the same contract as runCodexAppServerTurn: one
-// `claude -p` stream-json process per QQ turn, dynamic QQ tools served over a
-// per-turn MCP bridge, structured output through --json-schema, and
+// `claude -p` stream-json process per QQ turn, QQ tools served over the shared
+// per-turn MCP bridge (deferred behind ToolSearch), structured output through
+// --json-schema, and
 // steer/restart/interrupt controls for fused follow-ups. Deadlines, framing,
 // child supervision and the CODEX_* error codes come from the shared agent
 // turn module so recovery and steering policies stay engine-neutral.
@@ -29,9 +36,9 @@ const DEFAULT_MAX_PROTOCOL_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_IMAGE_BYTES = 3_750_000;
 const CONTROL_REQUEST_TIMEOUT_MS = 15_000;
 const STRUCTURED_OUTPUT_TOOL = "StructuredOutput";
-const MCP_SERVER_NAME = "qq";
+const MCP_SERVER_NAME = QQ_MCP_SERVER_NAME;
+const TOOL_SEARCH_TOOL = "ToolSearch";
 const THREAD_ID_PREFIX = "claude:";
-const bridgeScriptPath = fileURLToPath(new URL("./qq-mcp-bridge.mjs", import.meta.url));
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const claudeEfforts = new Set(["low", "medium", "high", "xhigh", "max"]);
 const errors = createAgentTurnErrors("Claude Code");
@@ -40,7 +47,7 @@ const errors = createAgentTurnErrors("Claude Code");
 // same way Codex commentary does, so the adapter tells the model about it.
 const CLAUDE_ADAPTER_INSTRUCTIONS = [
   "运行环境说明：你通过 Claude Code 为 QQ Bot 执行本轮任务。",
-  "Hub 提供的 QQ 动态工具以 mcp__qq__<命名空间>__<工具名> 的形式出现，按工具说明直接调用。",
+  "Hub 提供的 QQ 工具以 mcp__qq__<命名空间>__<工具名> 的 MCP 工具出现，默认只列名字；需要时先用 ToolSearch 按关键词或 select:<完整名> 加载定义，再按工具说明调用。",
   "在工具调用之前写出的可见文字会作为任务进度发给 QQ 用户；不要写过渡性旁白，只在长任务取得阶段性结果时写一句自然中文进度。",
   "最终答案必须通过结构化输出提交，不要在结构化输出之外重复最终回复。"
 ].join("\n");
@@ -68,33 +75,6 @@ export function normalizeClaudeEffort(value) {
   if (effort === "ultra") return "max";
   if (effort === "none" || effort === "minimal") return "low";
   return null;
-}
-
-export function flattenQqDynamicTools(dynamicTools = []) {
-  const tools = [];
-  for (const entry of Array.isArray(dynamicTools) ? dynamicTools : []) {
-    if (entry?.type === "namespace" && Array.isArray(entry.tools)) {
-      for (const tool of entry.tools) {
-        if (!tool?.name) continue;
-        tools.push({
-          name: `${entry.name}__${tool.name}`,
-          namespace: String(entry.name),
-          tool: String(tool.name),
-          description: [entry.description, tool.description].filter(Boolean).join(" "),
-          inputSchema: tool.inputSchema || { type: "object", properties: {} }
-        });
-      }
-    } else if (entry?.name) {
-      tools.push({
-        name: String(entry.name),
-        namespace: entry.namespace ? String(entry.namespace) : "",
-        tool: String(entry.name),
-        description: String(entry.description || ""),
-        inputSchema: entry.inputSchema || { type: "object", properties: {} }
-      });
-    }
-  }
-  return tools;
 }
 
 // Maps the Codex sandbox vocabulary onto Claude Code flags. Every turn runs in
@@ -125,6 +105,8 @@ export function buildClaudeCodeArgs({
   if (writable && shellAccess) builtinTools.push("Bash");
   if (webSearchMode && webSearchMode !== "disabled") builtinTools.push("WebSearch");
   const mcpTools = mcpToolNames.map((name) => `mcp__${MCP_SERVER_NAME}__${name}`);
+  // MCP schemas stay deferred; ToolSearch loads only the ones a turn needs.
+  if (mcpTools.length) builtinTools.push(TOOL_SEARCH_TOOL);
   const extraRoots = [...new Set([
     ...(Array.isArray(sandboxPolicy?.writableRoots) ? sandboxPolicy.writableRoots : []),
     ...(Array.isArray(runtimeWorkspaceRoots) ? runtimeWorkspaceRoots : [])
@@ -517,7 +499,8 @@ function runClaudeCodeTurnOnce({
         resume: resumed,
         ephemeral
       });
-      child = spawnProcess(claudePath, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+      const childEnv = tools.length ? { ...env, ENABLE_TOOL_SEARCH: "true" } : env;
+      child = spawnProcess(claudePath, args, { cwd, env: childEnv, stdio: ["pipe", "pipe", "pipe"] });
       supervisor = superviseAgentChild(child, {
         maxStderrBytes,
         killGraceMs,
@@ -554,102 +537,12 @@ function runClaudeCodeTurnOnce({
   });
 }
 
-// Serves one turn's dynamic tools to the MCP bridge over a private Unix
-// socket and routes each call through the Hub's onDynamicToolCall handler.
+// Starts the shared QQ MCP tool server and writes Claude's --mcp-config file.
 export async function startClaudeToolBridge({ workDir, tools, onCall, getTurn = () => ({}) }) {
-  const socketPath = join(workDir, "qq.sock");
-  const toolsPath = join(workDir, "qq-tools.json");
+  const server = await startQqMcpToolServer({ workDir, tools, onCall, getTurn, callIdPrefix: "claude-call" });
   const mcpConfigPath = join(workDir, "mcp.json");
-  const byName = new Map(tools.map((tool) => [tool.name, tool]));
-  writeFileSync(toolsPath, JSON.stringify(tools.map(({ name, description, inputSchema }) => ({
-    name,
-    description,
-    inputSchema
-  }))), { mode: 0o600 });
-  writeFileSync(mcpConfigPath, JSON.stringify({
-    mcpServers: {
-      [MCP_SERVER_NAME]: {
-        type: "stdio",
-        command: process.execPath,
-        args: [bridgeScriptPath],
-        env: {
-          CODEX_REMOTE_CONTACT_QQ_MCP_SOCKET: socketPath,
-          CODEX_REMOTE_CONTACT_QQ_MCP_TOOLS: toolsPath
-        }
-      }
-    }
-  }), { mode: 0o600 });
-
-  const sockets = new Set();
-  const server = createServer((socket) => {
-    sockets.add(socket);
-    socket.setEncoding("utf8");
-    let buffer = "";
-    socket.on("data", (chunk) => {
-      buffer += chunk;
-      let newlineIndex = buffer.indexOf("\n");
-      while (newlineIndex >= 0) {
-        const line = buffer.slice(0, newlineIndex).trim();
-        buffer = buffer.slice(newlineIndex + 1);
-        if (line) void answerToolCall(socket, line);
-        newlineIndex = buffer.indexOf("\n");
-      }
-    });
-    socket.on("error", () => undefined);
-    socket.on("close", () => sockets.delete(socket));
-  });
-
-  const answerToolCall = async (socket, line) => {
-    let request;
-    try {
-      request = JSON.parse(line);
-    } catch {
-      return;
-    }
-    const reply = { id: request.id };
-    try {
-      const tool = byName.get(String(request.name || ""));
-      if (!tool) throw new Error(`Unknown QQ tool: ${request.name}`);
-      if (typeof onCall !== "function") throw new Error(`No handler registered for dynamic tool ${tool.name}`);
-      const result = await onCall({
-        namespace: tool.namespace,
-        tool: tool.tool,
-        arguments: request.arguments && typeof request.arguments === "object" ? request.arguments : {},
-        callId: `claude-call-${randomUUID()}`,
-        ...getTurn()
-      });
-      reply.result = toMcpToolResult(result);
-    } catch (error) {
-      reply.error = String(error?.message || error || "QQ tool call failed");
-    }
-    if (!socket.destroyed) socket.write(`${JSON.stringify(reply)}\n`);
-  };
-
-  await new Promise((listenResolve, listenReject) => {
-    server.once("error", listenReject);
-    server.listen(socketPath, () => {
-      server.off("error", listenReject);
-      listenResolve();
-    });
-  });
-  return {
-    mcpConfigPath,
-    close() {
-      for (const socket of sockets) socket.destroy();
-      server.close();
-    }
-  };
-}
-
-// Converts the shared Codex-shaped tool result into MCP tool content.
-export function toMcpToolResult(result) {
-  const { contentItems, success } = normalizeDynamicToolResult(result);
-  const content = contentItems.map((item) => {
-    const dataUrl = String(item?.imageUrl || "").match(/^data:([^;]+);base64,(.+)$/);
-    if (item?.type === "inputImage" && dataUrl) return { type: "image", mimeType: dataUrl[1], data: dataUrl[2] };
-    return { type: "text", text: String(item?.text ?? JSON.stringify(item)) };
-  });
-  return { content, isError: !success };
+  writeFileSync(mcpConfigPath, JSON.stringify(buildClaudeQqMcpConfig(server.launch)), { mode: 0o600 });
+  return { mcpConfigPath, close: () => server.close() };
 }
 
 export function buildUserContent(input, { maxImageBytes = DEFAULT_MAX_IMAGE_BYTES, readFile = readFileSync } = {}) {

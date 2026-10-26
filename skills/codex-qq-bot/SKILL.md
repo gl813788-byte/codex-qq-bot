@@ -45,6 +45,13 @@ On this configured machine:
 - OneBot API: `http://127.0.0.1:3000`
 - Hub and dashboard: `http://127.0.0.1:3789`
 - Structured log default: `runtime/logs/hub.jsonl`
+- Tests: run `npm run check` and then `node --test --test-concurrency=1`.
+  The parallel default of `npm run verify` / `npm test` exhausts memory and
+  Android kills the whole Termux session (NapCat, Hub and the agent), even
+  with the stack stopped. Ask before a full serial run while the stack is up.
+  Starting QQ/NapCat (`ncc all`, `ncc napcat`) from inside an agent session
+  has the same effect; start only the Hub there for short checks and let the
+  user start the full stack.
 - Interactive Codex CLI: `~/.codex/config.toml` sets
   `features.daemon_auto_start = false`. Its shared app-server daemon socket
   path exceeds the Unix socket limit under PRoot, and PRoot's remap is private
@@ -97,9 +104,12 @@ subsystems belong in focused modules.
 | Ordinary interest cycle state | `src/qq-proactive-cycle-state.js` |
 | Follow-up fusion | `src/qq-reply-steering.js` |
 | App Server turn execution | `src/infrastructure/codex/` and `src/codex-app-server-turn.js` |
-| Claude Code turn execution, MCP tool bridge, child env | `src/infrastructure/claude/` |
-| Engine-neutral turn deadlines, framing, child supervision, env helpers | `src/infrastructure/agent/` |
-| Structured final output | `src/infrastructure/codex/qq-agent-output.js` |
+| Claude Code turn execution, child env | `src/infrastructure/claude/` |
+| Engine-neutral turn deadlines, framing, child supervision, env helpers, QQ MCP tool server and bridge | `src/infrastructure/agent/` |
+| Opt-in lean Codex config (off by default) | `src/infrastructure/codex/codex-lean-config.js` |
+| Structured final output (inner thought, sticker, mood) | `src/infrastructure/codex/qq-agent-output.js` |
+| Sticker search, reactions/recall, profile lookups | `src/qq-sticker-search.js`, `src/app/qq-sticker-tool.js`, `src/app/qq-message-tools.js`, `src/app/qq-lookup-tool.js` |
+| Bot mood, inner thoughts, daily routine | `src/qq-bot-life-state.js`, `src/qq-bot-daily-routine.js` |
 | Settings persistence | `src/infrastructure/storage/settings-repository.js` |
 | QQ memory and semantic recall | `src/unified-memory/` plus focused `src/qq-*memory*` modules |
 | Dashboard source | `modules/mac-client/Resources/` and `src/dashboard-assets.js` |
@@ -152,11 +162,21 @@ refactor with a behavior change.
 - `/stop` cancels only the active lifecycle and its pending fusion batch.
   `/新对话` additionally clears the conversation-scoped context and reusable
   thread mapping.
-- Persistent thread reuse requires the stored dynamic-tool fingerprint to match
-  the current catalog. Codex 0.158 does not refresh tools on `thread/resume`.
-  Changed or unknown catalogs start a new thread with the complete current
-  context; preserve QQ memory and old Codex history. Verify both unchanged-tool
-  resume and changed-tool replacement after App Server upgrades. Claude Code
+- QQ tools reach both engines as a per-turn MCP server (Codex: thread
+  `mcp_servers` config with `default_tools_approval_mode = "approve"`, because
+  the Hub dispatcher stays authoritative; Claude: `--mcp-config` plus
+  `ENABLE_TOOL_SEARCH=true` and `ToolSearch`). Schemas stay deferred until the
+  model searches for a tool, so the prompt keeps only the one-line namespace
+  index; put usage contracts in tool descriptions, not the prompt.
+  `CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT=dynamic` keeps App Server dynamic
+  tools with `deferLoading`.
+- Persistent thread reuse requires the stored tool fingerprint to match. MCP
+  tools are re-listed on every `thread/resume`, so all MCP catalogs share one
+  transport fingerprint; dynamic tools are fixed at `thread/start` (Codex
+  0.158+), so their exact catalog is fingerprinted. Changed dynamic catalogs, a
+  transport switch, or unknown fingerprints start a new thread with the
+  complete current context; preserve QQ memory and old Codex history. Verify
+  unchanged resume and one-time replacement after App Server upgrades. Claude Code
   session ids live in the same mapping as `claude:<uuid>`; the Codex path drops
   them after an engine switch, and a missing Claude session is rebuilt once
   with the full prompt.
@@ -208,6 +228,16 @@ refactor with a behavior change.
   safe-fetch policy, into the task output directory; keep the signature/size
   checks and the inspect-before-send guidance. Sending still goes through
   validated structured attachments.
+- `qq_sticker.manage` searches the merged sticker catalog on demand (the
+  prompt carries only its size) and returns stable `#ref`s derived from the
+  label store's identity; `inspect` returns real visual input in the same tool
+  result. Stickers are sent through the structured `sticker` field as their
+  own final bubble. `qq_message.act` reacts to the current/quoted group message
+  (at most two per turn) or recalls the Bot's own confirmed message from the
+  last two minutes (in-memory ledger at the lowest send layer).
+  `qq_context.lookup` reads member/group/notice/essence facts only for people
+  who appeared in the conversation and never returns sex, age or location.
+  These and `qq_self.state` stay bound to the original conversation.
 - `qq_memory.avatar` and `qq_knowledge.image` are visual tools bound to the
   original conversation like `qq_context.images`. Avatar candidates follow
   person-impression visibility (group members seen there plus quoted/@/named
@@ -276,7 +306,8 @@ refactor with a behavior change.
   `learning.style_review`, `memory.scope_summary`,
   `memory.knowledge_update`, `memory.person_promotion`,
   `memory.avatar_refresh`, `memory.avatar_features`,
-  `memory.knowledge_image`, and `memory.image_prune`. Language-statistics
+  `memory.knowledge_image`, `memory.image_prune`, `memory.bot_state`, and
+  `memory.bot_routine`. Language-statistics
   logs are low-noise checkpoints, contain counts/ratios rather than copied chat
   or inferred meaning, and fire when frequent candidates change or every 25
   text messages. Preserve stable English `message` values for JSON/API
@@ -304,6 +335,18 @@ The distributed prompt must be generic enough for a public project:
 Casual turns may express personality strongly; factual, high-risk, and task turns
 should be more restrained while remaining recognizably the same assistant. Avoid
 fixed客服 templates and imitation of a specific group member.
+
+The QQ bot is also a working Agent: QQ turns keep every native Codex feature
+and the engine's own system prompt by default. Reduce context only in ways that
+keep capability (deferred tools, on-demand catalogs, trimmed Hub text). The
+compact `formatQqAgentBaseInstructions()` (`CODEX_REMOTE_CONTACT_QQ_BASE_INSTRUCTIONS=qq`)
+and the lean per-thread config (`CODEX_REMOTE_CONTACT_AGENT_LEAN_CONTEXT=1`)
+are opt-in for chat-only deployments; privileged file tasks keep AGENTS.md. The output Schema generates the private first-person
+`innerThought` first and `mood` last; neither is ever delivered or logged
+verbatim. Only the mood crosses conversations; inner thoughts stay in their own
+scope. The 活人感 rules (varied length, no restating/lists/AI phrasing,
+sticker-only/reaction-only/silent turns) must keep truthful answers when someone
+sincerely asks whether the Bot is an AI.
 
 Manual AI tasks support independent `--force`, `--full`, and `--background` options (QQ: `/AI任务 强制 后台 全部`; local API: `background: true`). Background acceptance returns a job id and is never completion. Inspect `jobs` in `/api/qq/ai-tasks` or `ncc ai-tasks`; bounded job history lasts only for the current Hub process. Native runtime tools always submit AI tasks in the background. Both engines reject synchronous nested model calls from dynamic tools with `CODEX_NESTED_TURN_BLOCKED`; never raise global concurrency to hide that deadlock. Background work retains the normal limiter, task locks, permissions, and deadlines.
 
@@ -340,9 +383,9 @@ Claude invariants that must not be weakened:
   Codex workspace-write sandbox.
 - WebFetch is never offered; it could reach loopback OneBot/Hub APIs.
   WebSearch follows `webSearchMode`.
-- Dynamic QQ tools reach the Hub only through the per-turn MCP bridge and its
+- QQ tools reach the Hub only through the per-turn MCP bridge and its
   private Unix socket, and run through the same `onDynamicToolCall` dispatcher
-  with the original sender's permissions.
+  with the original sender's permissions; Codex uses the same bridge.
 - The child env comes from `buildIsolatedClaudeChildEnv`: an allowlist plus
   non-secret `CODEX_REMOTE_CONTACT_*` markers. Connection keys come from the
   optional `~/.claude/ncc-profiles/active.env` profile, otherwise the machine's

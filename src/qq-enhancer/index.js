@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { isSupportedImageContentType, writeResponseBodyToFile } from "../bounded-stream.js";
 import { buildQqReplySendPlan } from "../qq-reply-chunks.js";
 import { fetchWithUrlPolicy } from "../safe-fetch.js";
+import { getQqStickerRef, parseQqStickerRef } from "../qq-sticker-search.js";
 
 export {
   evaluateQqProactiveInterest,
@@ -47,13 +48,16 @@ export function buildQqSendPlan(_event, reply) {
   });
 }
 
-export async function sendQqGroupBubbles({ event, reply, sendGroupMessage, quoteFirstBubble = true, delayMs = 650 }) {
+export async function sendQqGroupBubbles({ event, reply, sendGroupMessage, quoteFirstBubble = true, delayMs = 650, delayForBubble = null }) {
   const plan = buildQqSendPlan(event, reply);
   const bubbles = plan.bubbles || [];
   if (bubbles.length === 0) return { ok: true, bubbles: [], results: [] };
   const results = [];
   for (const [index, bubble] of bubbles.entries()) {
-    if (index > 0) await sleep(Math.max(0, Number(delayMs || 0)));
+    if (index > 0) {
+      const pause = typeof delayForBubble === "function" ? delayForBubble(bubble, index) : delayMs;
+      await sleep(Math.max(0, Number(pause || 0)));
+    }
     results.push(await sendGroupMessage(bubble, {
       quoteSource: index === 0 && quoteFirstBubble && event?.type !== "private_message"
     }));
@@ -148,6 +152,8 @@ export async function resolveQqReplyMedia(reply, { stickerDir } = {}) {
   const stickerNames = [...text.matchAll(/\[\[qq_sticker:([^\]\n]+)\]\]/g)].map((match) => match[1].trim()).filter(Boolean);
   const stickerCatalog = stickerNames.length ? await buildQqStickerCatalog(stickerDir) : [];
   const stickerPaths = stickerNames.flatMap((name) => {
+    const ref = parseQqStickerRef(name);
+    if (ref) return stickerCatalog.filter((item) => getQqStickerRef(item) === ref).map((item) => item.file);
     const normalized = normalizeName(name);
     return stickerCatalog
       .filter((item) => normalizeName(item.name) === normalized || item.name.includes(name))

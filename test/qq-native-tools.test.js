@@ -286,3 +286,32 @@ test("avatar and knowledge picture tools are structured visual tools bound to th
   assert.deepEqual(imageSpec.inputSchema.properties.action.enum, ["attach", "replace", "caption", "remove", "inspect"]);
   assert.deepEqual(imageSpec.inputSchema.required, ["action", "title"]);
 });
+
+test("sticker, message, lookup and self-state tools stay structured and bound to the original conversation", async () => {
+  const event = { isOwner: true, groupId: "10001", senderId: "90001" };
+  const focusedEvent = { isOwner: true, groupId: "20002", qqCrossSessionScopeId: "20002" };
+  const bound = [];
+  const dispatch = createQqNativeToolDispatcher({
+    event,
+    executeStructured: async (call, boundEvent) => {
+      if (call.namespace === "qq_session") return { ok: true, scopeId: "20002", scopeEvent: focusedEvent, reply: "已选择" };
+      bound.push({ tool: `${call.namespace}.${call.tool}`, boundEvent });
+      return call.namespace === "qq_sticker"
+        ? { ok: true, reply: "看图", contentItems: [{ type: "inputText", text: "看图" }, { type: "inputImage", imageUrl: "data:image/png;base64,AAAA" }] }
+        : { ok: true, reply: "完成" };
+    },
+    executeCommand: async () => {
+      throw new Error("new tools must not fall back to slash commands");
+    }
+  });
+  await dispatch({ callId: "s1", namespace: "qq_session", tool: "manage", arguments: { action: "select", scopeId: "group:20002" } });
+  const inspected = await dispatch({ callId: "t1", namespace: "qq_sticker", tool: "manage", arguments: { action: "inspect", selector: "#abcdef" } });
+  await dispatch({ callId: "t2", namespace: "qq_message", tool: "act", arguments: { action: "react", emoji: "赞" } });
+  await dispatch({ callId: "t3", namespace: "qq_context", tool: "lookup", arguments: { action: "member" } });
+  await dispatch({ callId: "t4", namespace: "qq_self", tool: "state", arguments: {} });
+  assert.deepEqual(bound.map((entry) => entry.tool), ["qq_sticker.manage", "qq_message.act", "qq_context.lookup", "qq_self.state"]);
+  assert.ok(bound.every((entry) => entry.boundEvent === event));
+  // Sticker inspection returns real visual input like the other visual tools.
+  assert.equal(normalizeDynamicToolResult(inspected).contentItems.some((item) => item.type === "inputImage"), true);
+  assert.equal(mapQqNativeToolToCommand("qq_sticker", "manage", { action: "inspect", selector: "x" }), "");
+});

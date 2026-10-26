@@ -11,20 +11,25 @@ export const QQ_CODEX_SESSION_PROTOCOL_VERSION = 2;
 const validModes = new Set(Object.values(QQ_CODEX_SESSION_MODES));
 const maxStoredThreads = 64;
 
-export function fingerprintQqCodexDynamicTools(tools = []) {
+// Dynamic tools are fixed at thread/start (Codex 0.158+ restores the original
+// set on thread/resume), so their exact catalog pins a reusable thread. MCP
+// tools are listed again whenever the engine starts, so every MCP catalog
+// shares one transport fingerprint; a thread created with dynamic tools is
+// still replaced once when the transport changes.
+export function fingerprintQqCodexDynamicTools(tools = [], { transport = "dynamic" } = {}) {
+  const payload = transport === "mcp" ? { transport: "mcp", version: 1 } : (Array.isArray(tools) ? tools : []);
   return createHash("sha256")
-    .update(JSON.stringify(Array.isArray(tools) ? tools : [], (_key, value) => {
+    .update(JSON.stringify(payload, (_key, value) => {
       if (!value || typeof value !== "object" || Array.isArray(value)) return value;
       return Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]));
     }))
     .digest("hex");
 }
 
-export function resolveQqCodexReusableThreadId(plan, tools = []) {
+export function resolveQqCodexReusableThreadId(plan, tools = [], { transport = "dynamic" } = {}) {
   const thread = plan?.existingThread;
-  // Codex 0.158 restores the original tools; thread/resume cannot replace them.
   if (!plan?.persistent || thread?.protocolVersion !== QQ_CODEX_SESSION_PROTOCOL_VERSION) return null;
-  if (thread.dynamicToolsFingerprint !== fingerprintQqCodexDynamicTools(tools)) return null;
+  if (thread.dynamicToolsFingerprint !== fingerprintQqCodexDynamicTools(tools, { transport })) return null;
   return thread.threadId || null;
 }
 

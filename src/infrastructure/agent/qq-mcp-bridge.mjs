@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Stdio MCP server that Claude Code spawns for one QQ turn. It exposes the
-// turn's dynamic QQ tools and forwards every call to the Hub over a private
-// Unix socket, so tool execution keeps the Hub's sender-scoped authorization.
+// Stdio MCP server that Codex or Claude Code spawns for one QQ turn. It
+// exposes the turn's QQ tools and forwards every call to the Hub over a
+// private Unix socket, so tool execution keeps the Hub's sender-scoped
+// authorization.
 import { readFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { createInterface } from "node:readline";
@@ -40,11 +41,11 @@ function failPendingCalls(message) {
   pendingCalls.clear();
 }
 
-function callHub(name, args) {
+function callHub(name, args, callId) {
   const id = ++nextCallId;
   return new Promise((resolve) => {
     pendingCalls.set(id, resolve);
-    hub.write(`${JSON.stringify({ id, name, arguments: args })}\n`);
+    hub.write(`${JSON.stringify({ id, name, arguments: args, callId })}\n`);
   });
 }
 
@@ -70,7 +71,8 @@ async function handle(message) {
     return;
   }
   if (method === "tools/call") {
-    const reply = await callHub(String(params?.name || ""), params?.arguments || {});
+    const engineCallId = typeof params?._meta?.callId === "string" ? params._meta.callId : "";
+    const reply = await callHub(String(params?.name || ""), params?.arguments || {}, engineCallId);
     if (reply.error) {
       send({ id, result: { content: [{ type: "text", text: String(reply.error) }], isError: true } });
       return;

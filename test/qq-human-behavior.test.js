@@ -249,15 +249,17 @@ test("formats anonymous evidence and recognizes proactive silence", () => {
     maxSentences: 1,
     preferMultiBubble: true,
     preferSticker: true
-  }, { proactive: true, bubbleSeparator: "---" });
+  }, { proactive: true, stickerSuggestions: "手边可直接发的表情包：\n  #abcdef 狗头：狗头" });
   assert.match(context, /匿名统计/);
   assert.match(context, /实质任务.*闲聊长度与句数建议自动失效/);
   assert.match(context, /2 条短气泡/);
   assert.match(context, /表情包规划/);
-  assert.match(context, /单独一行写 ---/);
+  assert.match(context, /#编号 填进 sticker 字段/);
+  assert.match(context, /#abcdef 狗头/);
+  assert.doesNotMatch(context, /\[\[qq_sticker/);
   assert.match(context, /兴趣模型已经批准的执行轮/);
   assert.match(context, /互动重复无价值.*已经厌烦/);
-  assert.match(context, /\[\[qq_silent\]\]/);
+  assert.match(context, /status 设为 silent/);
   assert.equal(isQqSilentReply("[[qq_silent]]\n[[qq_memory:{\"recentTopic\":\"闲聊\"}]]"), true);
 });
 

@@ -102,6 +102,22 @@ export function createEnvironmentConfig(env = process.env) {
       ["codex", "claude"],
       "codex"
     ),
+    // Codex serves QQ tools from a per-turn MCP server by default; "dynamic"
+    // keeps App Server dynamic tools. Claude Code always uses MCP. Both defer
+    // tool schemas until the model selects a tool.
+    agentToolTransport: enumValue(
+      String(env.CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT || "").trim().toLowerCase(),
+      ["mcp", "dynamic"],
+      "mcp"
+    ),
+    // The QQ bot is also a working Agent, so Codex keeps every native feature
+    // and its own base instructions unless a deployment opts into trimming.
+    agentLeanContext: env.CODEX_REMOTE_CONTACT_AGENT_LEAN_CONTEXT === "1",
+    qqBaseInstructionsMode: enumValue(
+      String(env.CODEX_REMOTE_CONTACT_QQ_BASE_INSTRUCTIONS || "").trim().toLowerCase(),
+      ["qq", "engine"],
+      "engine"
+    ),
     claudeCliPath: env.CLAUDE_CLI_PATH || "claude",
     claudeModel: String(env.CODEX_REMOTE_CONTACT_CLAUDE_MODEL || "").trim() || "opus",
     claudeReasoningEffort: enumValue(
@@ -228,6 +244,12 @@ export function createEnvironmentConfig(env = process.env) {
     qqFileMaxBytes,
     qqBubbleSeparator: normalizeBubbleSeparator(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEPARATOR),
     qqBubbleSendDelayMs: Math.max(0, numberOrDefault(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_SEND_DELAY_MS, 650)),
+    // Follow-up bubbles wait in proportion to their length, like typing.
+    qqTypingPace: env.CODEX_REMOTE_CONTACT_QQ_TYPING_PACE !== "0",
+    // Private chats show QQ's "typing…" status while a reply is generated.
+    qqTypingIndicator: env.CODEX_REMOTE_CONTACT_QQ_TYPING_INDICATOR !== "0",
+    // One small background model task per day plans the Bot's routine.
+    qqDailyRoutine: env.CODEX_REMOTE_CONTACT_QQ_DAILY_ROUTINE !== "0",
     qqBubbleMaxChars: boundedInteger(env.CODEX_REMOTE_CONTACT_QQ_BUBBLE_MAX_CHARS, {
       defaultValue: 900,
       min: 200,

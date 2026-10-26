@@ -1,4 +1,3 @@
-import { formatQqStickerSendModeInstruction } from "./qq-sticker-delivery.js";
 
 const mediaOnlyPattern = /^(?:\[(?:图片|表情|语音|文件)(?:[^\]]*)?\]|[\p{Extended_Pictographic}\uFE0F\s]+)$/u;
 const casualEmotionPattern = /(累|困|晕|烦|气死|难受|开心|高兴|想睡|睡懵|绷不住|笑死|离谱|无语|我去|卧槽|草|好耶|寄了|麻了)/i;
@@ -259,7 +258,7 @@ export function buildQqHumanBehaviorPlan(event = {}, intent = {}, style = {}, { 
 
 export function formatQqHumanBehaviorContext(style = {}, plan = {}, {
   proactive = false,
-  bubbleSeparator = "|||"
+  stickerSuggestions = ""
 } = {}) {
   const bubbles = plan.preferMultiBubble
     ? `本轮倾向连续发 2 条短气泡（最多 ${plan.maxBubbles || 2} 条）：第一条先接住/给结论，后面只补细节、后劲或接梗；没有自然的第二层意思就仍发 1 条，严禁凑数。`
@@ -268,8 +267,8 @@ export function formatQqHumanBehaviorContext(style = {}, plan = {}, {
     ? `本轮可以自然带 1 个 emoji${plan.emojiPalette?.length ? `，近期群里常见的是 ${plan.emojiPalette.join(" ")}` : ""}；只在语气确实需要时用，不要每条固定挂同一个。`
     : "本轮不必为了像人而强塞文字 emoji。";
   const stickerInstruction = plan.preferSticker
-    ? `本轮适合发 1 张语境匹配的表情包；如果可用表情库里有合适项，可以按语境选图文合并、仅表情包或文字与表情包分开发送。不要为了完成指标硬配无关表情。\n${formatQqStickerSendModeInstruction({ bubbleSeparator })}`
-    : "本轮默认不发表情包；只有语境非常贴合时才例外使用 1 张。";
+    ? "本轮适合像真人那样在文字后补 1 张表情包（或者只发表情包）：优先从下面手边的几张里挑情绪最贴的，把 #编号 填进 sticker 字段，它会在文字后单独发出；只发表情包时 text 和 bubbles 留空。手边的都不贴才用 qq_sticker 按情绪/场合/梗搜，或者这轮不发。想发就发，不用在文字里解释。"
+    : "本轮默认不发表情包；只有语境非常贴合时才例外用 sticker 字段发 1 张。";
   return [
     `真人化动态规划（匿名统计样本 ${style.sampleSize || 0} 条；不模仿具体个人）：`,
     `- 模式：${plan.mode || "casual"}；目标：${plan.goal || "自然承接"}。`,
@@ -280,11 +279,12 @@ export function formatQqHumanBehaviorContext(style = {}, plan = {}, {
     `- ${bubbles}`,
     `- ${emojiInstruction}`,
     `- 表情包规划：${stickerInstruction}`,
+    plan.preferSticker && stickerSuggestions ? stickerSuggestions : null,
     "- 真人群聊通常只回应当前最值得接的一点，会省略双方已经知道的主语和背景；不要复述问题，不要把每句口语补成完整书面语。",
     "- 对方只是在分享、感叹或发图时，先给具体反应；没有求建议就不要自动分析、科普、安慰教程或列能力清单。",
-    "- 可以自然用短句、语气词、问号或一个合适表情，但不要强塞网络黑话、错别字、口癖或装作真人。被问身份时仍如实说是 QQ 上的 AI 助手。",
+    "- 可以自然用短句、语气词、问号或一个合适表情，但不要强塞网络黑话、错别字或口癖。被认真问到是不是 AI 时如实回答。",
     proactive
-      ? "- 这是兴趣模型已经批准的执行轮；先理解内容并正常执行，但主模型仍可在上下文已经过时、互动重复无价值、自己已经厌烦或安全/事实边界不允许时只输出 [[qq_silent]]。"
+      ? "- 这是兴趣模型已经批准的执行轮；先理解内容并正常执行，但主模型仍可在上下文已经过时、互动重复无价值、自己已经厌烦或安全/事实边界不允许时把 status 设为 silent。"
       : null
   ].filter(Boolean).join("\n");
 }
@@ -333,6 +333,17 @@ export function getQqAdaptiveBubbleDelayMs(style = {}, { configuredMs = 650 } = 
   if (!Number.isFinite(learnedSeconds) || learnedSeconds <= 0) return base;
   const compressedHumanDelay = Math.round(learnedSeconds * 150);
   return clamp(Math.max(base, compressedHumanDelay), base, 1800);
+}
+
+// Pause before a follow-up bubble, like a person typing it: half the learned
+// gap plus ~14 characters per second for this bubble, with jitter, capped so
+// a long bubble never stalls delivery. A sticker-only bubble goes out fast.
+export function getQqTypingDelayMs(bubble, baseDelayMs = 650, { random = Math.random } = {}) {
+  const base = clamp(Number(baseDelayMs || 0), 0, 5000);
+  const visible = String(bubble || "").replace(/\[\[qq_[^\]]*\]\]/g, "").trim();
+  if (!visible) return Math.round(base * (0.6 + random() * 0.4));
+  const typingMs = Math.min([...visible].length, 40) * 70;
+  return clamp(Math.round(base * 0.5 + typingMs + random() * 400), base, 4200);
 }
 
 function getMultiBubbleChance(mode, privateChat, style) {
