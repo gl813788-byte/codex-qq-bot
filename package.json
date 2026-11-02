@@ -36,8 +36,8 @@
   },
   "scripts": {
     "start": "bash scripts/start-hub.sh",
-    "deploy": "zsh scripts/deploy.command",
-    "ncc": "zsh scripts/ncc.command",
+    "deploy": "bash scripts/deploy.command",
+    "ncc": "bash scripts/ncc.command",
     "check": "node scripts/check.mjs",
     "test": "node --test",
     "test:coverage": "node --test --experimental-test-coverage",

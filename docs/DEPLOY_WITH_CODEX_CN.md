@@ -60,7 +60,7 @@ https://github.com/gl813788-byte/codex-qq-bot.git
 - 最终用真实状态与测试结果验收，而不是只确认进程存在。
 
 执行要求：
-1. 检查系统/架构、可用磁盘与内存，以及 git、node、npm、zsh、curl、codex、jq、screen/launchctl（如果适用）、OneBot/NapCat 和 ncc。Node.js 必须为 20+。
+1. 检查系统/架构、可用磁盘与内存，以及 git、node、npm、bash、curl、codex、jq、screen/launchctl（如果适用）、OneBot/NapCat 和 ncc。Node.js 必须为 20+。
 2. 为部署建立简短计划，然后直接执行。只有扫码、秘密值、系统提权、外部下载授权或会改变既有部署方案的选择才问我。
 3. 项目不存在时克隆到稳定目录。Linux root 默认 /root/Codex-QQ-Bot；普通用户默认使用 HOME 下的稳定目录；已有旧版 /root/Codex-Remote-Contact 时继续复用。项目存在时先检查 git status --short --branch、remote 和当前分支。禁止 reset --hard、clean、强制 checkout 或覆盖本地文件。
 4. 阅读 README、docs/INSTALLATION*、docs/DEPLOY_WITH_CODEX*、docs/ARCHITECTURE*、根 AGENTS.md 和适用的 skills/codex-qq-bot/SKILL.md。

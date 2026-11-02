@@ -567,6 +567,15 @@ existing_project_is_valid() {
     [ -f "$INSTALL_DIR/scripts/deploy.command" ]
 }
 
+# Older source archives still run their management scripts with zsh; newer
+# ones use Bash. Follow the script's own shebang so either kind installs.
+project_script_shell() {
+  case "$(head -n 1 "$1" 2>/dev/null)" in
+    *zsh*) printf 'zsh\n' ;;
+    *) printf 'bash\n' ;;
+  esac
+}
+
 ensure_source_launcher() {
   local source_dir="$1"
   local launcher="$source_dir/一键部署.command"
@@ -583,11 +592,11 @@ ensure_source_launcher() {
     printf 'fi\n'
     printf 'if [ -f "$PROJECT_DIR/scripts/bootstrap-environment.sh" ]; then\n'
     printf '  bash "$PROJECT_DIR/scripts/bootstrap-environment.sh" --base-only\n'
-    printf 'elif ! command -v zsh >/dev/null 2>&1; then\n'
-    printf '  printf "缺少 zsh，请先安装 zsh 后重新运行。\\n" >&2\n'
-    printf '  exit 1\n'
     printf 'fi\n'
-    printf 'exec zsh "$PROJECT_DIR/scripts/ncc.command" "$@"\n'
+    printf 'NCC_SHELL=bash\n'
+    printf 'case "$(head -n 1 "$PROJECT_DIR/scripts/ncc.command")" in *zsh*) NCC_SHELL=zsh ;; esac\n'
+    printf 'command -v "$NCC_SHELL" >/dev/null 2>&1 || { printf "缺少 %%s，请先安装后重新运行。\\n" "$NCC_SHELL" >&2; exit 1; }\n'
+    printf 'exec "$NCC_SHELL" "$PROJECT_DIR/scripts/ncc.command" "$@"\n'
   } > "$launcher"
   chmod 755 "$launcher"
   log "中文一键部署入口已恢复：$launcher"
@@ -814,8 +823,10 @@ prepare_installed_project() {
     [ -x "$INSTALL_DIR/scripts/bootstrap-environment.sh" ] ||
       die "源码缺少环境自举器，无法继续依赖安装。"
     bash "$INSTALL_DIR/scripts/bootstrap-environment.sh" --base-only
-    command -v zsh >/dev/null 2>&1 || die "基础环境准备后仍找不到 zsh。"
-    zsh "$INSTALL_DIR/scripts/deploy.command" --prepare-only
+    local deploy_shell
+    deploy_shell="$(project_script_shell "$INSTALL_DIR/scripts/deploy.command")"
+    command -v "$deploy_shell" >/dev/null 2>&1 || die "基础环境准备后仍找不到 $deploy_shell。"
+    "$deploy_shell" "$INSTALL_DIR/scripts/deploy.command" --prepare-only
   fi
   log "平台依赖、Node.js、Codex CLI、npm 依赖和 npm run verify 已完成。"
 }

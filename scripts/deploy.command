@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env bash
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -119,7 +119,7 @@ ensure_node() {
 }
 
 ensure_basic_tools() {
-  for cmd in curl git zsh; do
+  for cmd in curl git; do
     if command -v "$cmd" >/dev/null 2>&1; then
       log "已找到 $cmd。"
       continue

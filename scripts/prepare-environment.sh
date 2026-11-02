@@ -18,10 +18,6 @@ log() {
 log "阶段 1/2：检查并补齐当前平台运行依赖。"
 bash "$BOOTSTRAP_SCRIPT" --base-only
 export PATH="${CODEX_QQ_BOT_MANAGED_NODE_HOME:-${CODEX_QQ_BOT_USER_PREFIX:-$HOME/.local}/share/codex-qq-bot/node}/bin:${CODEX_QQ_BOT_USER_PREFIX:-$HOME/.local}/bin:$PATH"
-command -v zsh >/dev/null 2>&1 || {
-  printf '[安装续跑] 错误：zsh 安装后仍不可用。\n' >&2
-  exit 1
-}
 
 log "阶段 2/2：继续 Node/Codex/npm/verify 阶段。"
-exec zsh "$DEPLOY_SCRIPT" --prepare-only
+exec bash "$DEPLOY_SCRIPT" --prepare-only

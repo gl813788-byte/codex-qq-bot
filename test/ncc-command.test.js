@@ -20,7 +20,7 @@ test("repository ncc resolves its project when invoked outside the checkout or t
   try {
     await symlink(commandPath, symlinkPath);
     for (const entry of [commandPath, symlinkPath]) {
-      const output = execFileSync("zsh", [entry, "help"], {
+      const output = execFileSync("bash", [entry, "help"], {
         cwd: tmpdir(),
         encoding: "utf8",
         env
@@ -35,7 +35,7 @@ test("repository ncc resolves its project when invoked outside the checkout or t
 test("repository ncc saves the chosen agent engine in config/local.env", async () => {
   const home = await mkdtemp(join(tmpdir(), "codex-qq-bot-engine-"));
   const env = { ...process.env, GPT_QQ_BOT_HOME: home };
-  const run = (...args) => execFileSync("zsh", [commandPath, ...args], { cwd: tmpdir(), encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
+  const run = (...args) => execFileSync("bash", [commandPath, ...args], { cwd: tmpdir(), encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
   try {
     assert.equal(run("engine").trim(), "codex");
     assert.match(run("engine", "claude"), /Claude Code/);
@@ -59,7 +59,7 @@ test("ncc sends the force and background parameters and distinguishes acceptance
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const { stdout } = await promisify(execFile)("zsh", [commandPath, "ai-run", "all", "10001", "--force", "--background", "--full"], {
+    const { stdout } = await promisify(execFile)("bash", [commandPath, "ai-run", "all", "10001", "--force", "--background", "--full"], {
       cwd: tmpdir(),
       env: { ...process.env, GPT_QQ_BOT_HUB_URL: `http://127.0.0.1:${server.address().port}` }
     });

@@ -41,6 +41,8 @@ The installer writes a completion marker only after each validated stage succeed
 
 Source, Node, and npm downloads use their respective caches. Damaged downloads are quarantined, and extraction always starts from a clean temporary directory. Interrupting verification does not invalidate dependencies, so the next run repeats verification only. Git worktrees, local changes, unrelated non-empty directories, and a different global `ncc` are not overwritten.
 
+Every management entry (`一键部署.command`, `npm run ncc`, `npm run deploy`, and the installed `ncc`) runs on Bash, including the Bash 3.2 that ships with macOS; zsh is neither required nor installed. When the installer handles an older source archive whose scripts still declare zsh, it follows that script's shebang.
+
 ## Environment decision table
 
 | Environment | Node/Codex plan | System-package privilege | QQ/OneBot plan |

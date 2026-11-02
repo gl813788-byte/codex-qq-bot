@@ -132,7 +132,6 @@ ensure_base_tools() {
   append_package_for_command "$manager" unzip unzip
   append_package_for_command "$manager" zip zip
   append_package_for_command "$manager" jq jq
-  append_package_for_command "$manager" zsh zsh
   append_package_for_command "$manager" screen screen
   append_package_for_command "$manager" tar tar
   case "$manager" in
