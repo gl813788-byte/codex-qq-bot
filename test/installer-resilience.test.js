@@ -196,7 +196,7 @@ async function nodeFixture(home, working) {
   assert.equal(tar.status, 0, tar.stderr);
   const sha = createHash("sha256").update(await readFile(archive)).digest("hex");
   await writeFile(join(dist, "latest-v22.x/SHASUMS256.txt"), `${sha}  ${name}\n`);
-  for (const tool of ["git", "jq", "zsh", "screen", "pgrep", "codex"]) await executable(join(bin, tool), "exit 0");
+  for (const tool of ["git", "jq", "screen", "pgrep", "codex"]) await executable(join(bin, tool), "exit 0");
   return {
     HOME: home, PATH: `${bin}:${process.env.PATH}`, CODEX_QQ_BOT_USER_PREFIX: join(home, "prefix"),
     CODEX_QQ_BOT_MANAGED_NODE_HOME: join(home, "custom/node"), CODEX_QQ_BOT_BOOTSTRAP_CACHE_DIR: join(home, "cache"),

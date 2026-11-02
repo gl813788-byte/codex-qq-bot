@@ -41,6 +41,8 @@ bash "$installer" --prepare
 
 源码下载、Node 下载和 npm 使用各自缓存。下载损坏时会隔离坏文件；解压总是从干净临时目录开始。验证阶段中断不会让依赖阶段失效，下次只重新验证。Git 工作区、本地改动、陌生非空目录和其他同名全局 `ncc` 不会被覆盖。
 
+所有管理入口（`一键部署.command`、`npm run ncc`、`npm run deploy` 和安装后的 `ncc`）都用 Bash 运行，包括 macOS 自带的 Bash 3.2；不需要也不会安装 zsh。安装器处理脚本仍声明 zsh 的旧版源码包时，会按该脚本的 shebang 选择解释器。
+
 ## 环境决策表
 
 | 环境 | Node/Codex 方案 | 系统包权限 | QQ/OneBot 方案 |

@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env bash
 set -euo pipefail
 
 resolve_script_path() {
@@ -215,7 +215,7 @@ mask_secret() {
   elif [ "${#value}" -le 8 ]; then
     printf '****'
   else
-    printf '****%s' "${value[-4,-1]}"
+    printf '****%s' "${value: -4}"
   fi
 }
 
@@ -281,7 +281,7 @@ codex_menu() {
   if ! command -v codex >/dev/null 2>&1; then
     log "没有找到 Codex CLI，或它不在 PATH 里。"
     log "请先运行根目录的 一键部署.command 尝试安装，或手动安装 Codex CLI。"
-    [ "$should_pause" = "1" ] && pause
+    if [ "$should_pause" = "1" ]; then pause; fi
     return
   fi
   codex --version || true
@@ -295,7 +295,7 @@ codex_menu() {
   if [[ "${test_answer:-Y}" != [nN]* ]]; then
     codex exec --ephemeral --skip-git-repo-check -C "$PROJECT_DIR" "Only output OK"
   fi
-  [ "$should_pause" = "1" ] && pause
+  if [ "$should_pause" = "1" ]; then pause; fi
 }
 
 claude_menu() {
@@ -304,7 +304,7 @@ claude_menu() {
   if ! command -v claude >/dev/null 2>&1; then
     log "没有找到 Claude Code CLI，或它不在 PATH 里。"
     log "安装方法：curl -fsSL https://claude.ai/install.sh | bash"
-    [ "$should_pause" = "1" ] && pause
+    if [ "$should_pause" = "1" ]; then pause; fi
     return
   fi
   claude --version || true
@@ -316,7 +316,7 @@ claude_menu() {
   if ask_yes_no "现在做一次 Claude Code 鉴权测试吗？" "Y"; then
     (cd "$PROJECT_DIR" && claude -p --tools "" --setting-sources "" --strict-mcp-config --no-session-persistence "Only output OK")
   fi
-  [ "$should_pause" = "1" ] && pause
+  if [ "$should_pause" = "1" ]; then pause; fi
 }
 
 current_engine() {
@@ -410,7 +410,7 @@ qq_menu() {
     json_update "data.qq = data.qq || {}; data.qq.allowedGroups = ${groups_json};"
   fi
   log "QQ 设置已保存。"
-  [ "$should_pause" = "1" ] && pause
+  if [ "$should_pause" = "1" ]; then pause; fi
 }
 
 owner_menu() {
@@ -749,11 +749,11 @@ avatar_menu() {
   [ -n "${user_ids:-}" ] && args+=(--qq "$user_ids")
   if [ "$choice" = "1" ]; then
     ask_yes_no "是否忽略 3 天复查间隔，全部重新下载？" "N" && args+=(--force)
-    avatar_command refresh "${args[@]}" || true
+    avatar_command refresh ${args[@]+"${args[@]}"} || true
   else
     ask_yes_no "是否连续处理多批（最多 20 批）？" "N" && args+=(--all)
     ask_yes_no "是否强制（重试已暂停头像；指定 QQ 时重新描述）？" "N" && args+=(--force)
-    avatar_command describe "${args[@]}" || true
+    avatar_command describe ${args[@]+"${args[@]}"} || true
   fi
   pause
 }
@@ -784,7 +784,7 @@ data.updatedAt = new Date().toISOString();
 fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
 NODE
   log "助手名称设置已保存。"
-  [ "$should_pause" = "1" ] && pause
+  if [ "$should_pause" = "1" ]; then pause; fi
 }
 
 start_hub() {
@@ -847,7 +847,7 @@ WELCOME
     log "npm 安装阶段已完成环境、项目依赖和 verify，直接继续配置向导。"
   else
     [ -f "$DEPLOY_SCRIPT" ] || die "找不到首次部署脚本：$DEPLOY_SCRIPT"
-    zsh "$DEPLOY_SCRIPT" --prepare-only
+    bash "$DEPLOY_SCRIPT" --prepare-only
   fi
 
   ensure_settings

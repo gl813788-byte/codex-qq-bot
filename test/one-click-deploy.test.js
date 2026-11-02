@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -34,7 +34,7 @@ test("Chinese one-click deployment entry is executable and has valid Bash syntax
     encoding: "utf8"
   });
   assert.equal(bootstrapSyntax.status, 0, bootstrapSyntax.stderr);
-  for (const script of [environmentDetectorPath, prepareEnvironmentPath, termuxProotPath]) {
+  for (const script of [environmentDetectorPath, prepareEnvironmentPath, termuxProotPath, nccPath, deployPath]) {
     const result = spawnSync("bash", ["-n", script], {
       cwd: projectDir,
       encoding: "utf8"
@@ -58,7 +58,7 @@ test("fresh-machine bootstrap plans every required layer without mutating the ho
       CODEX_QQ_BOT_BOOTSTRAP_DRY_RUN: "1",
       CODEX_QQ_BOT_BOOTSTRAP_OS: "linux",
       CODEX_QQ_BOT_BOOTSTRAP_PACKAGE_MANAGER: "apt-get",
-      CODEX_QQ_BOT_BOOTSTRAP_FORCE_MISSING: "curl git unzip zip jq zsh screen tar xz pgrep sha256sum sudo codex",
+      CODEX_QQ_BOT_BOOTSTRAP_FORCE_MISSING: "curl git unzip zip jq screen tar xz pgrep sha256sum sudo codex",
       CODEX_QQ_BOT_BOOTSTRAP_FORCE_NODE_INSTALL: "1",
       CODEX_QQ_BOT_BOOTSTRAP_FORCE_NAPCAT_INSTALL: "1"
     }
@@ -69,6 +69,7 @@ test("fresh-machine bootstrap plans every required layer without mutating the ho
   assert.match(result.stdout, /Codex CLI/);
   assert.match(result.stdout, /NapCat 官方安装器/);
   assert.match(result.stdout, /LinuxQQ、NapCat 和运行库/);
+  assert.doesNotMatch(result.stdout, /zsh/);
 });
 
 test("environment bootstrap selects dedicated Termux, PRoot, WSL and musl plans", () => {
@@ -226,17 +227,17 @@ test("dependency preparation resumes after the npm stage and reruns verification
     }));
     await writeFile(join(fixture, "config", "settings.example.json"), "{}\n");
     await writeFile(join(fixture, "scripts", "bootstrap-environment.sh"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
-    await writeFile(join(fixture, "scripts", "ncc.command"), "#!/usr/bin/env zsh\nexit 0\n", { mode: 0o755 });
+    await writeFile(join(fixture, "scripts", "ncc.command"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
     await writeFile(
       join(fixture, "modules", "install-launchd-plist.command"),
-      "#!/usr/bin/env zsh\nexit 0\n",
+      "#!/usr/bin/env bash\nexit 0\n",
       { mode: 0o755 }
     );
     await writeFile(join(fixture, "scripts", "deploy.command"), await readFile(deployPath), { mode: 0o755 });
     await writeFile(join(fixture, "install.sh"), await readFile(remoteInstallerPath));
     await writeFile(join(fixture, "scripts", "install-npm.sh"), await readFile(join(projectDir, "scripts/install-npm.sh")));
 
-    const first = spawnSync("zsh", [join(fixture, "scripts", "deploy.command"), "--prepare-only"], {
+    const first = spawnSync("bash", [join(fixture, "scripts", "deploy.command"), "--prepare-only"], {
       cwd: fixture,
       encoding: "utf8",
       env: { ...process.env, PATH: process.env.PATH }
@@ -245,7 +246,7 @@ test("dependency preparation resumes after the npm stage and reruns verification
     assert.match(first.stdout, /安装 npm 项目依赖/);
     assert.match(first.stdout, /fixture verify/);
 
-    const second = spawnSync("zsh", [join(fixture, "scripts", "deploy.command"), "--prepare-only"], {
+    const second = spawnSync("bash", [join(fixture, "scripts", "deploy.command"), "--prepare-only"], {
       cwd: fixture,
       encoding: "utf8",
       env: { ...process.env, PATH: process.env.PATH }
@@ -274,8 +275,8 @@ test("remote installer repairs a missing Chinese launcher in an otherwise valid 
     const fixtureRoot = join(home, "fixture", "codex-qq-bot-without-launcher");
     await mkdir(join(fixtureRoot, "scripts"), { recursive: true });
     await writeFile(join(fixtureRoot, "package.json"), '{"name":"repair-fixture"}\n');
-    await writeFile(join(fixtureRoot, "scripts", "ncc.command"), "#!/usr/bin/env zsh\nexit 0\n");
-    await writeFile(join(fixtureRoot, "scripts", "deploy.command"), "#!/usr/bin/env zsh\nexit 0\n");
+    await writeFile(join(fixtureRoot, "scripts", "ncc.command"), '#!/usr/bin/env bash\nprintf "repaired ncc:%s\\n" "$*"\n');
+    await writeFile(join(fixtureRoot, "scripts", "deploy.command"), "#!/usr/bin/env bash\nexit 0\n");
     const archive = join(home, "fixture.zip");
     const packed = spawnSync("zip", ["-qr", archive, "codex-qq-bot-without-launcher"], {
       cwd: join(home, "fixture"),
@@ -304,6 +305,12 @@ test("remote installer repairs a missing Chinese launcher in an otherwise valid 
     const repaired = await readFile(join(target, "一键部署.command"), "utf8");
     assert.match(repaired, /scripts\/ncc\.command/);
     await access(join(target, "一键部署.command"), constants.X_OK);
+    const launched = spawnSync("bash", [join(target, "一键部署.command"), "status"], {
+      cwd: home,
+      encoding: "utf8"
+    });
+    assert.equal(launched.status, 0, launched.stderr);
+    assert.match(launched.stdout, /repaired ncc:status/);
   } finally {
     await rm(home, { recursive: true, force: true });
   }
@@ -323,13 +330,13 @@ test("remote installer validates and extracts a local source archive without lau
     await writeFile(join(fixtureRoot, "package.json"), '{"name":"fixture"}\n');
     await writeFile(
       join(fixtureRoot, "一键部署.command"),
-      '#!/usr/bin/env bash\nexec zsh "$(dirname "$0")/scripts/ncc.command" "$@"\n'
+      '#!/usr/bin/env bash\nexec bash "$(dirname "$0")/scripts/ncc.command" "$@"\n'
     );
     await writeFile(
       join(fixtureRoot, "scripts", "ncc.command"),
-      '#!/usr/bin/env zsh\nprintf "fixture ncc:%s\\n" "$*"\n'
+      '#!/usr/bin/env bash\nprintf "fixture ncc:%s\\n" "$*"\n'
     );
-    await writeFile(join(fixtureRoot, "scripts", "deploy.command"), "#!/usr/bin/env zsh\nexit 0\n");
+    await writeFile(join(fixtureRoot, "scripts", "deploy.command"), "#!/usr/bin/env bash\nexit 0\n");
     const archive = join(home, "fixture.zip");
     const packed = spawnSync("zip", ["-qr", archive, "codex-qq-bot-v1.1.7"], {
       cwd: join(home, "fixture"),
@@ -455,8 +462,8 @@ test("remote installer resolves and extracts the default branch head instead of 
     await writeFile(join(metadataDir, "commit.json"), JSON.stringify({ sha: revision }));
     await writeFile(join(fixtureRoot, "package.json"), '{"name":"latest-head-fixture"}\n');
     await writeFile(join(fixtureRoot, "一键部署.command"), "#!/usr/bin/env bash\nexit 0\n");
-    await writeFile(join(fixtureRoot, "scripts", "ncc.command"), "#!/usr/bin/env zsh\nexit 0\n");
-    await writeFile(join(fixtureRoot, "scripts", "deploy.command"), "#!/usr/bin/env zsh\nexit 0\n");
+    await writeFile(join(fixtureRoot, "scripts", "ncc.command"), "#!/usr/bin/env bash\nexit 0\n");
+    await writeFile(join(fixtureRoot, "scripts", "deploy.command"), "#!/usr/bin/env bash\nexit 0\n");
     const archive = join(archiveDir, `${revision}.zip`);
     const packed = spawnSync("zip", ["-qr", archive, `codex-qq-bot-${revision}`], {
       cwd: join(home, "fixture"),
@@ -523,8 +530,8 @@ test("remote installer refreshes cached head metadata and upgrades an archive in
       await writeFile(join(fixtureRoot, "config", "settings.example.json"), JSON.stringify({ featureValue }));
       await writeFile(join(fixtureRoot, "data", "unified-memory.json"), '[]\n');
       await writeFile(join(fixtureRoot, "一键部署.command"), "#!/usr/bin/env bash\nexit 0\n");
-      await writeFile(join(fixtureRoot, "scripts", "ncc.command"), "#!/usr/bin/env zsh\nexit 0\n");
-      await writeFile(join(fixtureRoot, "scripts", "deploy.command"), "#!/usr/bin/env zsh\nexit 0\n");
+      await writeFile(join(fixtureRoot, "scripts", "ncc.command"), "#!/usr/bin/env bash\nexit 0\n");
+      await writeFile(join(fixtureRoot, "scripts", "deploy.command"), "#!/usr/bin/env bash\nexit 0\n");
       const packed = spawnSync("zip", ["-qr", join(archiveDir, `${revision}.zip`), rootName], {
         cwd: fixtureDir,
         encoding: "utf8"
@@ -605,8 +612,8 @@ test("remote installer preserves an unrelated ncc command", async (t) => {
     await mkdir(join(fixtureRoot, "scripts"), { recursive: true });
     await writeFile(join(fixtureRoot, "package.json"), '{"name":"fixture"}\n');
     await writeFile(join(fixtureRoot, "一键部署.command"), "#!/usr/bin/env bash\nexit 0\n");
-    await writeFile(join(fixtureRoot, "scripts", "ncc.command"), "#!/usr/bin/env zsh\nexit 0\n");
-    await writeFile(join(fixtureRoot, "scripts", "deploy.command"), "#!/usr/bin/env zsh\nexit 0\n");
+    await writeFile(join(fixtureRoot, "scripts", "ncc.command"), "#!/usr/bin/env bash\nexit 0\n");
+    await writeFile(join(fixtureRoot, "scripts", "deploy.command"), "#!/usr/bin/env bash\nexit 0\n");
     const archive = join(home, "fixture.zip");
     const packed = spawnSync("zip", ["-qr", archive, "codex-qq-bot-v1.1.7"], {
       cwd: join(home, "fixture"),
@@ -644,7 +651,7 @@ test("remote installer preserves an unrelated ncc command", async (t) => {
 test("fresh ncc run enters first-run deployment and keeps it pending when cancelled", async () => {
   const home = await mkdtemp(join(tmpdir(), "codex-qq-bot-first-run-"));
   try {
-    const result = spawnSync("zsh", [nccPath], {
+    const result = spawnSync("bash", [nccPath], {
       cwd: projectDir,
       encoding: "utf8",
       input: "n\n",
@@ -665,7 +672,7 @@ test("existing installations are adopted once and later ncc runs open the normal
     await mkdir(join(home, "config"), { recursive: true });
     await writeFile(join(home, "data", "settings.json"), "{}\n");
     await writeFile(join(home, "config", "local.env"), "");
-    const result = spawnSync("zsh", [nccPath], {
+    const result = spawnSync("bash", [nccPath], {
       cwd: projectDir,
       encoding: "utf8",
       input: "0\n",
@@ -689,7 +696,7 @@ test("a status check on a fresh checkout does not accidentally skip first-run de
       join(home, "config", "settings.example.json"),
       '{"version":1,"qq":{},"branding":{}}\n'
     );
-    const status = spawnSync("zsh", [nccPath, "status"], {
+    const status = spawnSync("bash", [nccPath, "status"], {
       cwd: projectDir,
       encoding: "utf8",
       env: { ...process.env, GPT_QQ_BOT_HOME: home }
@@ -698,7 +705,7 @@ test("a status check on a fresh checkout does not accidentally skip first-run de
     const envFile = await readFile(join(home, "config", "local.env"), "utf8");
     assert.match(envFile, /CODEX_REMOTE_CONTACT_NCC_SETUP_COMPLETED=0/);
 
-    const menu = spawnSync("zsh", [nccPath], {
+    const menu = spawnSync("bash", [nccPath], {
       cwd: projectDir,
       encoding: "utf8",
       input: "n\n",
@@ -707,6 +714,66 @@ test("a status check on a fresh checkout does not accidentally skip first-run de
     assert.equal(menu.status, 1, menu.stderr);
     assert.match(menu.stdout, /Codex QQ Bot 首次部署/);
     assert.doesNotMatch(menu.stdout, /已识别并接管现有部署/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("management entry points run on Bash and never need zsh", async () => {
+  const packageJson = JSON.parse(await readFile(join(projectDir, "package.json"), "utf8"));
+  assert.match(packageJson.scripts.ncc, /^bash scripts\/ncc\.command$/);
+  assert.match(packageJson.scripts.deploy, /^bash scripts\/deploy\.command$/);
+  const installPlist = join(projectDir, "modules", "install-launchd-plist.command");
+  for (const script of [launcherPath, nccPath, deployPath, prepareEnvironmentPath, installPlist]) {
+    const source = await readFile(script, "utf8");
+    assert.match(source, /^#!\/usr\/bin\/env bash\n/, script);
+    assert.doesNotMatch(source, /\bzsh\b/, script);
+  }
+});
+
+test("first-run ncc completes every configuration step on Bash", async () => {
+  const home = await mkdtemp(join(tmpdir(), "codex-qq-bot-first-run-complete-"));
+  try {
+    const bin = join(home, "bin");
+    await mkdir(bin);
+    await mkdir(join(home, "config"));
+    await writeFile(join(home, "config", "settings.example.json"), '{"version":1,"qq":{},"branding":{}}\n');
+    await symlink(process.execPath, join(bin, "node"));
+    await writeFile(join(bin, "codex"), "#!/bin/sh\necho codex-fixture\n", { mode: 0o755 });
+    await writeFile(join(bin, "claude"), "#!/bin/sh\necho claude-fixture\n", { mode: 0o755 });
+    await writeFile(join(bin, "zsh"), "#!/bin/sh\necho zsh-must-not-run >&2\nexit 97\n", { mode: 0o755 });
+    const answers = [
+      "y", // start first-run deployment
+      "y", "n", "n", // Codex login/test menu, then decline login and the live test
+      "y", "n", // switch to Claude Code, then decline the live test
+      "http://127.0.0.1:9", "10001", "20002", // OneBot, owner, allowed group
+      "", "", "", // branding defaults
+      "n" // do not start the Hub
+    ];
+    const result = spawnSync("bash", [nccPath], {
+      cwd: home,
+      encoding: "utf8",
+      input: `${answers.join("\n")}\n`,
+      env: {
+        ...process.env,
+        HOME: home,
+        PATH: `${bin}:/usr/bin:/bin`,
+        GPT_QQ_BOT_HOME: home,
+        NCC_ENVIRONMENT_PREPARED: "1",
+        TAVILY_API_KEY: "tvly-fixture-abcd1234"
+      }
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Claude Code 已登录/);
+    assert.match(result.stdout, /QQ 设置已保存/);
+    assert.match(result.stdout, /Tavily key：\*{4}1234/);
+    assert.match(result.stdout, /首次部署已完成/);
+    const settings = JSON.parse(await readFile(join(home, "data", "settings.json"), "utf8"));
+    assert.deepEqual(settings.qq.ownerUserIds, ["10001"]);
+    assert.deepEqual(settings.qq.allowedGroups, ["20002"]);
+    const envFile = await readFile(join(home, "config", "local.env"), "utf8");
+    assert.match(envFile, /^export CODEX_REMOTE_CONTACT_NCC_SETUP_COMPLETED=1$/m);
+    assert.match(envFile, /^export CODEX_REMOTE_CONTACT_AGENT_ENGINE=claude$/m);
   } finally {
     await rm(home, { recursive: true, force: true });
   }
