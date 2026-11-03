@@ -1,9 +1,15 @@
 import {
+  DEFAULT_INTEREST_AGENT_TIMEOUT_MS,
   getDefaultInterestModel,
   getDefaultInterestModelBaseUrl,
   INTEREST_MODEL_PROVIDER_IDS,
+  INTEREST_MODEL_REASONING_EFFORTS,
+  isSubscriptionInterestProvider,
   listInterestModelProviders,
-  normalizeInterestModelProvider
+  MAX_INTEREST_AGENT_TIMEOUT_MS,
+  MIN_INTEREST_AGENT_TIMEOUT_MS,
+  normalizeInterestModelProvider,
+  normalizeInterestModelReasoningEffort
 } from "./interest-model-provider.js";
 
 const BOT_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
@@ -28,13 +34,44 @@ export function readDashboardBotSettings(state) {
   };
 }
 
+// Everything the dashboard's interest-model and preset editors need; kept
+// apart from readDashboardBotSettings so its long-standing shape is stable.
+export function readDashboardInterestSettings(state) {
+  const judge = state?.qq?.proactive?.judge || {};
+  const provider = normalizeInterestModelProvider(judge.provider);
+  const preset = judge.preset && typeof judge.preset === "object" ? judge.preset : {};
+  return {
+    provider,
+    subscription: isSubscriptionInterestProvider(provider),
+    model: String(judge.model || ""),
+    baseUrl: isSubscriptionInterestProvider(provider) ? "" : String(judge.baseUrl || ""),
+    apiKeyConfigured: Boolean(judge.apiKeyConfigured),
+    reasoningEffort: normalizeInterestModelReasoningEffort(judge.reasoningEffort),
+    agentTimeoutMs: boundedInteger(judge.agentTimeoutMs, MIN_INTEREST_AGENT_TIMEOUT_MS, MAX_INTEREST_AGENT_TIMEOUT_MS, DEFAULT_INTEREST_AGENT_TIMEOUT_MS),
+    reasoningEfforts: [...INTEREST_MODEL_REASONING_EFFORTS],
+    providers: listInterestModelProviders().map(({ id, label, defaultModel, subscription }) => ({ id, label, defaultModel, subscription: Boolean(subscription) })),
+    preset: {
+      name: String(preset.name || "default"),
+      likes: listOf(preset.likes),
+      dislikes: listOf(preset.dislikes),
+      style: listOf(preset.style)
+    }
+  };
+}
+
 export function applyDashboardBotSettings(state, input) {
   if (!state?.qq || !input || typeof input !== "object" || Array.isArray(input)) {
     throw new TypeError("Bot settings must be a JSON object");
   }
   const previous = readDashboardBotSettings(state);
   const previousJudgeBaseUrl = String(state.qq.proactive.judge.baseUrl || "");
+  const previousExtras = {
+    reasoningEffort: state.qq.proactive.judge.reasoningEffort,
+    agentTimeoutMs: state.qq.proactive.judge.agentTimeoutMs,
+    preset: state.qq.proactive.judge.preset
+  };
   const next = normalizePatch(input, { ...previous, judgeBaseUrl: previousJudgeBaseUrl });
+  const extras = normalizeExtras(input, previousExtras, next);
 
   state.qq.enhancer.enabled = next.enhancerEnabled;
   state.qq.webLookup.enabled = next.webLookupEnabled;
@@ -48,6 +85,9 @@ export function applyDashboardBotSettings(state, input) {
   state.qq.proactive.judge.apiKeyConfigured = next.judgeApiKeyConfigured;
   state.qq.proactive.judge.timeoutMs = next.judgeTimeoutMs;
   state.qq.proactive.judge.maxRecentMessages = next.judgeMaxRecentMessages;
+  state.qq.proactive.judge.reasoningEffort = extras.reasoningEffort;
+  state.qq.proactive.judge.agentTimeoutMs = extras.agentTimeoutMs;
+  state.qq.proactive.judge.preset = extras.preset;
 
   return {
     settings: readDashboardBotSettings(state),
@@ -64,8 +104,50 @@ export function applyDashboardBotSettings(state, input) {
       state.qq.proactive.judge.apiKeyConfigured = previous.judgeApiKeyConfigured;
       state.qq.proactive.judge.timeoutMs = previous.judgeTimeoutMs;
       state.qq.proactive.judge.maxRecentMessages = previous.judgeMaxRecentMessages;
+      state.qq.proactive.judge.reasoningEffort = previousExtras.reasoningEffort;
+      state.qq.proactive.judge.agentTimeoutMs = previousExtras.agentTimeoutMs;
+      state.qq.proactive.judge.preset = previousExtras.preset;
     }
   };
+}
+
+function normalizeExtras(input, previous, next) {
+  const extras = {
+    reasoningEffort: normalizeInterestModelReasoningEffort(previous.reasoningEffort),
+    agentTimeoutMs: boundedInteger(previous.agentTimeoutMs, MIN_INTEREST_AGENT_TIMEOUT_MS, MAX_INTEREST_AGENT_TIMEOUT_MS, DEFAULT_INTEREST_AGENT_TIMEOUT_MS),
+    preset: previous.preset
+  };
+  if (Object.hasOwn(input, "judgeReasoningEffort")) {
+    const effort = String(input.judgeReasoningEffort || "").trim().toLowerCase();
+    if (!INTEREST_MODEL_REASONING_EFFORTS.includes(effort)) {
+      throw new RangeError(`judgeReasoningEffort must be one of: ${INTEREST_MODEL_REASONING_EFFORTS.join(", ")}`);
+    }
+    extras.reasoningEffort = effort;
+  }
+  extras.agentTimeoutMs = optionalInteger(input, "judgeAgentTimeoutMs", MIN_INTEREST_AGENT_TIMEOUT_MS, MAX_INTEREST_AGENT_TIMEOUT_MS, extras.agentTimeoutMs);
+  if (Object.hasOwn(input, "judgeBaseUrl")) {
+    if (next.judgeProvider !== "custom") throw new RangeError("judgeBaseUrl can only be changed for the custom provider");
+    const url = String(input.judgeBaseUrl || "").trim().replace(/\/+$/, "");
+    if (url && !/^https?:\/\/[^\s]+$/i.test(url)) throw new RangeError("judgeBaseUrl must be an http(s) URL");
+    next.judgeBaseUrl = url;
+  }
+  if (Object.hasOwn(input, "judgePreset")) {
+    const preset = input.judgePreset;
+    if (!preset || typeof preset !== "object" || Array.isArray(preset)) throw new TypeError("judgePreset must be an object");
+    const base = previous.preset && typeof previous.preset === "object" ? previous.preset : {};
+    extras.preset = {
+      name: String(preset.name || base.name || "default").trim().slice(0, 80) || "default",
+      likes: Object.hasOwn(preset, "likes") ? listOf(preset.likes) : listOf(base.likes),
+      dislikes: Object.hasOwn(preset, "dislikes") ? listOf(preset.dislikes) : listOf(base.dislikes),
+      style: Object.hasOwn(preset, "style") ? listOf(preset.style) : listOf(base.style)
+    };
+  }
+  return extras;
+}
+
+function listOf(value) {
+  const list = Array.isArray(value) ? value : typeof value === "string" ? value.split(/\n+/) : [];
+  return list.map((item) => String(item || "").trim().slice(0, 200)).filter(Boolean).slice(0, 20);
 }
 
 function normalizePatch(input, current) {

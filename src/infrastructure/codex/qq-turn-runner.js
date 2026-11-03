@@ -47,6 +47,51 @@ export function resolveQqAgentToolTransport(engine, configured = "mcp") {
   return selectQqAgentEngine(engine).resolveToolTransport(configured);
 }
 
+// One tool-free, read-only, ephemeral structured turn on a chosen engine,
+// independent of the configured reply engine. Background classifiers (the
+// subscription interest model) use it; they are not QQ agent turns, so the
+// Codex side uses the lean per-thread config and no QQ tools are offered.
+export function runQqAgentBackgroundTask(engine, {
+  codexPath = "codex",
+  claudePath = "claude",
+  cwd,
+  model = null,
+  reasoningEffort = null,
+  prompt,
+  imagePaths = [],
+  developerInstructions = null,
+  baseInstructions = null,
+  outputSchema = null,
+  timeoutMs,
+  signal,
+  onSpawn,
+  onExit
+} = {}) {
+  const agent = selectQqAgentEngine(engine);
+  return agent.runTurn({
+    codexPath,
+    claudePath,
+    cwd,
+    env: agent.buildEnv({}),
+    model,
+    reasoningEffort,
+    prompt,
+    imagePaths,
+    developerInstructions,
+    baseInstructions,
+    dynamicTools: [],
+    outputSchema,
+    config: agent.buildConfig(null, { leanContext: true, keepProjectDocs: false }),
+    webSearchMode: "disabled",
+    sandbox: "read-only",
+    ephemeral: true,
+    timeoutMs,
+    signal,
+    onSpawn,
+    onExit
+  });
+}
+
 export function createQqCodexTurnRunner({
   limiter,
   state,

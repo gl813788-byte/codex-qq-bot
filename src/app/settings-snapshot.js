@@ -43,6 +43,8 @@ export function createSettingsSnapshot({
           model: state.qq.proactive.judge.model,
           baseUrl: state.qq.proactive.judge.baseUrl,
           timeoutMs: state.qq.proactive.judge.timeoutMs,
+          reasoningEffort: state.qq.proactive.judge.reasoningEffort,
+          agentTimeoutMs: state.qq.proactive.judge.agentTimeoutMs,
           minInterest: state.qq.proactive.judge.minInterest,
           maxRecentMessages: state.qq.proactive.judge.maxRecentMessages,
           apiKeyConfigured: Boolean(interestApiKeyConfigured),

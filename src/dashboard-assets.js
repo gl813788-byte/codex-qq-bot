@@ -7,6 +7,7 @@ const assetRoutes = new Map([
   ["/dashboard", { fileName: "client.html", contentType: "text/html; charset=utf-8" }],
   ["/client.css", { fileName: "client.css", contentType: "text/css; charset=utf-8" }],
   ["/client.js", { fileName: "client.js", contentType: "text/javascript; charset=utf-8" }],
+  ["/client-persona.js", { fileName: "client-persona.js", contentType: "text/javascript; charset=utf-8" }],
   ["/images/nexus-core.webp", { fileName: "images/nexus-core.webp", contentType: "image/webp" }]
 ]);
 

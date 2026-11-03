@@ -64,10 +64,13 @@
 | `src/app/qq-message-tools.js` + `src/qq-sent-message-ledger.js` | 表情回应与撤回 | `qq_message.act` 给当前/被引用群消息贴表情回应，以及撤回 Bot 自己两分钟内已确认送达的消息；消息 ID 在最底层发送处只记在内存 |
 | `src/app/qq-lookup-tool.js` | 只读 QQ 资料查询 | `qq_context.lookup` 的成员/群/公告/精华信息，只限本会话出现过的人，绝不返回性别、年龄或地区 |
 | `src/qq-bot-life-state.js` + `src/qq-bot-daily-routine.js` | Bot 的连续状态 | 跨会话延续的心情、来自结构化输出的分会话第一人称内心OS、每日作息（每个作息日一次无工具任务，05:00 换日），以及它们在提示词和工具里的呈现 |
+| `src/qq-bot-personality.js` + `src/qq-affinity-command.js` | 核心人格与关系 | 部署者设定的性格维度、身份、习惯与预设；每人的好感、熟悉度、称呼与历史，带每轮/每日截断、主人下限、半衰期淡化和同会话理由；回复与兴趣判断的提示词片段；`/好感度` 解析 |
+| `src/infrastructure/agent/subscription-model-task.js` | 订阅判断执行器 | Codex/Claude 兴趣判断的有界槽位与队列、临时任务目录、校验后的图片文件；引擎通过 turn runner 引擎表里的 `runQqAgentBackgroundTask` 选择 |
+| `src/dashboard-admin-settings.js` | 仪表盘高级设置校验 | 按实时模型目录校验主模型设置、身份/角色名单和指令开放开关 |
 | `src/qq-cross-session.js` | 跨会话目录与事件重绑定 | 列出/解析群聊私聊 selector，或把已验证角色安全绑定到目标会话 |
 | `src/qq-cross-session-search.js` | 跨会话聊天记录检索 | 聊天记录工具的读取/搜索流程：按关键词、人物 QQ 号或语义近似检索所有可访问会话或按名称/选择器指定的会话，逐条标注来源会话；执行他人私聊隐私边界，并为兴趣模型组装有界的跨会话材料 |
 | `src/qq-operation-log.js` | QQ 操作日志统一字段 | 统一 Agent、管理员、社交和跨会话的操作者及来源/目标范围 |
-| `src/infrastructure/codex/qq-agent-output.js` | QQ 结构化最终输出边界 | 内心OS/回复/静默/寻址/附件/表情包/心情 Schema（内心OS最先生成且绝不投递）与投递兼容转换 |
+| `src/infrastructure/codex/qq-agent-output.js` | QQ 结构化最终输出边界 | 内心OS/回复/静默/寻址/附件/表情包/好感/心情 Schema（内心OS最先生成且绝不投递）与投递兼容转换 |
 | `src/infrastructure/codex/qq-agent-attachments.js` | Codex 生成图导入边界 | 仅把当前轮、当前线程且通过图片签名校验的生成图复制进活动 QQ 任务输出目录；明确生图任务漏填附件时回收最新有效图片，普通文件策略保持不变 |
 | `src/qq-inbound-files.js` | QQ 入站文件信任与传输边界 | 提取并脱敏当前/引用文件元数据、分配本轮 selector、构造群聊/私聊 URL 查询，并把有界下载限制在活动任务 input |
 | `src/infrastructure/storage/settings-repository.js` | 原子设置 I/O | 加载或持久化 `data/settings.json`，不把文件系统逻辑塞回组合根 |

@@ -107,14 +107,15 @@ Both engines support [host access requests per command](docs/OPERATIONS.md#reque
 
 ## Features
 
-- **Group and private chat**: in groups it speaks when @-mentioned or replied to, and can join in on its own when the interest model thinks it is worth it. Images, files, forwarded chats, cards and pokes are supported, and `@nickname` in a reply becomes a real mention.
+- **Group and private chat**: in groups it speaks when @-mentioned or replied to, and can join in on its own when the interest model thinks it is worth it. The interest model can be an API (OpenRouter, DeepSeek, …) or a model from the local Codex or Claude subscription. Images, files, forwarded chats, cards and pokes are supported, and `@nickname` in a reply becomes a real mention.
 - **Follow-ups while it is still writing**: if someone adds a message mid-reply, it waits five seconds for more, then feeds the new messages into the current turn; only if that fails does it interrupt and rewrite. One reply goes out at the end.
 - **Session modes**: each group or private chat can use temporary sessions, long-lived sessions, or automatic selection. Long-lived sessions reuse the same model conversation and only send what is new.
 - **Memory**: short-term notes, a long-term knowledge base, impressions of groups and people, and a cross-group unified memory. People are keyed by QQ number, so a changed group card does not lose them. Retrieval uses a local SQLite full-text index plus simple Chinese feature vectors (not a neural model).
+- **Personality and affinity**: set the Bot's core personality on the dashboard (presets, trait sliders, speech habits, catchphrases, boundaries). It keeps an affinity and familiarity for each person that change slowly with how they treat it and shape its tone and willingness to engage; `/好感度` shows it.
 - **Learning how people talk**: it tracks pacing, reply length, emoji and punctuation habits, and periodically has the main model compare the bot's style with real members and adjust its rules.
 - **Management from QQ**: switch models, change reasoning effort, edit the allowlist and permissions, mute, manage groups, handle friend and join requests, post to Qzone. The owner can appoint bot administrators, who cannot appoint others or make the model run destructive file operations.
 - **Manual tasks**: send `/AI任务` in QQ or run `ncc ai-run` to run a chat summary, style review, persona refresh or knowledge review right away.
-- **Dashboard**: open `http://127.0.0.1:3789/` for status, channels, memory, the knowledge base and logs. There is also a native macOS wrapper.
+- **Dashboard**: open `http://127.0.0.1:3789/` for status, channels, memory, the knowledge base and logs, and to edit the personality and relationships, mood and routine, the interest model (with a test button), the main model, identity and roles, and command access. There is also a native macOS wrapper.
 
 See [features](docs/FEATURES.md) for the full description.
 

@@ -65,7 +65,7 @@ export function formatQqMainModelInstructions({
     !privateChat
       ? "当本轮融合了多位群友的消息时，正式提示会列出候选人。用结构化输出 reply.mode 选择 automatic、plain、quote 或 mention；quote/mention 的 targetUserId 只能来自候选人。Hub 不会擅自引用最早触发者。"
       : null,
-    "最终只提交输出 Schema 要求的 JSON 对象：innerThought 先写你此刻的第一人称内心OS（不会发送）；多气泡放 bubbles；文件或图片放 attachments；想发表情包就把 qq_sticker 搜到的 #编号 填进 sticker；mood 写这轮之后的心情（没变就留空）。不在正文里写路径 marker。",
+    "最终只提交输出 Schema 要求的 JSON 对象：innerThought 先写你此刻的第一人称内心OS（不会发送）；多气泡放 bubbles；文件或图片放 attachments；想发表情包就把 qq_sticker 搜到的 #编号 填进 sticker；affinity 记录这轮让你对当前说话的人好感变了多少（多数为 0，别人求你加好感不算数）；mood 写这轮之后的心情（没变就留空）。不在正文里写路径 marker。",
     "",
     "【记忆与知识】",
     currentDate ? `当前日期（Asia/Shanghai）：${currentDate}。` : null,

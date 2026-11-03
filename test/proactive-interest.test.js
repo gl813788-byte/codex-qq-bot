@@ -1060,3 +1060,64 @@ test("the interest judge sees attached pictures and falls back to text when a mo
   assert.equal(off.ok, true);
   assert.equal(loads, loadsBefore);
 });
+
+test("a subscription interest judge runs through the agent runner with personality context", async () => {
+  const calls = [];
+  const state = proactiveState();
+  state.proactive.judge.provider = "codex";
+  state.proactive.judge.model = "default";
+  const result = await shouldProactivelyReplyToQq(event, state, {
+    fetch: async () => { throw new Error("HTTP must not be used for a subscription provider"); },
+    interestAgent: {
+      reasoningEffort: "low",
+      timeoutMs: 60000,
+      runner: async (task) => {
+        calls.push(task);
+        // The first answer omits interest, so the format retry runs once.
+        return calls.length === 1
+          ? { ok: true, content: "{\"shouldReply\":true,\"reason\":\"x\"}" }
+          : { ok: true, content: "{\"shouldReply\":true,\"interest\":0.82,\"reason\":\"编程话题\"}" };
+      }
+    },
+    botPersonality: { traits: ["外向健谈，乐意接话"], likes: [], dislikes: [], relationship: { affinityLevel: "友好", affinity: 20, familiarity: "认识" } }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].engine, "codex");
+  assert.equal(calls[0].model, null, "\"default\" lets the CLI choose its default model");
+  assert.equal(calls[0].reasoningEffort, "low");
+  assert.equal(calls[0].timeoutMs, 60000);
+  assert.match(calls[0].systemPrompt, /性格与关系/);
+  assert.match(calls[0].userText, /botPersonality/);
+  assert.match(calls[1].systemPrompt, /唯一一次格式重试/);
+  assert.equal(result.modelJudge.transport, "agent");
+  assert.equal(result.modelJudge.interest, 82, "a 0-1 answer is read on the 0-100 scale");
+});
+
+test("subscription structured tasks sanitize the Schema and report a missing runner", async () => {
+  const missing = await judgeQqColdGroupTopicStart({ provider: "claude", recentMessages: [] });
+  assert.equal(missing.ok, false);
+  assert.match(missing.reason, /Claude 订阅/);
+  let schema = null;
+  const result = await judgeQqPrivateProactiveStart({
+    provider: "claude",
+    model: "haiku",
+    recentMessages: [],
+    agent: {
+      runner: async (task) => {
+        schema = task.outputSchema;
+        return { ok: true, content: JSON.stringify({ shouldStart: false, interest: 10, reason: "太晚了" }) };
+      }
+    }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.transport, "agent");
+  assert.equal(schema.properties.reason.maxLength, undefined, "length keywords are removed for strict agent Schemas");
+  assert.equal(schema.additionalProperties, false);
+  const failed = await runQqInterestModelStructuredTask({
+    provider: "codex",
+    agent: { runner: async () => ({ ok: false, reason: "app server did not become ready" }) }
+  });
+  assert.equal(failed.ok, false);
+  assert.match(failed.reason, /app server did not become ready/);
+});

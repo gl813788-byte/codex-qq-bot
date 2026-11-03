@@ -1,4 +1,13 @@
-export const INTEREST_MODEL_PROVIDER_IDS = Object.freeze(["openrouter", "deepseek", "custom"]);
+export const INTEREST_MODEL_PROVIDER_IDS = Object.freeze(["openrouter", "deepseek", "custom", "codex", "claude"]);
+// Subscription providers run one tool-free structured turn through the local
+// agent CLI (the ChatGPT or Claude login) instead of an HTTP API key.
+export const SUBSCRIPTION_INTEREST_PROVIDER_IDS = Object.freeze(["codex", "claude"]);
+export const INTEREST_MODEL_REASONING_EFFORTS = Object.freeze(["minimal", "low", "medium", "high"]);
+export const DEFAULT_INTEREST_AGENT_TIMEOUT_MS = 90_000;
+export const MIN_INTEREST_AGENT_TIMEOUT_MS = 15_000;
+export const MAX_INTEREST_AGENT_TIMEOUT_MS = 300_000;
+// Claude Code accepts stable aliases; Codex models come from the live catalog.
+export const CLAUDE_INTEREST_MODEL_SUGGESTIONS = Object.freeze(["haiku", "sonnet", "opus"]);
 
 const definitions = Object.freeze({
   openrouter: Object.freeze({
@@ -21,8 +30,70 @@ const definitions = Object.freeze({
     defaultBaseUrl: "",
     defaultModel: "gpt-4o-mini",
     structuredOutput: "json_object"
+  }),
+  // "default" lets Codex pick the account's default model.
+  codex: Object.freeze({
+    id: "codex",
+    label: "Codex 订阅",
+    defaultBaseUrl: "",
+    defaultModel: "default",
+    structuredOutput: "agent_output_schema",
+    subscription: true,
+    engine: "codex"
+  }),
+  claude: Object.freeze({
+    id: "claude",
+    label: "Claude 订阅",
+    defaultBaseUrl: "",
+    defaultModel: "haiku",
+    structuredOutput: "agent_output_schema",
+    subscription: true,
+    engine: "claude"
   })
 });
+
+export function isSubscriptionInterestProvider(value) {
+  return SUBSCRIPTION_INTEREST_PROVIDER_IDS.includes(String(value || "").trim().toLowerCase());
+}
+
+export function normalizeInterestModelReasoningEffort(value, fallback = "low") {
+  const effort = String(value || "").trim().toLowerCase();
+  return INTEREST_MODEL_REASONING_EFFORTS.includes(effort) ? effort : fallback;
+}
+
+export function normalizeInterestAgentTimeoutMs(value, fallback = DEFAULT_INTEREST_AGENT_TIMEOUT_MS) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(MIN_INTEREST_AGENT_TIMEOUT_MS, Math.min(MAX_INTEREST_AGENT_TIMEOUT_MS, Math.round(number)));
+}
+
+// The model id an agent CLI receives; "default" means the CLI's own default.
+export function resolveInterestAgentModel(value) {
+  const model = String(value || "").trim();
+  return !model || model.toLowerCase() === "default" ? null : model;
+}
+
+// OpenAI-style chat messages become one agent turn: system text becomes
+// developer instructions, user text the prompt, and data-URL pictures files.
+export function splitInterestChatMessages(messages = []) {
+  const system = [];
+  const user = [];
+  const images = [];
+  for (const message of Array.isArray(messages) ? messages : []) {
+    const parts = typeof message?.content === "string"
+      ? [{ type: "text", text: message.content }]
+      : Array.isArray(message?.content) ? message.content : [];
+    for (const part of parts) {
+      if (part?.type === "text" && part.text) {
+        (message.role === "system" ? system : user).push(String(part.text));
+      } else if (part?.type === "image_url" && message.role !== "system") {
+        const url = String(part.image_url?.url || "");
+        if (/^data:image\/(png|jpeg|gif|webp);base64,/.test(url)) images.push({ dataUrl: url });
+      }
+    }
+  }
+  return { systemPrompt: system.join("\n\n"), userText: user.join("\n\n"), images };
+}
 
 export function normalizeInterestModelProvider(value) {
   const provider = String(value || "").trim().toLowerCase();
@@ -34,7 +105,7 @@ export function getInterestModelProviderDefinition(value) {
 }
 
 export function listInterestModelProviders() {
-  return INTEREST_MODEL_PROVIDER_IDS.map((id) => ({ ...definitions[id] }));
+  return INTEREST_MODEL_PROVIDER_IDS.map((id) => ({ subscription: false, engine: null, ...definitions[id] }));
 }
 
 export function getDefaultInterestModel(value) {
@@ -48,6 +119,10 @@ export function getDefaultInterestModelBaseUrl(value) {
 export function resolveInterestModelRuntimeConfig(value, config = {}) {
   const provider = normalizeInterestModelProvider(value);
   const definition = getInterestModelProviderDefinition(provider);
+  if (definition.subscription) {
+    // The CLI's own login is the credential; no key or URL applies.
+    return { ...definition, provider, apiKey: "", baseUrl: "", apiKeyConfigured: true };
+  }
   const credentials = {
     openrouter: {
       apiKey: config.openRouterApiKey,

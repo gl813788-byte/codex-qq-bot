@@ -235,11 +235,14 @@ Use the same token on both sides. Without one, the webhook trusts only requests 
 | `CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE` | `1` | Semantic judge switch |
 | `..._JUDGE_EVERY_MESSAGES` | `20` | Ordinary unmentioned message threshold, 1–1000 |
 | `..._JUDGE_EVERY_MINUTES` | `5` | Minute threshold for a non-empty cycle; `0` disables this branch |
-| `..._JUDGE_PROVIDER` | `openrouter` | Interest provider: `openrouter`, `deepseek`, or `custom` |
-| `..._JUDGE_MODEL` | provider-specific | `openrouter/free` for OpenRouter; `deepseek-v4-flash` for DeepSeek |
+| `..._JUDGE_PROVIDER` | `openrouter` | Interest provider: `openrouter`, `deepseek`, `custom`, or the subscription providers `codex` / `claude` (one tool-free structured turn on the local CLI login's subscription; no key needed) |
+| `..._JUDGE_MODEL` | provider-specific | `openrouter/free` for OpenRouter; `deepseek-v4-flash` for DeepSeek; `default` for Codex (the account's default model, or any catalog model); `haiku` for Claude |
+| `..._JUDGE_REASONING_EFFORT` | `low` | Subscription providers' reasoning effort: `minimal`, `low`, `medium` or `high` (Codex accepts only the levels the chosen model publishes) |
+| `..._JUDGE_AGENT_TIMEOUT_MS` | `90000` | Whole-turn timeout for one subscription judgment, including the CLI cold start; 15000–300000 |
+| `..._JUDGE_AGENT_CONCURRENCY` | `1` | Dedicated slots for subscription judgments (1–4) plus three queue places; a full queue refuses instead of using the reply queue |
 | `..._JUDGE_API_KEY` | empty | Credential for the `custom` provider |
 | `..._JUDGE_BASE_URL` | empty | OpenAI-compatible API root for the `custom` provider |
-| `..._JUDGE_TIMEOUT_MS` | `6500` | Streaming idle timeout |
+| `..._JUDGE_TIMEOUT_MS` | `6500` | Streaming idle timeout for HTTP providers (subscription providers use the whole-turn timeout) |
 | `..._JUDGE_VISION` | `auto` | Whether the ordinary interest gate also receives up to two small JPEG previews of pictures in the judged messages: `auto` tries once per provider/model and falls back to text-only (remembered until restart) when the provider rejects image input, `on` always tries, `off` never sends pictures. Pictures go to the configured third-party interest provider |
 | `CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES` | `20971520` | QQ image limit, 20 MiB by default |
 | `CODEX_REMOTE_CONTACT_QQ_COMPRESSED_IMAGE_MAX_EDGE` | `1600` | Compressed inspection's longest edge, bounded 256–4096 px; automatic startup selects 1280/1600/2048 according to Hub memory |

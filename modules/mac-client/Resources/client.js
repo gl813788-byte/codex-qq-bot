@@ -1,6 +1,12 @@
 const HUB = location.protocol === "http:" || location.protocol === "https:" ? "" : "http://127.0.0.1:3789";
 const STORAGE_PREFIX = "codexRemoteContact.";
 const validViews = new Set(["overview", "channels", "intelligence", "memory", "knowledge", "activity", "settings"]);
+// Feature modules loaded before this script (client-persona.js) register
+// views, translations and hooks here.
+const dashboardExtensions = typeof personaExtension === "undefined" ? [] : [personaExtension];
+for (const extension of dashboardExtensions) {
+  for (const view of Object.keys(extension.views || {})) validViews.add(view);
+}
 const engineNames = { codex: "Codex", claude: "Claude Code" };
 
 const translations = {
@@ -203,6 +209,23 @@ const app = (() => {
   };
 })();
 
+for (const extension of dashboardExtensions) {
+  for (const language of Object.keys(translations)) Object.assign(translations[language], extension.translations?.[language] || {});
+}
+
+function runExtensionHook(name, ...args) {
+  const results = [];
+  for (const extension of dashboardExtensions) {
+    if (typeof extension[name] !== "function") continue;
+    try {
+      results.push(extension[name](...args));
+    } catch (error) {
+      console.error(`dashboard extension ${name} failed`, error);
+    }
+  }
+  return results;
+}
+
 // ---------- Storage ----------
 function readStorage(storage, key) {
   try {
@@ -283,10 +306,13 @@ function normalizeBotSettingsDraft(value) {
     judgeEnabled: Boolean(value.judgeEnabled),
     judgeEveryMessages: boundedUiText(value.judgeEveryMessages, 8),
     judgeEveryMinutes: boundedUiText(value.judgeEveryMinutes, 8),
-    judgeProvider: ["openrouter", "deepseek", "custom"].includes(value.judgeProvider) ? value.judgeProvider : "openrouter",
+    judgeProvider: ["openrouter", "deepseek", "custom", "codex", "claude"].includes(value.judgeProvider) ? value.judgeProvider : "openrouter",
     judgeModel: boundedUiText(value.judgeModel, 200),
     judgeTimeoutMs: boundedUiText(value.judgeTimeoutMs, 8),
-    judgeMaxRecentMessages: boundedUiText(value.judgeMaxRecentMessages, 8)
+    judgeMaxRecentMessages: boundedUiText(value.judgeMaxRecentMessages, 8),
+    judgeReasoningEffort: ["minimal", "low", "medium", "high"].includes(value.judgeReasoningEffort) ? value.judgeReasoningEffort : "low",
+    judgeAgentTimeoutMs: boundedUiText(value.judgeAgentTimeoutMs, 8),
+    judgeBaseUrl: boundedUiText(value.judgeBaseUrl, 300)
   };
 }
 
@@ -301,7 +327,10 @@ function collectBotSettingsDraft() {
     judgeProvider: $("#botJudgeProvider").value,
     judgeModel: $("#botJudgeModel").value,
     judgeTimeoutMs: $("#botJudgeTimeout").value,
-    judgeMaxRecentMessages: $("#botJudgeRecent").value
+    judgeMaxRecentMessages: $("#botJudgeRecent").value,
+    judgeReasoningEffort: $("#botJudgeEffort").value,
+    judgeAgentTimeoutMs: $("#botJudgeAgentTimeout").value,
+    judgeBaseUrl: $("#botJudgeBaseUrl").value
   };
 }
 
@@ -317,6 +346,23 @@ function applyBotSettingsDraft(draft) {
   $("#botJudgeModel").value = draft.judgeModel;
   $("#botJudgeTimeout").value = draft.judgeTimeoutMs;
   $("#botJudgeRecent").value = draft.judgeMaxRecentMessages;
+  $("#botJudgeEffort").value = draft.judgeReasoningEffort || "low";
+  $("#botJudgeAgentTimeout").value = draft.judgeAgentTimeoutMs || "";
+  $("#botJudgeBaseUrl").value = draft.judgeBaseUrl || "";
+  syncJudgeProviderFields();
+}
+
+// Subscription providers need effort and a whole-turn timeout; only the
+// custom provider has an editable URL.
+function syncJudgeProviderFields() {
+  const provider = $("#botJudgeProvider").value;
+  const subscription = provider === "codex" || provider === "claude";
+  $$("[data-judge-subscription]").forEach((node) => { node.hidden = !subscription; });
+  $$("[data-judge-http]").forEach((node) => { node.hidden = subscription; });
+  $$("[data-judge-custom]").forEach((node) => { node.hidden = provider !== "custom"; });
+  const hint = { codex: "judgeHintCodex", claude: "judgeHintClaude", custom: "judgeHintCustom" }[provider] || "judgeHintApi";
+  $("#botJudgeHint").textContent = t(hint);
+  runExtensionHook("judgeProviderChanged", provider);
 }
 
 function readLogFilters() {
@@ -413,6 +459,7 @@ function applyI18n() {
   $$("[data-i18n-placeholder]").forEach((node) => { node.placeholder = t(node.dataset.i18nPlaceholder); });
   $$("[data-i18n-title]").forEach((node) => { node.title = t(node.dataset.i18nTitle); });
   $$("[data-i18n-aria-label]").forEach((node) => { node.setAttribute("aria-label", t(node.dataset.i18nAriaLabel)); });
+  $$("[data-i18n-label]").forEach((node) => { node.label = t(node.dataset.i18nLabel); });
   $("#languageSelect").value = app.language;
   app.lastLogSignature = "";
   updatePageIdentity();
@@ -440,6 +487,12 @@ function isDarkTheme() {
 function updatePageIdentity() {
   const titles = { overview: "overviewTitle", channels: "channelsTitle", intelligence: "intelligenceTitle", memory: "memoryTitle", knowledge: "knowledgeTitle", activity: "activityTitle", settings: "settingsTitle" };
   const subtitles = { channels: "channelsSubtitle", intelligence: "intelligenceSubtitle", memory: "memorySubtitle", knowledge: "knowledgeSubtitle", activity: "activitySubtitle", settings: "settingsSubtitle" };
+  for (const extension of dashboardExtensions) {
+    for (const [view, keys] of Object.entries(extension.views || {})) {
+      titles[view] = keys.title;
+      subtitles[view] = keys.subtitle;
+    }
+  }
   $("#pageTitle").textContent = t(titles[app.view]);
   const engine = getEngineInfo();
   $("#pageSubtitle").textContent = app.view === "overview"
@@ -622,6 +675,7 @@ async function refreshView({ quiet = false } = {}) {
   tasks.push(refreshMaintenance({ quiet }));
   if (["memory", "knowledge"].includes(app.view)) tasks.push(refreshMemory({ quiet }));
   if (app.view === "activity") tasks.push(refreshLogs({ quiet }));
+  for (const result of runExtensionHook("refresh", app.view, { quiet })) tasks.push(...(Array.isArray(result) ? result : [result]));
   await Promise.allSettled(tasks);
 }
 
@@ -701,6 +755,7 @@ function renderAll() {
   renderKnowledge();
   renderLogs();
   renderSettings();
+  runExtensionHook("render");
 }
 
 function renderState() {
@@ -716,6 +771,7 @@ function renderState() {
   renderEvents();
   renderRecentTimeline();
   renderSettings();
+  runExtensionHook("renderState");
 }
 
 function renderMaintenance() {
@@ -1062,6 +1118,13 @@ function renderBotControls() {
     $("#botJudgeModel").value = settings.judgeModel || "";
     $("#botJudgeTimeout").value = settings.judgeTimeoutMs;
     $("#botJudgeRecent").value = settings.judgeMaxRecentMessages;
+    const interest = app.state?.qq?.interestSettings;
+    if (interest) {
+      $("#botJudgeEffort").value = interest.reasoningEffort || "low";
+      $("#botJudgeAgentTimeout").value = interest.agentTimeoutMs || 90000;
+      $("#botJudgeBaseUrl").value = interest.baseUrl || "";
+    }
+    syncJudgeProviderFields();
   }
   if (dirty && !busy) setBotControlStatus("dirty", "settingsUnsaved");
   const activeGenerations = sumValues(app.state?.qq?.activeGenerationCounts);
@@ -1072,7 +1135,9 @@ function renderBotControls() {
   setHtml($("#botDiagnostics"), [
     [t("diagEngine", { value: engineSummary(engine) }), ""],
     [t("diagJudgeProvider", { value: settings.judgeProvider || "openrouter" }), ""],
-    [settings.judgeApiKeyConfigured ? t("diagJudgeKeyReady") : t("diagJudgeKeyMissing"), settings.judgeApiKeyConfigured ? "ok" : "bad"],
+    ["codex", "claude"].includes(settings.judgeProvider)
+      ? [t("diagJudgeSubscription"), "ok"]
+      : [settings.judgeApiKeyConfigured ? t("diagJudgeKeyReady") : t("diagJudgeKeyMissing"), settings.judgeApiKeyConfigured ? "ok" : "bad"],
     [t("diagSearchProvider", { value: provider }), settings.webLookupEnabled ? "" : "warn"],
     [t("diagSafeFetch", { value: safeFetchMode }), ""],
     [t("diagActiveGeneration", { value: activeGenerations }), activeGenerations ? "warn" : ""],
@@ -1081,18 +1146,31 @@ function renderBotControls() {
 }
 
 function collectBotSettings() {
-  return {
+  const provider = $("#botJudgeProvider").value;
+  const subscription = provider === "codex" || provider === "claude";
+  const settings = {
     enhancerEnabled: $("#botEnhancerToggle").checked,
     webLookupEnabled: $("#botWebLookupToggle").checked,
     proactiveEnabled: $("#botProactiveToggle").checked,
     judgeEnabled: $("#botJudgeToggle").checked,
     judgeEveryMessages: Number($("#botJudgeMessages").value),
     judgeEveryMinutes: Number($("#botJudgeMinutes").value),
-    judgeProvider: $("#botJudgeProvider").value,
-    judgeModel: $("#botJudgeModel").value.trim(),
+    judgeProvider: provider,
     judgeTimeoutMs: Number($("#botJudgeTimeout").value),
     judgeMaxRecentMessages: Number($("#botJudgeRecent").value)
   };
+  // Switching providers resets the model to that provider's default unless
+  // a model was typed for the new provider.
+  const model = $("#botJudgeModel").value.trim();
+  if (model) settings.judgeModel = model;
+  if (subscription) {
+    settings.judgeReasoningEffort = $("#botJudgeEffort").value;
+    settings.judgeAgentTimeoutMs = Number($("#botJudgeAgentTimeout").value);
+  }
+  const baseUrl = $("#botJudgeBaseUrl").value.trim();
+  const currentBaseUrl = app.state?.qq?.interestSettings?.baseUrl || "";
+  if (provider === "custom" && baseUrl !== currentBaseUrl) settings.judgeBaseUrl = baseUrl;
+  return settings;
 }
 
 function setBotControlStatus(status, messageKey) {
@@ -2286,7 +2364,8 @@ function getCommands() {
     { id: "health", label: t("actionHealth"), hint: t("actionHealthHint"), icon: icons.pulse, keywords: "diagnose service status 检查 健康" },
     { id: "theme", label: t("actionTheme"), hint: t("actionThemeHint"), icon: icons.theme, keywords: "dark light 深色 浅色" },
     { id: "raw", label: t("actionApi"), hint: t("actionApiHint"), icon: icons.raw, keywords: "api json state raw 原始" },
-    { id: "add-group", label: t("actionAddGroup"), hint: t("actionAddGroupHint"), icon: icons.add, keywords: "qq allowlist 群 白名单 添加" }
+    { id: "add-group", label: t("actionAddGroup"), hint: t("actionAddGroupHint"), icon: icons.add, keywords: "qq allowlist 群 白名单 添加" },
+    ...runExtensionHook("commands").flat()
   ];
 }
 
@@ -2355,7 +2434,9 @@ async function runCommand(id) {
   if (id === "add-group") {
     setView("channels", { focus: false });
     requestAnimationFrame(() => $("#groupInput").focus());
+    return;
   }
+  await Promise.allSettled(runExtensionHook("runCommand", id));
 }
 
 function renderInitialShell() {
@@ -2711,8 +2792,10 @@ setInterval(() => {
   if (!app.controllers.has("state") && now - app.lastFetch.state >= base) void refreshState({ quiet: true }).catch(() => undefined);
   if (!app.controllers.has("maintenance") && now - app.lastFetch.maintenance >= base) void refreshMaintenance({ quiet: true }).catch(() => undefined);
   if (["memory", "knowledge"].includes(app.view) && !app.controllers.has("memory") && now - app.lastFetch.memory >= base) void refreshMemory({ quiet: true }).catch(() => undefined);
+  runExtensionHook("tick", now, base);
 }, 1_000);
 
+runExtensionHook("init");
 restoreDashboardUiState();
 setTheme(app.theme);
 applyI18n();

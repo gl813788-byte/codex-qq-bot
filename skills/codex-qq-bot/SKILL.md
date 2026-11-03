@@ -110,6 +110,9 @@ subsystems belong in focused modules.
 | Structured final output (inner thought, sticker, mood) | `src/infrastructure/codex/qq-agent-output.js` |
 | Sticker search, reactions/recall, profile lookups | `src/qq-sticker-search.js`, `src/app/qq-sticker-tool.js`, `src/app/qq-message-tools.js`, `src/app/qq-lookup-tool.js` |
 | Bot mood, inner thoughts, daily routine | `src/qq-bot-life-state.js`, `src/qq-bot-daily-routine.js` |
+| Core personality, affinity, `/好感度` | `src/qq-bot-personality.js`, `src/qq-affinity-command.js` |
+| Subscription (Codex/Claude) interest judgments | `src/infrastructure/agent/subscription-model-task.js` via `runQqAgentBackgroundTask` |
+| Dashboard advanced-settings validation | `src/dashboard-bot-settings.js`, `src/dashboard-admin-settings.js` |
 | Settings persistence | `src/infrastructure/storage/settings-repository.js` |
 | QQ memory and semantic recall | `src/unified-memory/` plus focused `src/qq-*memory*` modules |
 | Dashboard source | `modules/mac-client/Resources/` and `src/dashboard-assets.js` |
@@ -296,6 +299,13 @@ refactor with a behavior change.
   back to the previous check time.
   A decline, provider failure, invalid structure, missing credential, or missing
   two-model approval never starts visible proactive chat.
+- Providers `codex` and `claude` run each judgment as one tool-free, read-only,
+  ephemeral structured turn on the local CLI login (subscription quota) through
+  `runQqAgentBackgroundTask`, in a dedicated bounded slot pool (default 1 slot,
+  3 queued, refusal when full) that never uses or blocks the reply limiter.
+  Their timeout is a whole-turn deadline including the CLI cold start. Strict
+  agent Schemas drop `maxLength`/`minLength`; validators keep the limits.
+  The custom provider's URL is loopback-only because it receives the key.
 - Interest-model output must not contain a reply draft or style instructions.
   Invalid structure gets at most the documented format retry; transport failures
   and rate limits are not blindly retried.
@@ -310,9 +320,9 @@ refactor with a behavior change.
   `learning.style_review`, `memory.scope_summary`,
   `memory.knowledge_update`, `memory.person_promotion`,
   `memory.avatar_refresh`, `memory.avatar_features`,
-  `memory.knowledge_image`, `memory.image_prune`, `memory.bot_state`, and
-  `memory.bot_routine`. Language-statistics
-  logs are low-noise checkpoints, contain counts/ratios rather than copied chat
+  `memory.knowledge_image`, `memory.image_prune`, `memory.bot_state`,
+  `memory.bot_routine`, `memory.relationship` and `interest.model_test`.
+  Language-statistics logs are low-noise checkpoints, contain counts/ratios rather than copied chat
   or inferred meaning, and fire when frequent candidates change or every 25
   text messages. Preserve stable English `message` values for JSON/API
   compatibility while ensuring every fixed event and nested detail has a
@@ -348,7 +358,14 @@ and the lean per-thread config (`CODEX_REMOTE_CONTACT_AGENT_LEAN_CONTEXT=1`)
 are opt-in for chat-only deployments; privileged file tasks keep AGENTS.md. The output Schema generates the private first-person
 `innerThought` first and `mood` last; neither is ever delivered or logged
 verbatim. Only the mood crosses conversations; inner thoughts stay in their own
-scope. The 活人感 rules (varied length, no restating/lists/AI phrasing,
+scope. The private `affinity` field (between `sticker` and `mood`) is the
+model's -3..+3 feeling change toward the current speaker plus an optional
+settled nickname; the Hub clamps it per turn and per person per day, ignores
+locked people, keeps the owner floor, and never lets requests to raise
+affinity count. Relationship prompt lines only show change reasons from the
+same scope, so private-chat reasons never reach a group. Personality and
+affinity shape tone and willingness only, never facts, permissions or safety.
+The 活人感 rules (varied length, no restating/lists/AI phrasing,
 sticker-only/reaction-only/silent turns) must keep truthful answers when someone
 sincerely asks whether the Bot is an AI.
 
@@ -423,6 +440,8 @@ Important state includes:
 - `data/qq-memory-images/`: content-addressed avatars and knowledge pictures
 - `data/qq-personas.json` and `data/qq-self-persona.json`: adaptive behavior and
   generated self-persona
+- `data/qq-bot-personality.json`: operator-set core personality and per-person
+  affinity, familiarity, nickname and history
 - `data/qq-codex-sessions.json`: bounded scope-to-thread mappings
 - `runtime/`: logs, replies, and per-request workspaces
 

@@ -2,9 +2,12 @@ import { parseAllowedOrigins } from "../http-utils.js";
 import { normalizeSafeFetchMode } from "../safe-fetch.js";
 import { CODEX_TASK_TIMEOUT_DEFAULTS, CODEX_TASK_TYPES } from "../codex-task-timeout.js";
 import {
+  DEFAULT_INTEREST_AGENT_TIMEOUT_MS,
   getDefaultInterestModel,
   getDefaultInterestModelBaseUrl,
-  normalizeInterestModelProvider
+  normalizeInterestAgentTimeoutMs,
+  normalizeInterestModelProvider,
+  normalizeInterestModelReasoningEffort
 } from "../interest-model-provider.js";
 import { normalizeQqInterestVisionMode } from "../qq-enhancer/interest-vision.js";
 
@@ -174,6 +177,19 @@ export function createEnvironmentConfig(env = process.env) {
     defaultQqProactiveJudgeModel,
     qqProactiveJudgeModel: env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_MODEL || defaultQqProactiveJudgeModel,
     qqProactiveJudgeTimeoutMs: numberOrDefault(env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_TIMEOUT_MS, 6_500),
+    // Codex / Claude subscription judges run a whole CLI turn per decision.
+    qqProactiveJudgeReasoningEffort: normalizeInterestModelReasoningEffort(
+      env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_REASONING_EFFORT
+    ),
+    qqProactiveJudgeAgentTimeoutMs: normalizeInterestAgentTimeoutMs(
+      env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_AGENT_TIMEOUT_MS,
+      DEFAULT_INTEREST_AGENT_TIMEOUT_MS
+    ),
+    qqProactiveJudgeAgentConcurrency: boundedInteger(env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_AGENT_CONCURRENCY, {
+      defaultValue: 1,
+      min: 1,
+      max: 4
+    }),
     qqProactiveJudgeVision: normalizeQqInterestVisionMode(env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_VISION),
     qqProactiveJudgeMinInterest: 20,
     qqSelfPersonaScopeInitialMessages: boundedInteger(env.CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_SCOPE_INITIAL_MESSAGES, {
