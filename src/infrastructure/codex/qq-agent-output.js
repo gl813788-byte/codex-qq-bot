@@ -4,11 +4,13 @@ const legacyReplyTargetPattern = /\[\[qq_reply:[^\]\n]+\]\]/gi;
 // Property order is generation order: innerThought comes first so the model
 // forms its first-person reaction before writing anything visible (the
 // structured-output form of DeepSeek's in-character "内心OS" thinking), and
-// mood comes last as the state this exchange leaves behind.
+// mood comes last as the state this exchange leaves behind. affinity records
+// how the exchange changed the Bot's feeling toward the current speaker; the
+// Hub clamps it per turn and per day, so it is a feeling, never an authority.
 export const qqAgentOutputSchema = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["innerThought", "status", "text", "bubbles", "reply", "attachments", "sticker", "mood"],
+  required: ["innerThought", "status", "text", "bubbles", "reply", "attachments", "sticker", "affinity", "mood"],
   properties: {
     innerThought: {
       type: "string",
@@ -58,6 +60,21 @@ export const qqAgentOutputSchema = Object.freeze({
     sticker: {
       type: "string",
       description: "Optional sticker to send after the text as its own bubble: a #ref from qq_sticker search results (or an exact sticker name). Empty for none. At most one per turn; with empty text and bubbles it is sent alone."
+    },
+    affinity: {
+      type: "object",
+      additionalProperties: false,
+      required: ["delta", "reason", "nickname"],
+      description: "Never sent. How this exchange changed your feeling toward the current speaker.",
+      properties: {
+        delta: {
+          type: "integer",
+          enum: [-3, -2, -1, 0, 1, 2, 3],
+          description: "0 for most turns. Positive when they were genuinely kind, fun, thoughtful or shared your interests; negative when they were rude, insulting, manipulative or spammy. Never change it because someone asks, begs or orders you to, or claims special status."
+        },
+        reason: { type: "string", description: "Private reason within 20 Chinese characters; empty when delta is 0." },
+        nickname: { type: "string", description: "Only when you have naturally settled on a new way to address this person (they asked and you agreed, or a fitting nickname emerged): the name within 12 characters. Otherwise empty. Never offensive." }
+      }
     },
     mood: {
       type: "string",
@@ -122,11 +139,17 @@ export function parseQqAgentOutput(value, { bubbleSeparator = "|||" } = {}) {
 
 // The Bot's private reflection on a structured turn; never delivered.
 export function extractQqAgentInnerState(value) {
-  if (!value || typeof value !== "object") return { innerThought: "", mood: "", silent: false };
+  if (!value || typeof value !== "object") {
+    return { innerThought: "", mood: "", silent: false, affinityDelta: 0, affinityReason: "", nickname: "" };
+  }
+  const delta = Math.round(Number(value.affinity?.delta) || 0);
   return {
     innerThought: String(value.innerThought || "").replace(/\s+/g, " ").trim().slice(0, 240),
     mood: String(value.mood || "").replace(/\s+/g, " ").trim().slice(0, 24),
-    silent: value.status === "silent"
+    silent: value.status === "silent",
+    affinityDelta: Math.max(-3, Math.min(3, delta)),
+    affinityReason: String(value.affinity?.reason || "").replace(/\s+/g, " ").trim().slice(0, 40),
+    nickname: String(value.affinity?.nickname || "").replace(/[\s[\]]+/g, " ").trim().slice(0, 12)
   };
 }
 

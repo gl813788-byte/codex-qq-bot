@@ -33,6 +33,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5v15M8 7.5a3.5 3.5 0 0 1 4-3 3.5 3.5 0 0 1 4 3 3.5 3.5 0 0 1 2.5 5.5A3.5 3.5 0 0 1 16 19.5a3.5 3.5 0 0 1-4 0 3.5 3.5 0 0 1-4 0A3.5 3.5 0 0 1 5.5 13 3.5 3.5 0 0 1 8 7.5Z" /></svg>
             <span data-i18n="navIntelligence">行为</span>
           </button>
+          <button class="nav-item" type="button" data-view="persona">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5" /><path d="M17.5 4.5l.6 1.3 1.4.2-1 1 .2 1.4-1.2-.7-1.3.7.3-1.4-1-1 1.4-.2z" /></svg>
+            <span data-i18n="navPersona">人格</span>
+          </button>
           <button class="nav-item" type="button" data-view="memory">
             <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6.5" rx="7" ry="2.8" /><path d="M5 6.5v5.5c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V6.5M5 12v5.5c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V12" /></svg>
             <span data-i18n="navMemory">记忆</span>
@@ -130,6 +134,14 @@
             </div>
 
             <div class="grid overview-lower">
+              <div class="behavior-column">
+              <section class="card">
+                <header class="card-head">
+                  <div><h2 data-i18n="overviewPersona">Bot 此刻</h2><p data-i18n="overviewPersonaHint">心情、作息与最亲近的人</p></div>
+                  <button class="button small ghost" type="button" data-go-view="persona" data-i18n="openPersona">打开人格</button>
+                </header>
+                <div id="overviewPersona" class="overview-persona"></div>
+              </section>
               <section class="card">
                 <header class="card-head">
                   <div><h2 data-i18n="latencyTitle">接口响应</h2><p id="pulseSampleLabel" data-i18n="waitingSamples">等待首个样本</p></div>
@@ -145,6 +157,7 @@
                   <div class="pulse-axis"><span id="pulseAxisStart">—</span><span id="pulseAxisMiddle">—</span><span id="pulseAxisEnd" data-i18n="now">现在</span></div>
                 </div>
               </section>
+              </div>
               <section class="card">
                 <header class="card-head">
                   <div><h2 data-i18n="recentActivity">最近活动</h2><p data-i18n="recentActivityHint">最近的 QQ 消息与回复</p></div>
@@ -228,14 +241,38 @@
                   </label>
                 </div>
                 <div class="tuning-grid">
-                  <label class="field"><span data-i18n="judgeProvider">模型服务</span><select id="botJudgeProvider"><option value="openrouter">OpenRouter</option><option value="deepseek">DeepSeek</option><option value="custom" data-i18n="judgeProviderCustom">自定义兼容服务</option></select></label>
-                  <label class="field"><span data-i18n="judgeModel">判定模型</span><input id="botJudgeModel" autocomplete="off" spellcheck="false" /></label>
-                  <label class="field"><span data-i18n="judgeTimeout">静默超时（ms）</span><input id="botJudgeTimeout" type="number" min="1500" max="20000" step="100" /></label>
+                  <label class="field"><span data-i18n="judgeProvider">模型服务</span><select id="botJudgeProvider"><optgroup label="订阅（本机 CLI 登录）" data-i18n-label="judgeProviderGroupSubscription"><option value="codex" data-i18n="judgeProviderCodex">Codex 订阅</option><option value="claude" data-i18n="judgeProviderClaude">Claude 订阅</option></optgroup><optgroup label="API Key" data-i18n-label="judgeProviderGroupApi"><option value="openrouter">OpenRouter</option><option value="deepseek">DeepSeek</option><option value="custom" data-i18n="judgeProviderCustom">自定义兼容服务</option></optgroup></select></label>
+                  <label class="field"><span data-i18n="judgeModel">判定模型</span><input id="botJudgeModel" list="botJudgeModelOptions" autocomplete="off" spellcheck="false" /><datalist id="botJudgeModelOptions"></datalist></label>
+                  <label class="field" data-judge-http><span data-i18n="judgeTimeout">静默超时（ms）</span><input id="botJudgeTimeout" type="number" min="1500" max="20000" step="100" /></label>
+                  <label class="field" data-judge-subscription hidden><span data-i18n="judgeEffort">思考强度</span><select id="botJudgeEffort"><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+                  <label class="field" data-judge-subscription hidden><span data-i18n="judgeAgentTimeout">整轮超时（ms）</span><input id="botJudgeAgentTimeout" type="number" min="15000" max="300000" step="1000" /></label>
+                  <label class="field" data-judge-custom hidden><span data-i18n="judgeBaseUrl">接口地址</span><input id="botJudgeBaseUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://example.com/v1" /></label>
                   <label class="field"><span data-i18n="judgeEveryMessages">消息间隔</span><input id="botJudgeMessages" type="number" min="1" max="1000" step="1" /></label>
                   <label class="field"><span data-i18n="judgeEveryMinutes">分钟间隔</span><input id="botJudgeMinutes" type="number" min="0" max="1440" step="1" /></label>
                   <label class="field"><span data-i18n="judgeRecentMessages">最近上下文</span><input id="botJudgeRecent" type="number" min="1" max="12" step="1" /></label>
                 </div>
-                <div class="form-actions"><button id="saveBotSettings" class="button primary" type="submit" data-i18n="saveBotSettings">保存 Bot 设置</button></div>
+                <p id="botJudgeHint" class="field-note judge-hint"></p>
+                <div class="form-actions split">
+                  <div class="test-actions">
+                    <input id="interestTestText" maxlength="300" autocomplete="off" placeholder="测试消息（可选）" data-i18n-placeholder="interestTestPlaceholder" />
+                    <button id="testInterestModel" class="button ghost" type="button" data-i18n="interestTest">测试兴趣模型</button>
+                  </div>
+                  <button id="saveBotSettings" class="button primary" type="submit" data-i18n="saveBotSettings">保存 Bot 设置</button>
+                </div>
+                <div id="interestTestResult" class="test-result" hidden aria-live="polite"></div>
+              </form>
+            </section>
+
+            <section class="card">
+              <header class="card-head">
+                <div><h2 data-i18n="interestPresetHeading">兴趣偏好</h2><p data-i18n="interestPresetHint">人设学习完成前，兴趣模型按这里判断 Bot 喜欢和不喜欢什么；每行一条。</p></div>
+                <span id="interestPresetStatus" class="save-state" data-i18n="settingsSynced">设置已同步</span>
+              </header>
+              <form id="interestPresetForm" class="preset-grid">
+                <label class="field"><span data-i18n="presetLikes">感兴趣</span><textarea id="presetLikes" rows="5" maxlength="4000"></textarea></label>
+                <label class="field"><span data-i18n="presetDislikes">不感兴趣</span><textarea id="presetDislikes" rows="5" maxlength="4000"></textarea></label>
+                <label class="field"><span data-i18n="presetStyle">接话风格提示</span><textarea id="presetStyle" rows="5" maxlength="4000"></textarea></label>
+                <div class="form-actions span-all"><button id="saveInterestPreset" class="button primary" type="submit" data-i18n="savePreset">保存兴趣偏好</button></div>
               </form>
             </section>
 
@@ -275,6 +312,124 @@
                   </header>
                   <div id="qqPrivateInterest" class="stack"></div>
                 </section>
+              </div>
+            </div>
+          </section>
+
+          <!-- Persona -->
+          <section class="view" id="view-persona" data-view-panel="persona" hidden>
+            <div id="personaStats" class="stat-row" aria-live="polite"></div>
+            <div class="persona-toolbar">
+              <div id="personaTabs" class="segmented" role="tablist" aria-label="人格分区" data-i18n-aria-label="personaSections">
+                <button type="button" role="tab" data-persona-tab="profile" data-i18n="personaTabProfile">性格</button>
+                <button type="button" role="tab" data-persona-tab="people" data-i18n="personaTabPeople">关系</button>
+                <button type="button" role="tab" data-persona-tab="state" data-i18n="personaTabState">状态</button>
+              </div>
+              <span id="personaSaveState" class="save-state" data-i18n="settingsSynced">设置已同步</span>
+            </div>
+
+            <div id="personaPanelProfile" class="persona-panel">
+              <form id="personaForm" class="grid persona-grid">
+                <section class="card">
+                  <header class="card-head">
+                    <div><h2 data-i18n="personaCore">核心设定</h2><p data-i18n="personaCoreHint">部署者设定的稳定性格，优先于自动学习出的人设。</p></div>
+                    <label class="switch-label"><span class="switch"><input id="personaEnabled" type="checkbox" /><span aria-hidden="true"></span></span><em data-i18n="personaEnabled">启用</em></label>
+                  </header>
+                  <div class="stack">
+                    <div class="field"><span data-i18n="personaPreset">性格预设</span><div id="personaPresets" class="preset-chips" role="group"></div></div>
+                    <label class="field"><span data-i18n="personaIdentity">我是谁</span><textarea id="personaIdentity" rows="3" maxlength="600" placeholder="例如：群里最爱研究新玩意儿的技术宅，嘴上嫌弃其实很热心" data-i18n-placeholder="personaIdentityHint"></textarea></label>
+                    <div class="form-grid">
+                      <label class="field"><span data-i18n="personaSpeechHabits">说话习惯</span><textarea id="personaSpeechHabits" rows="4" placeholder="每行一条" data-i18n-placeholder="onePerLine"></textarea></label>
+                      <label class="field"><span data-i18n="personaCatchphrases">口头禅</span><textarea id="personaCatchphrases" rows="4" placeholder="每行一条" data-i18n-placeholder="onePerLine"></textarea></label>
+                      <label class="field"><span data-i18n="personaLikes">喜欢</span><textarea id="personaLikes" rows="4" placeholder="每行一条" data-i18n-placeholder="onePerLine"></textarea></label>
+                      <label class="field"><span data-i18n="personaDislikes">不喜欢</span><textarea id="personaDislikes" rows="4" placeholder="每行一条" data-i18n-placeholder="onePerLine"></textarea></label>
+                      <label class="field span-2"><span data-i18n="personaBoundaries">底线</span><textarea id="personaBoundaries" rows="3" placeholder="每行一条，例如：不参与人身攻击" data-i18n-placeholder="personaBoundariesHint"></textarea></label>
+                    </div>
+                  </div>
+                </section>
+                <div class="behavior-column">
+                  <section class="card">
+                    <header class="card-head"><div><h2 data-i18n="personaTraits">性格维度</h2><p data-i18n="personaTraitsHint">50 为中性不写入提示词；越靠两端，表现越明显。</p></div></header>
+                    <div id="personaTraits" class="trait-list"></div>
+                  </section>
+                  <section class="card">
+                    <header class="card-head">
+                      <div><h2 data-i18n="affinityRules">好感规则</h2><p data-i18n="affinityRulesHint">模型每轮只能小幅调整好感，并受每日上限约束，不能被话术刷分。</p></div>
+                      <label class="switch-label"><span class="switch"><input id="affinityEnabled" type="checkbox" /><span aria-hidden="true"></span></span><em data-i18n="personaEnabled">启用</em></label>
+                    </header>
+                    <div class="form-grid">
+                      <label class="field"><span data-i18n="affinityMaxDelta">每轮最大变化</span><input id="affinityMaxDelta" type="number" min="1" max="10" step="1" /></label>
+                      <label class="field"><span data-i18n="affinityDailyCap">每人每日上限</span><input id="affinityDailyCap" type="number" min="1" max="50" step="1" /></label>
+                      <label class="field"><span data-i18n="affinityHalfLife">淡化半衰期（天，0 不衰减）</span><input id="affinityHalfLife" type="number" min="0" max="3650" step="1" /></label>
+                      <label class="field"><span data-i18n="affinityOwnerFloor">主人好感下限</span><input id="affinityOwnerFloor" type="number" min="-100" max="100" step="1" /></label>
+                      <label class="toggle-card span-2"><span><strong data-i18n="affinityReveal">允许用户查看自己的好感度</strong><small data-i18n="affinityRevealHint">关闭后普通用户发送 /好感度 只会得到一句玩笑。</small></span><span class="switch"><input id="affinityReveal" type="checkbox" /><span aria-hidden="true"></span></span></label>
+                    </div>
+                  </section>
+                </div>
+                <section class="card span-all">
+                  <header class="card-head">
+                    <div><h2 data-i18n="personaPreview">提示词预览</h2><p data-i18n="personaPreviewHint">保存后主模型实际看到的人格与关系段落（关系示例取好感最高的人）。</p></div>
+                    <div class="form-actions">
+                      <button id="resetPersonaForm" class="button ghost" type="button" data-i18n="revertChanges">撤销修改</button>
+                      <button id="savePersona" class="button primary" type="submit" data-i18n="savePersona">保存人格</button>
+                    </div>
+                  </header>
+                  <pre id="personaPreview" class="prompt-preview"></pre>
+                </section>
+              </form>
+            </div>
+
+            <div id="personaPanelPeople" class="persona-panel" hidden>
+              <section class="card">
+                <header class="card-head">
+                  <div><h2 data-i18n="relationships">好感与关系</h2><p data-i18n="relationshipsHint">Bot 对每个人的好感、熟悉度、称呼与印象。点击一行可编辑或锁定。</p></div>
+                  <span id="peopleCount" class="badge">0</span>
+                </header>
+                <div id="affinityDistribution" class="affinity-distribution" aria-hidden="true"></div>
+                <div class="toolbar people-toolbar">
+                  <label class="search-field grow"><input id="peopleSearch" type="search" placeholder="搜索名字、QQ 号、称呼或印象" data-i18n-placeholder="peopleSearch" data-i18n-aria-label="peopleSearch" /></label>
+                  <select id="peopleLevelFilter" aria-label="好感等级" data-i18n-aria-label="affinityLevel"></select>
+                  <select id="peopleSort" aria-label="排序" data-i18n-aria-label="sortBy">
+                    <option value="affinity" data-i18n="sortAffinity">按好感</option>
+                    <option value="familiarity" data-i18n="sortFamiliarity">按熟悉度</option>
+                    <option value="recent" data-i18n="sortRecent">按最近互动</option>
+                  </select>
+                  <button id="addPerson" class="button ghost" type="button" data-i18n="addPerson">添加人物</button>
+                </div>
+                <div id="peopleList" class="people-list" aria-live="polite"></div>
+              </section>
+            </div>
+
+            <div id="personaPanelState" class="persona-panel" hidden>
+              <div class="grid behavior-grid">
+                <div class="behavior-column">
+                  <section class="card">
+                    <header class="card-head"><div><h2 data-i18n="botMood">此刻心情</h2><p data-i18n="botMoodHint">每轮结束时由主模型更新，跨会话延续并逐渐淡去。</p></div></header>
+                    <div id="moodCurrent" class="mood-current"></div>
+                    <form id="moodForm" class="inline-form">
+                      <label class="field grow"><span class="sr-only" data-i18n="setMood">设置心情</span><input id="moodInput" maxlength="16" placeholder="2-8 个字，例如：有点困" data-i18n-placeholder="moodPlaceholder" /></label>
+                      <button class="button primary" type="submit" data-i18n="setMood">设置心情</button>
+                      <button id="clearMood" class="button ghost" type="button" data-i18n="clearMood">清除</button>
+                    </form>
+                  </section>
+                  <section class="card">
+                    <header class="card-head">
+                      <div><h2 data-i18n="botRoutine">今日作息</h2><p data-i18n="botRoutineHint">每天生成一次，让 Bot 的在线状态和语气更像真人。</p></div>
+                      <button id="regenerateRoutine" class="button small ghost" type="button" data-i18n="regenerateRoutine">重新生成</button>
+                    </header>
+                    <div id="routineTimeline" class="routine-timeline"></div>
+                  </section>
+                </div>
+                <div class="behavior-column">
+                  <section class="card">
+                    <header class="card-head"><div><h2 data-i18n="innerThoughts">内心OS</h2><p data-i18n="innerThoughtsHint">只在本机控制台可见，从不发送；按会话保留最近几条。</p></div></header>
+                    <div id="innerThoughts" class="thought-list"></div>
+                  </section>
+                  <section class="card">
+                    <header class="card-head"><div><h2 data-i18n="generatedPersona">自动学习的人设</h2><p data-i18n="generatedPersonaHint">从聊天摘要中学到的兴趣与风格，作为核心人格之下的补充。</p></div></header>
+                    <div id="generatedPersona" class="stack"></div>
+                  </section>
+                </div>
               </div>
             </div>
           </section>
@@ -421,6 +576,39 @@
                 </div>
               </section>
             </div>
+            <div class="grid settings-grid admin-grid">
+              <section class="card">
+                <header class="card-head">
+                  <div><h2 data-i18n="aiSettings">主模型</h2><p id="aiSettingsHint" data-i18n="aiSettingsHint">QQ 回复使用的模型与推理参数，保存后下一轮生效。</p></div>
+                  <button id="refreshModels" class="button small ghost" type="button" data-i18n="refreshModels">刷新模型列表</button>
+                </header>
+                <form id="aiSettingsForm" class="form-grid">
+                  <label class="field span-2"><span data-i18n="engineModel">模型</span><select id="aiModel"></select></label>
+                  <label class="field"><span data-i18n="engineEffort">思考强度</span><select id="aiEffort"></select></label>
+                  <label class="field"><span data-i18n="reasoningSummary">推理摘要</span><select id="aiSummary"><option value="auto">auto</option><option value="concise">concise</option><option value="detailed">detailed</option><option value="none">none</option></select></label>
+                  <label class="field"><span data-i18n="codexPersonality">Codex 人格</span><select id="aiPersonality"><option value="none">none</option><option value="friendly">friendly</option><option value="pragmatic">pragmatic</option></select></label>
+                  <label class="field"><span data-i18n="serviceTier">服务档位</span><select id="aiServiceTier"></select></label>
+                  <div class="form-actions span-2"><button class="button primary" type="submit" data-i18n="saveAiSettings">保存模型设置</button></div>
+                </form>
+              </section>
+              <section class="card">
+                <header class="card-head"><div><h2 data-i18n="identitySettings">身份与权限</h2><p data-i18n="identitySettingsHint">名字、称呼和谁能管理 Bot；仅本机可修改。</p></div></header>
+                <form id="identityForm" class="form-grid">
+                  <label class="field"><span data-i18n="assistantName">Bot 名字</span><input id="identityAssistantName" maxlength="40" required /></label>
+                  <label class="field"><span data-i18n="ownerLabel">对主人的称呼</span><input id="identityOwnerLabel" maxlength="20" required /></label>
+                  <label class="field span-2"><span data-i18n="assistantMentions">唤醒别名</span><input id="identityMentions" placeholder="用逗号分隔，例如：小助手, bot" data-i18n-placeholder="commaSeparated" /></label>
+                  <label class="field"><span data-i18n="ownerIds">主人 QQ</span><textarea id="identityOwners" rows="2" placeholder="空格或逗号分隔" data-i18n-placeholder="idListHint"></textarea></label>
+                  <label class="field"><span data-i18n="adminIds">管理员 QQ</span><textarea id="identityAdmins" rows="2" placeholder="空格或逗号分隔" data-i18n-placeholder="idListHint"></textarea></label>
+                  <div class="form-actions span-2"><button class="button primary" type="submit" data-i18n="saveIdentity">保存身份设置</button></div>
+                </form>
+                <div class="subhead ban-head"><h3 data-i18n="bannedUsers">封禁名单</h3><span id="banCount" class="badge">0</span></div>
+                <div id="banList" class="token-list"></div>
+              </section>
+              <section class="card span-all">
+                <header class="card-head"><div><h2 data-i18n="commandPermissions">指令开放范围</h2><p data-i18n="commandPermissionsHint">打开后普通群友也能使用该指令；主人和管理员始终可用。</p></div></header>
+                <div id="commandPermissionList" class="command-permission-list"></div>
+              </section>
+            </div>
             <section class="card about-card">
               <header class="card-head"><div><h2>Codex QQ Bot</h2><p data-i18n="aboutBody">把 QQ 接到本机 Codex 或 Claude Code 的本地中枢。</p></div></header>
               <dl id="runtimeFacts" class="fact-grid"></dl>
@@ -434,6 +622,7 @@
       <button class="active" type="button" data-view="overview"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="8" rx="1.8" /><rect x="13.5" y="3.5" width="7" height="5" rx="1.8" /><rect x="3.5" y="14.5" width="7" height="6" rx="1.8" /><rect x="13.5" y="11.5" width="7" height="9" rx="1.8" /></svg><span data-i18n="navOverview">总览</span></button>
       <button type="button" data-view="channels"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5.5h15v10h-9l-4.5 3.5v-3.5h-1.5z" /></svg><span data-i18n="navChannels">通道</span></button>
       <button type="button" data-view="intelligence"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5v15M8 7.5a3.5 3.5 0 0 1 4-3 3.5 3.5 0 0 1 4 3 3.5 3.5 0 0 1 2.5 5.5A3.5 3.5 0 0 1 16 19.5a3.5 3.5 0 0 1-4 0 3.5 3.5 0 0 1-4 0A3.5 3.5 0 0 1 5.5 13 3.5 3.5 0 0 1 8 7.5Z" /></svg><span data-i18n="navIntelligence">行为</span></button>
+      <button type="button" data-view="persona"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5" /><path d="M17.5 4.5l.6 1.3 1.4.2-1 1 .2 1.4-1.2-.7-1.3.7.3-1.4-1-1 1.4-.2z" /></svg><span data-i18n="navPersona">人格</span></button>
       <button type="button" data-view="memory"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6.5" rx="7" ry="2.8" /><path d="M5 6.5v11c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-11" /></svg><span data-i18n="navMemory">记忆</span></button>
       <button type="button" data-view="knowledge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5z" /></svg><span data-i18n="navKnowledge">知识</span></button>
       <button type="button" data-view="activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12.5h3.5l2.5-6 4 12 2.5-6h4.5" /></svg><span data-i18n="navActivity">日志</span></button>
@@ -506,7 +695,30 @@
       </div>
     </dialog>
 
+    <dialog id="personDialog" class="modal wide" aria-labelledby="personDialogTitle">
+      <form id="personForm" class="modal-body">
+        <header class="modal-head"><h2 id="personDialogTitle" data-i18n="editPerson">编辑关系</h2><button class="icon-button" type="button" data-close-person aria-label="关闭" data-i18n-aria-label="close">×</button></header>
+        <div class="form-grid">
+          <label class="field"><span data-i18n="personQq">QQ 号</span><input id="personUserId" inputmode="numeric" pattern="[1-9][0-9]{4,12}" required /></label>
+          <label class="field"><span data-i18n="personName">名字</span><input id="personName" maxlength="40" /></label>
+          <label class="field span-2"><span><span data-i18n="affinity">好感</span> <output id="personAffinityValue" class="mono">0</output> <em id="personAffinityLevel" class="level-chip"></em></span><input id="personAffinity" type="range" min="-100" max="100" step="1" /></label>
+          <label class="field"><span data-i18n="personNickname">Bot 对 TA 的称呼</span><input id="personNickname" maxlength="12" /></label>
+          <label class="field"><span data-i18n="personTags">印象标签</span><input id="personTags" maxlength="140" placeholder="用逗号分隔" data-i18n-placeholder="commaSeparated" /></label>
+          <label class="field span-2"><span data-i18n="personNote">备注（会给模型看）</span><textarea id="personNote" rows="2" maxlength="160"></textarea></label>
+          <label class="toggle-card span-2"><span><strong data-i18n="personLocked">锁定</strong><small data-i18n="personLockedHint">锁定后不会自然淡化，模型也不能再改动好感和称呼。</small></span><span class="switch"><input id="personLocked" type="checkbox" /><span aria-hidden="true"></span></span></label>
+        </div>
+        <div><h3 class="dialog-subtitle" data-i18n="affinityHistory">变化记录</h3><ol id="personHistory" class="history-list"></ol></div>
+        <div class="modal-actions spread">
+          <button id="removePerson" class="button danger ghost" type="button" data-i18n="removePerson">删除记录</button>
+          <span class="grow"></span>
+          <button class="button ghost" type="button" data-close-person data-i18n="cancel">取消</button>
+          <button class="button primary" type="submit" data-i18n="save">保存</button>
+        </div>
+      </form>
+    </dialog>
+
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <script src="client-persona.js"></script>
     <script src="client.js"></script>
   </body>
 </html>

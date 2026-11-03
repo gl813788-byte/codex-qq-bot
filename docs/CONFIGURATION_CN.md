@@ -237,11 +237,14 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 | `CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE` | `1` | 语义 judge 开关 |
 | `..._JUDGE_EVERY_MESSAGES` | `20` | 普通未 @ 消息阈值，范围 1–1000 |
 | `..._JUDGE_EVERY_MINUTES` | `5` | 非空周期的分钟阈值；`0` 关闭分钟分支 |
-| `..._JUDGE_PROVIDER` | `openrouter` | 兴趣模型厂商：`openrouter`、`deepseek` 或 `custom` |
-| `..._JUDGE_MODEL` | 随厂商变化 | OpenRouter 默认 `openrouter/free`；DeepSeek 默认 `deepseek-v4-flash` |
+| `..._JUDGE_PROVIDER` | `openrouter` | 兴趣模型厂商：`openrouter`、`deepseek`、`custom`，或订阅厂商 `codex` / `claude`（用本机 CLI 登录的订阅额度跑一次无工具结构化轮次，不需要 key） |
+| `..._JUDGE_MODEL` | 随厂商变化 | OpenRouter 默认 `openrouter/free`；DeepSeek 默认 `deepseek-v4-flash`；Codex 默认 `default`（账号默认模型，可填目录里的任一模型）；Claude 默认 `haiku` |
+| `..._JUDGE_REASONING_EFFORT` | `low` | 订阅厂商的思考强度：`minimal`、`low`、`medium` 或 `high`（Codex 只接受所选模型公布的档位） |
+| `..._JUDGE_AGENT_TIMEOUT_MS` | `90000` | 订阅厂商一次判断的整轮超时（含 CLI 冷启动），范围 15000–300000 |
+| `..._JUDGE_AGENT_CONCURRENCY` | `1` | 订阅判断专用的并发槽位（1–4）；另有 3 个排队位，满了直接拒绝，绝不占用回复队列 |
 | `..._JUDGE_API_KEY` | 空 | `custom` 厂商的 key |
 | `..._JUDGE_BASE_URL` | 空 | `custom` 厂商的 OpenAI 兼容 API 根地址 |
-| `..._JUDGE_TIMEOUT_MS` | `6500` | judge 流式空闲超时 |
+| `..._JUDGE_TIMEOUT_MS` | `6500` | HTTP 厂商 judge 的流式空闲超时（订阅厂商使用整轮超时） |
 | `..._JUDGE_VISION` | `auto` | 普通兴趣闸门是否也看被判断消息里的图片（最多 2 张、缩成小 JPEG 预览）：`auto` 对每个厂商/模型先试一次，厂商拒绝图片输入时改为纯文字并记住到重启，`on` 总是尝试，`off` 从不发送图片。图片会发给所配置的第三方兴趣模型服务 |
 | `CODEX_REMOTE_CONTACT_QQ_IMAGE_MAX_BYTES` | `20971520` | QQ 图片上限，默认 20 MiB |
 | `CODEX_REMOTE_CONTACT_QQ_COMPRESSED_IMAGE_MAX_EDGE` | `1600` | 压缩读取的最长边，范围 256–4096 像素；自动启动按 Hub 内存选择 1280/1600/2048 |

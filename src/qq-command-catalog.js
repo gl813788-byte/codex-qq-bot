@@ -57,6 +57,21 @@ const commands = [
     configurable: true
   },
   {
+    key: "affinity",
+    category: "conversation",
+    menuLine: "/好感度",
+    description: "查看 Bot 对你的好感与熟悉度",
+    usage: [
+      ["/好感度", "查看自己在 Bot 心里的位置"],
+      ["/好感度 @某人|QQ号", "主人或管理员查看他人"],
+      ["/好感度 排行", "主人或管理员查看好感排行"],
+      ["/好感度 设置 QQ号 数值", "主人直接设定（-100 到 100）"]
+    ],
+    aliases: ["好感度", "好感", "affinity"],
+    defaultPublic: true,
+    configurable: true
+  },
+  {
     key: "session",
     category: "conversation",
     menuLine: "/会话模式",

@@ -70,10 +70,33 @@ import { resolveQqReplyFileAttachments } from "./qq-reply-files.js";
 import { parseQqAgentOutputWithAttachmentImport } from "./infrastructure/codex/qq-agent-attachments.js";
 import { createQqZoneClient } from "./qq-qzone.js";
 import {
+  CLAUDE_INTEREST_MODEL_SUGGESTIONS,
   getDefaultInterestModel,
+  isSubscriptionInterestProvider,
+  normalizeInterestAgentTimeoutMs,
   normalizeInterestModelProvider,
+  normalizeInterestModelReasoningEffort,
   resolveInterestModelRuntimeConfig
 } from "./interest-model-provider.js";
+import { createSubscriptionModelTaskRunner } from "./infrastructure/agent/subscription-model-task.js";
+import { isQqAffinityCommand, parseQqAffinityCommand } from "./qq-affinity-command.js";
+import {
+  applyQqModelAffinityChange,
+  createEmptyQqPersonality,
+  describeQqPersonRelationship,
+  formatQqAffinityReport,
+  formatQqPersonalityCoreContext,
+  formatQqRelationshipContext,
+  applyQqPersonalityPreset,
+  normalizeQqPersonality,
+  normalizeQqPersonalityProfile,
+  recordQqPersonalityInteraction,
+  removeQqPerson,
+  setQqModelNickname,
+  summarizeQqPersonality,
+  summarizeQqPersonalityForJudge,
+  updateQqPersonByOwner
+} from "./qq-bot-personality.js";
 import { createQqRequestStore, formatQqRequestEntry } from "./qq-request-store.js";
 import {
   buildQqActiveJoinGroupPayload,
@@ -368,7 +391,11 @@ import {
   createQqNativeToolDispatcher
 } from "./infrastructure/codex/qq-native-tools.js";
 import { createQqNativeProgressReporter } from "./infrastructure/codex/qq-native-progress.js";
-import { createQqCodexTurnRunner, resolveQqAgentToolTransport } from "./infrastructure/codex/qq-turn-runner.js";
+import {
+  createQqCodexTurnRunner,
+  resolveQqAgentToolTransport,
+  runQqAgentBackgroundTask
+} from "./infrastructure/codex/qq-turn-runner.js";
 import { detectClaudeConnection, isExecutableOnPath } from "./infrastructure/claude/claude-child-env.js";
 import {
   AGENT_LOG_CATEGORY,
@@ -426,7 +453,12 @@ import { createWebSearch, formatWebSearchProviderName } from "./web-search.js";
 import { isSupportedImageContentType, readResponseJson, writeResponseBodyToFile } from "./bounded-stream.js";
 import { runJsonProcess } from "./process-runner.js";
 import { createDashboardAssetHandler } from "./dashboard-assets.js";
-import { applyDashboardBotSettings, readDashboardBotSettings } from "./dashboard-bot-settings.js";
+import { applyDashboardBotSettings, readDashboardBotSettings, readDashboardInterestSettings } from "./dashboard-bot-settings.js";
+import {
+  normalizeDashboardAiSettingsPatch,
+  normalizeDashboardCommandPermissionsPatch,
+  normalizeDashboardIdentityPatch
+} from "./dashboard-admin-settings.js";
 import { selectLanAccessAddresses } from "./network-access.js";
 import { createPublicTunnelManager } from "./public-tunnel.js";
 import { requestHasValidToken } from "./request-auth.js";
@@ -496,6 +528,8 @@ const {
   qqPersonasPath,
   qqSelfPersonaPath,
   qqBotLifePath,
+  qqPersonalityPath,
+  interestAgentWorkspaceDir,
   qqConversationMemoryPath,
   qqMemoryImagesDir,
   qqCodexSessionsPath,
@@ -552,6 +586,7 @@ const {
   qqProactiveJudgeModel,
   qqProactiveJudgeTimeoutMs,
   qqProactiveJudgeVision,
+  qqProactiveJudgeAgentConcurrency,
   qqProactiveJudgeMinInterest,
   qqSelfPersonaScopeInitialMessages,
   qqSelfPersonaScopeMessages,
@@ -898,11 +933,18 @@ const state = createInitialState({
 });
 
 function getActiveQqInterestModelConfig() {
-  const runtime = resolveInterestModelRuntimeConfig(state.qq.proactive.judge.provider, environmentConfig);
+  const judge = state.qq.proactive.judge;
+  const runtime = resolveInterestModelRuntimeConfig(judge.provider, environmentConfig);
   return {
     ...runtime,
-    model: String(state.qq.proactive.judge.model || runtime.defaultModel).trim() || runtime.defaultModel,
-    baseUrl: String(state.qq.proactive.judge.baseUrl || runtime.baseUrl).trim().replace(/\/+$/, "")
+    model: String(judge.model || runtime.defaultModel).trim() || runtime.defaultModel,
+    baseUrl: runtime.subscription ? "" : String(judge.baseUrl || runtime.baseUrl).trim().replace(/\/+$/, ""),
+    // Codex / Claude subscription judges run through the local CLI.
+    agent: runtime.subscription ? {
+      runner: (task) => qqSubscriptionInterestRunner(task),
+      reasoningEffort: normalizeInterestModelReasoningEffort(judge.reasoningEffort),
+      timeoutMs: normalizeInterestAgentTimeoutMs(judge.agentTimeoutMs)
+    } : null
   };
 }
 
@@ -910,7 +952,8 @@ function syncActiveQqInterestModelConfig({ resetBaseUrl = false, resetModel = fa
   const judge = state.qq.proactive.judge;
   const runtime = resolveInterestModelRuntimeConfig(judge.provider, environmentConfig);
   judge.provider = runtime.provider;
-  if (resetBaseUrl || !String(judge.baseUrl || "").trim()) judge.baseUrl = runtime.baseUrl;
+  if (runtime.subscription) judge.baseUrl = "";
+  else if (resetBaseUrl || !String(judge.baseUrl || "").trim()) judge.baseUrl = runtime.baseUrl;
   if (resetModel || !String(judge.model || "").trim()) judge.model = runtime.defaultModel;
   judge.apiKeyConfigured = runtime.apiKeyConfigured;
   return getActiveQqInterestModelConfig();
@@ -1229,6 +1272,22 @@ async function loadQqBotLife() {
   }
 }
 
+// Same policy as the bot-life store: a malformed file is kept for diagnosis.
+let qqPersonalityLoadedSafely = true;
+
+async function loadQqPersonality() {
+  await mkdir(dataDir, { recursive: true });
+  try {
+    state.qq.personality = normalizeQqPersonality(JSON.parse(await readFile(qqPersonalityPath, "utf8")));
+  } catch (error) {
+    state.qq.personality = createEmptyQqPersonality();
+    if (error.code !== "ENOENT") {
+      qqPersonalityLoadedSafely = false;
+      logger.warn("Unable to load QQ bot personality", { error }, "learning");
+    }
+  }
+}
+
 async function loadQqConversationMemory() {
   await mkdir(dataDir, { recursive: true });
   try {
@@ -1318,6 +1377,12 @@ async function loadSettings() {
         }
         if (Number.isFinite(Number(judge.timeoutMs))) {
           state.qq.proactive.judge.timeoutMs = Math.max(1500, Math.min(20000, Number(judge.timeoutMs)));
+        }
+        if (judge.reasoningEffort) {
+          state.qq.proactive.judge.reasoningEffort = normalizeInterestModelReasoningEffort(judge.reasoningEffort);
+        }
+        if (Number.isFinite(Number(judge.agentTimeoutMs))) {
+          state.qq.proactive.judge.agentTimeoutMs = normalizeInterestAgentTimeoutMs(judge.agentTimeoutMs);
         }
         state.qq.proactive.judge.minInterest = 20;
         if (Number.isFinite(Number(judge.maxRecentMessages))) {
@@ -2507,6 +2572,20 @@ async function saveQqBotLife() {
   return qqBotLifeWriter.schedule();
 }
 
+const qqPersonalityWriter = createCoalescingWriter(async () => {
+  if (!qqPersonalityLoadedSafely) return;
+  await serializeFileOperation(qqPersonalityPath, async () => {
+    await writeJsonAtomically(qqPersonalityPath, {
+      ...state.qq.personality,
+      updatedAt: new Date().toISOString()
+    });
+  });
+}, { delayMs: 300 });
+
+async function saveQqPersonality() {
+  return qqPersonalityWriter.schedule();
+}
+
 function maybeScheduleQqSelfPersonaRefresh() {
   if (qqSelfPersonaRefreshPromise || shuttingDown) return qqSelfPersonaRefreshPromise;
   const failedAt = Date.parse(state.qq.selfPersona.generation?.lastAttemptAt || "");
@@ -3040,6 +3119,7 @@ function buildPublicState() {
       enhancer: { enabled: state.qq.enhancer.enabled },
       webLookup: { enabled: state.qq.webLookup.enabled },
       botSettings: readDashboardBotSettings(state),
+      interestSettings: readDashboardInterestSettings(state),
       codexSession: {
         defaultMode: state.qq.codexSession.settings.defaultMode,
         scopes: { ...state.qq.codexSession.settings.scopes },
@@ -3320,6 +3400,167 @@ function normalizeMemoryEntries(entries, limit) {
 
 function describeActiveAgent() {
   return describeAgentEngine(agentEngine, { ai: state.ai, claudeModel, claudeReasoningEffort });
+}
+
+// Interest-model options for the dashboard: the live Codex catalog when the
+// Codex CLI is installed, Claude aliases, and the subscription queue state.
+async function buildDashboardInterestModelStatus({ refresh = false } = {}) {
+  let codexModels = [];
+  let codexModelError = null;
+  try {
+    codexModels = (await codexModelCatalog.list({ refresh })).map((item) => ({
+      model: item.model,
+      displayName: item.displayName,
+      isDefault: item.isDefault,
+      supportedReasoningEfforts: item.supportedReasoningEfforts
+    }));
+  } catch (error) {
+    codexModelError = String(error?.message || error).slice(0, 300);
+  }
+  return {
+    settings: readDashboardInterestSettings(state),
+    codexModels,
+    codexModelError,
+    claudeModels: [...CLAUDE_INTEREST_MODEL_SUGGESTIONS],
+    subscriptionQueue: qqSubscriptionInterestRunner.snapshot(),
+    vision: { mode: qqProactiveJudgeVision, cache: qqInterestVisionCache.snapshot() }
+  };
+}
+
+// One real judgment against a sample message, so the owner can see latency
+// and output before relying on a provider. It uses the saved settings.
+async function runDashboardInterestModelTest(body = {}) {
+  const active = getActiveQqInterestModelConfig();
+  const text = String(body.text || "").trim().slice(0, 300) || "有人知道怎么让 QQ 机器人记住群里的黑话吗？";
+  const startedAt = Date.now();
+  const result = await runQqInterestModelStructuredTask({
+    provider: active.provider,
+    apiKey: active.apiKey,
+    baseUrl: active.baseUrl,
+    model: active.model,
+    agent: active.agent,
+    timeoutMs: Math.max(state.qq.proactive.judge.timeoutMs, 10_000),
+    taskName: "dashboard_interest_test",
+    temperature: 0.3,
+    maxTokens: 400,
+    systemPrompt: "这是控制台发起的连通性测试。根据 Bot 的人设判断这条群消息是否值得 Bot 主动接话，给出 0-100 的兴趣分和一句理由。",
+    payload: {
+      botPersonality: summarizeQqPersonalityForJudge(state.qq.personality),
+      generatedBotPersona: formatQqSelfPersonaContext(state.qq.selfPersona, { interestOnly: true }) || null,
+      currentMessage: { text }
+    },
+    responseSchema: {
+      type: "object",
+      properties: {
+        shouldReply: { type: "boolean" },
+        interest: { type: "number", minimum: 0, maximum: 100 },
+        reason: { type: "string" }
+      },
+      required: ["shouldReply", "interest", "reason"],
+      additionalProperties: false
+    },
+    validate: (value) => typeof value?.shouldReply === "boolean" && Number.isFinite(Number(value?.interest))
+  });
+  logger.info("Dashboard interest model test finished", {
+    operation: "interest.model_test",
+    outcome: result.ok ? "success" : "failed",
+    provider: active.provider,
+    model: active.model,
+    transport: result.transport || "http",
+    durationMs: Date.now() - startedAt
+  }, "interest");
+  return {
+    ok: Boolean(result.ok),
+    provider: active.provider,
+    model: active.model,
+    subscription: Boolean(active.subscription),
+    durationMs: Date.now() - startedAt,
+    attemptCount: result.attemptCount || 0,
+    value: result.ok ? result.value : null,
+    reason: result.ok ? null : String(result.reason || "unknown error").slice(0, 400)
+  };
+}
+
+function buildDashboardPersonalityStatus() {
+  const now = Date.now();
+  const summary = summarizeQqPersonality(state.qq.personality, { now, ownerIds: state.qq.ownerUserIds });
+  const life = state.qq.botLife;
+  const topPerson = summary.people.find((person) => !person.isOwner) || summary.people[0] || null;
+  const thoughtsByScope = {};
+  for (const thought of life.thoughts || []) thoughtsByScope[thought.scopeId] = (thoughtsByScope[thought.scopeId] || 0) + 1;
+  return {
+    ...summary,
+    assistantName: state.qq.selfPersona.account?.nickname || assistantName,
+    preview: {
+      core: formatQqPersonalityCoreContext(state.qq.personality, {
+        assistantName: state.qq.selfPersona.account?.nickname || assistantName
+      }),
+      relationship: topPerson ? formatQqRelationshipContext(state.qq.personality, {
+        people: [{ userId: topPerson.userId, name: topPerson.name, role: "speaker", isOwner: topPerson.isOwner }],
+        ownerLabel
+      }) : ""
+    },
+    life: {
+      mood: life.mood,
+      routine: life.routine,
+      routineEnabled: Boolean(qqDailyRoutine),
+      routineGenerating: Boolean(qqBotRoutineJob),
+      thoughts: (life.thoughts || []).slice(-30).map((thought) => ({ ...thought })),
+      thoughtsByScope
+    },
+    generatedPersona: summarizeQqSelfPersona(state.qq.selfPersona).persona || null
+  };
+}
+
+async function buildDashboardAdminSettings({ refresh = false } = {}) {
+  const activeAgent = describeActiveAgent();
+  let models = [];
+  let modelError = null;
+  if (activeAgent.modelCatalog) {
+    try {
+      models = await codexModelCatalog.list({ refresh });
+    } catch (error) {
+      modelError = String(error?.message || error).slice(0, 300);
+    }
+  }
+  return {
+    agent: activeAgent,
+    ai: {
+      model: state.ai.model,
+      reasoningEffort: state.ai.reasoningEffort,
+      reasoningSummary: state.ai.reasoningSummary,
+      personality: state.ai.personality,
+      serviceTier: state.ai.serviceTier || ""
+    },
+    models: models.map((item) => ({
+      model: item.model,
+      displayName: item.displayName,
+      description: item.description,
+      isDefault: item.isDefault,
+      defaultReasoningEffort: item.defaultReasoningEffort,
+      supportedReasoningEfforts: item.supportedReasoningEfforts,
+      serviceTiers: item.serviceTiers
+    })),
+    modelError,
+    identity: {
+      ownerUserIds: [...state.qq.ownerUserIds],
+      adminUserIds: [...state.qq.adminUserIds],
+      assistantName,
+      ownerLabel,
+      assistantMentions: [...assistantMentionAliases],
+      bannedUserIds: [...state.qq.bannedUserIds],
+      bannedUntilByUserId: { ...state.qq.bannedUntilByUserId }
+    },
+    commands: qqCommandCatalog.map((command) => ({
+      key: command.key,
+      category: command.category,
+      menuLine: command.menuLine,
+      description: command.description,
+      configurable: Boolean(command.configurable),
+      public: state.qq.commandPermissions.publicCommands[command.key] === true,
+      userCount: (state.qq.commandPermissions.userCommands[command.key] || []).length
+    }))
+  };
 }
 
 const agentCliVersionProbe = createAgentCliVersionProbe();
@@ -4460,6 +4701,11 @@ async function judgeQqProactiveEvent(event, { triggerMode = "message", countMess
     judgeEveryMessages: adaptive.proactiveIntervals.judgeEveryMessages,
     judgeEveryMinutes: adaptive.proactiveIntervals.judgeEveryMinutes,
     interestModelApiKey: activeInterestModel.apiKey,
+    interestAgent: activeInterestModel.agent,
+    botPersonality: summarizeQqPersonalityForJudge(state.qq.personality, {
+      userId: event.senderId,
+      isOwner: Boolean(event.isOwner)
+    }),
     assistantName,
     ownerLabel,
     relationshipInterest: adaptive.relationshipInterest,
@@ -4966,6 +5212,7 @@ async function runQqKnowledgeDeletionReview(candidate) {
     apiKey: activeInterestModel.apiKey,
     baseUrl: activeInterestModel.baseUrl,
     model: activeInterestModel.model,
+    agent: activeInterestModel.agent,
     timeoutMs: state.qq.proactive.judge.timeoutMs,
     taskName: "qq_knowledge_deletion_triage",
     temperature: 0.15,
@@ -5340,6 +5587,8 @@ async function runQqColdGroupInterestCheck() {
         apiKey: activeInterestModel.apiKey,
         baseUrl: activeInterestModel.baseUrl,
         model: activeInterestModel.model,
+        agent: activeInterestModel.agent,
+        botPersonality: summarizeQqPersonalityForJudge(state.qq.personality),
         timeoutMs: state.qq.proactive.judge.timeoutMs,
         maxRecentMessages: state.qq.proactive.judge.maxRecentMessages,
         selfPersona: summarizeQqSelfPersona(state.qq.selfPersona).persona,
@@ -5467,6 +5716,11 @@ async function runQqPrivateInterestCheck() {
         apiKey: activeInterestModel.apiKey,
         baseUrl: activeInterestModel.baseUrl,
         model: activeInterestModel.model,
+        agent: activeInterestModel.agent,
+        botPersonality: summarizeQqPersonalityForJudge(state.qq.personality, {
+          userId: event.senderId,
+          isOwner: Boolean(event.isOwner)
+        }),
         timeoutMs: state.qq.proactive.judge.timeoutMs,
         maxRecentMessages: state.qq.proactive.judge.maxRecentMessages,
         selfPersona: summarizeQqSelfPersona(state.qq.selfPersona).persona,
@@ -6189,6 +6443,10 @@ async function buildQqCommandAction(event) {
     };
   }
 
+  if (isQqCommandAllowedForEvent("affinity", event) && isQqAffinityCommand(normalized)) {
+    return buildQqAffinityCommandAction(event, normalized);
+  }
+
   const manualAiTask = parseQqManualAiTaskCommand(normalized);
   if (manualAiTask) {
     if (!isQqCommandAllowedForEvent("aiTasks", event)) {
@@ -6459,6 +6717,7 @@ function isAllowedQqCommandEvent(event) {
   if (isQqCommandAllowedForEvent("stop", event) && isPublicQqStopCommand(normalized, compact)) return true;
   if (isQqCommandAllowedForEvent("newDialog", event) && isPublicQqClearContextCommand(normalized, compact)) return true;
   if (isQqCommandAllowedForEvent("summary", event) && isPublicQqSummarizeContextCommand(normalized, compact)) return true;
+  if (isQqCommandAllowedForEvent("affinity", event) && isQqAffinityCommand(normalized)) return true;
   if (hasQqPrivilegedAccess(event) && isOwnerOnlyQqCommand(normalized, compact)) return true;
   return isAllowedPublicQqCommand(normalized, compact, event);
 }
@@ -6475,6 +6734,7 @@ function isAllowedPublicQqCommand(normalized, compact, event) {
     || (isQqCommandAllowedForEvent("stop", event) && isPublicQqStopCommand(normalized, compact))
     || (isQqCommandAllowedForEvent("newDialog", event) && isPublicQqClearContextCommand(normalized, compact))
     || (isQqCommandAllowedForEvent("summary", event) && isPublicQqSummarizeContextCommand(normalized, compact))
+    || (isQqCommandAllowedForEvent("affinity", event) && isQqAffinityCommand(normalized))
     || (isQqCommandAllowedForEvent("aiTasks", event) && Boolean(parseQqManualAiTaskCommand(normalized)))
     || (isQqCommandAllowedForEvent("status", event) && /^(状态|status|查看状态)$/i.test(compact))
     || (isQqCommandAllowedForEvent("config", event) && /^(详细配置|配置|config|settings|详细状态)$/i.test(compact))
@@ -6608,6 +6868,66 @@ async function buildQqGroupAdminAction(normalized, event) {
   return { reply: formatQqCommandUsage(getQqCommand("groupAdmin"), { notice: "未识别的群管理动作。" }) };
 }
 
+// /好感度: everyone may see their own standing (unless the owner hid it);
+// viewing others and the ranking need owner/admin access, setting needs the owner.
+function buildQqAffinityCommandAction(event, normalized) {
+  const request = parseQqAffinityCommand(normalized, { atTargets: event.atTargets, selfId: event.selfId });
+  const privileged = hasQqPrivilegedAccess(event);
+  const rules = state.qq.personality.profile.affinity;
+  const isOwnerId = (userId) => state.qq.ownerUserIds.includes(String(userId));
+  if (!request || request.action === "invalid") {
+    return { reply: formatQqCommandUsage(getQqCommand("affinity"), { notice: "没看懂这个好感度指令。" }) };
+  }
+  if (request.action === "self") {
+    if (!rules.revealToUsers && !privileged) return { reply: "这是我心里的小秘密，不告诉你。" };
+    return {
+      reply: formatQqAffinityReport(state.qq.personality, event.senderId, {
+        isOwner: Boolean(event.isOwner),
+        name: event.senderLabel || event.senderName,
+        ownerLabel
+      })
+    };
+  }
+  if (!privileged) return { reply: formatQqWarning(`查看别人的好感度只对${ownerLabel}和 Bot 管理员开放。`) };
+  if (request.action === "view") {
+    return {
+      reply: formatQqAffinityReport(state.qq.personality, request.targetUserId, {
+        viewer: "other",
+        isOwner: isOwnerId(request.targetUserId),
+        name: getSenderLabel(request.targetUserId, ""),
+        ownerLabel
+      })
+    };
+  }
+  if (request.action === "rank") {
+    const summary = summarizeQqPersonality(state.qq.personality, { ownerIds: state.qq.ownerUserIds, limit: 10 });
+    const rows = summary.people.map((person, index) => `${index + 1}. ${person.name || person.userId}（${person.userId}）${person.levelLabel} ${person.affinity > 0 ? "+" : ""}${person.affinity} · ${person.familiarityLabel}`);
+    return {
+      reply: formatQqCard({
+        icon: "💗",
+        title: "好感排行",
+        fields: [["记录人数", `${summary.personCount} 人`]],
+        sections: [{ rows, empty: "还没有好感记录。" }]
+      })
+    };
+  }
+  if (request.action === "set") {
+    if (!event.isOwner) return { reply: formatQqWarning(`只有${ownerLabel}可以直接设定好感度。`) };
+    state.qq.personality = updateQqPersonByOwner(state.qq.personality, request.targetUserId, {
+      affinity: request.value,
+      reason: "主人在 QQ 中设定"
+    }, { name: getSenderLabel(request.targetUserId, "") });
+    const relation = describeQqPersonRelationship(state.qq.personality, request.targetUserId, { isOwner: isOwnerId(request.targetUserId) });
+    return {
+      reply: formatQqDone(`已把 ${request.targetUserId} 的好感度设为 ${relation.affinity}（${relation.levelLabel}）`, [
+        "自然衰减和后续互动仍会继续生效；需要固定请在控制台锁定。"
+      ]),
+      beforeSend: saveQqPersonality
+    };
+  }
+  return { reply: formatQqCommandUsage(getQqCommand("affinity")) };
+}
+
 function buildQqInterestConfigAction(normalized, event) {
   const body = String(normalized || "").trim();
   const compact = body.replace(/\s+/g, "").toLowerCase();
@@ -6658,7 +6978,7 @@ function buildQqInterestConfigAction(normalized, event) {
   if (providerMatch) {
     const requested = String(providerMatch[1] || "").trim().toLowerCase();
     if (!requested) {
-      return { reply: formatQqCommandUsage(getQqCommand("interest"), { notice: "请写出兴趣模型厂商：openrouter、deepseek 或 custom。" }) };
+      return { reply: formatQqCommandUsage(getQqCommand("interest"), { notice: "请写出兴趣模型厂商：openrouter、deepseek、custom、codex 或 claude。" }) };
     }
     const aliases = {
       openrouter: "openrouter",
@@ -6668,18 +6988,24 @@ function buildQqInterestConfigAction(normalized, event) {
       深度求索: "deepseek",
       custom: "custom",
       自定义: "custom",
-      兼容: "custom"
+      兼容: "custom",
+      codex: "codex",
+      chatgpt: "codex",
+      "codex订阅": "codex",
+      claude: "claude",
+      "claude code": "claude",
+      "claude订阅": "claude"
     };
     const provider = aliases[requested];
     if (!provider) {
-      return { reply: formatQqWarning("不支持这个兴趣模型厂商。", ["可选：openrouter、deepseek、custom"]) };
+      return { reply: formatQqWarning("不支持这个兴趣模型厂商。", ["可选：openrouter、deepseek、custom、codex、claude"]) };
     }
     state.qq.proactive.judge.provider = provider;
     const active = syncActiveQqInterestModelConfig({ resetBaseUrl: true, resetModel: true });
     return {
       reply: formatQqDone(`兴趣模型厂商已切换：${active.label}`, [
         `默认模型：${active.model}`,
-        `Key：${active.apiKeyConfigured ? "已配置" : "未配置"}`
+        active.subscription ? "凭据：本机 CLI 登录，每次判断消耗订阅额度" : `Key：${active.apiKeyConfigured ? "已配置" : "未配置"}`
       ]),
       beforeSend: saveSettings
     };
@@ -6699,8 +7025,16 @@ function buildQqInterestConfigAction(normalized, event) {
     };
   }
 
-  const timeoutMatch = body.match(/^(?:(?:兴趣|主动|兴趣配置|主动配置|interest|proactive)\s*)?(?:超时|timeout)\s*([0-9]{3,5})\s*(?:ms|毫秒)?$/i)
-    || body.match(/^(?:兴趣超时|主动超时)\s*([0-9]{3,5})\s*(?:ms|毫秒)?$/i);
+  const timeoutMatch = body.match(/^(?:(?:兴趣|主动|兴趣配置|主动配置|interest|proactive)\s*)?(?:超时|timeout)\s*([0-9]{3,6})\s*(?:ms|毫秒)?$/i)
+    || body.match(/^(?:兴趣超时|主动超时)\s*([0-9]{3,6})\s*(?:ms|毫秒)?$/i);
+  if (timeoutMatch && isSubscriptionInterestProvider(state.qq.proactive.judge.provider)) {
+    const agentTimeoutMs = normalizeInterestAgentTimeoutMs(timeoutMatch[1]);
+    state.qq.proactive.judge.agentTimeoutMs = agentTimeoutMs;
+    return {
+      reply: formatQqDone(`订阅兴趣模型整轮超时已改为：${agentTimeoutMs}ms`, ["范围 15000–300000，包含 CLI 冷启动时间。"]),
+      beforeSend: saveSettings
+    };
+  }
   if (timeoutMatch) {
     const timeoutMs = Math.max(1500, Math.min(20000, Number(timeoutMatch[1])));
     state.qq.proactive.judge.timeoutMs = timeoutMs;
@@ -7184,8 +7518,16 @@ function buildQqInterestConfigDetail() {
       ["分钟检查", state.qq.proactive.judgeEveryMinutes > 0 ? `有新增消息时每 ${state.qq.proactive.judgeEveryMinutes} 分钟` : "关闭"],
       ["模型厂商", judge.provider],
       ["判定模型", judge.model],
-      ["厂商 Key", judge.apiKeyConfigured ? "已配置" : "未配置"],
-      ["静默超时", `${judge.timeoutMs}ms`],
+      ...(isSubscriptionInterestProvider(judge.provider)
+        ? [
+          ["凭据", "本机 CLI 登录（订阅额度）"],
+          ["思考强度", judge.reasoningEffort || "low"],
+          ["整轮超时", `${judge.agentTimeoutMs || 90000}ms`]
+        ]
+        : [
+          ["厂商 Key", judge.apiKeyConfigured ? "已配置" : "未配置"],
+          ["静默超时", `${judge.timeoutMs}ms`]
+        ]),
       ["上下文", `最近 ${judge.maxRecentMessages} 条`],
       ["最终阈值", judge.minInterest],
       ["当前计数", counts]
@@ -9923,6 +10265,14 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   // The library is searched on demand through qq_sticker; only its size is in the prompt.
   event.qqStickerLibraryHint = state.qq.enhancer.enabled ? formatQqStickerLibraryHint(stickerCatalog) : "";
   const botLifeContext = formatQqBotLifeContext(state.qq.botLife, { scopeId });
+  const personalityCoreContext = formatQqPersonalityCoreContext(state.qq.personality, {
+    assistantName: state.qq.selfPersona.account?.nickname || assistantName
+  });
+  const relationshipContext = formatQqRelationshipContext(state.qq.personality, {
+    people: collectQqRelationshipPeople(event),
+    scopeId,
+    ownerLabel
+  });
   assertQqReplyScopeActive(replyScope);
   const qqModelImages = getQqModelImageInputs(event, text);
   const replyStickerCandidates = extractQqReplyStickerCandidates(event);
@@ -10079,12 +10429,16 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       proactiveExecutionContext ? "" : null,
       !persistentResume ? botToolContext : null,
       !persistentResume && botToolContext ? "" : null,
+      !persistentResume ? personalityCoreContext : null,
+      !persistentResume && personalityCoreContext ? "" : null,
       !persistentResume ? selfPersonaContext : null,
       !persistentResume && selfPersonaContext ? "" : null,
       !persistentResume ? scopeTopicContext : null,
       !persistentResume && scopeTopicContext ? "" : null,
       botLifeContext || null,
       botLifeContext ? "" : null,
+      relationshipContext || null,
+      relationshipContext ? "" : null,
       robotProfilesContext || null,
       robotProfilesContext ? "" : null,
       !persistentResume ? publicMemoryContext : null,
@@ -12921,6 +13275,21 @@ const runSteerableQqCodexTurn = createQqCodexTurnRunner({
   refreshQuota: refreshCodexQuotaSnapshotAfterRun
 });
 
+// Subscription interest judgments get their own small slot pool so a burst
+// of background checks never waits on, or delays, a QQ reply turn.
+const qqSubscriptionInterestRunner = createSubscriptionModelTaskRunner({
+  workspaceDir: interestAgentWorkspaceDir,
+  maxConcurrent: qqProactiveJudgeAgentConcurrency,
+  maxQueued: 3,
+  runTask: (engine, options) => runQqAgentBackgroundTask(engine, {
+    ...options,
+    codexPath: codexCliPath,
+    claudePath: claudeCliPath
+  }),
+  onSpawn: (child) => activeCodexChildren.add(child),
+  onExit: (child) => activeCodexChildren.delete(child)
+});
+
 async function ensureCodexReplyWorkspace() {
   await mkdir(codexWorkspaceDir, { recursive: true });
   await mkdir(codexTmpDir, { recursive: true });
@@ -13129,6 +13498,7 @@ function startQqTypingIndicator(event) {
 // Keeps the Bot's private inner monologue and mood for its next turns. Logs
 // carry only counts; the thought itself stays in the bot-life store.
 function rememberQqBotInnerState(event) {
+  rememberQqRelationshipTurn(event);
   const inner = event?.qqAgentInnerState;
   const scopeId = getQqMemoryScopeId(event);
   if (!inner || !scopeId || (!inner.innerThought && !inner.mood)) return;
@@ -13149,6 +13519,70 @@ function rememberQqBotInnerState(event) {
     silentTurn: inner.silent
   }, "learning", qqLogContext(event));
   void saveQqBotLife().catch((error) => logger.warn("Unable to save QQ bot life state", { error }, "learning"));
+}
+
+// The people a reply turn concerns, for the relationship prompt block:
+// the speaker first, then the quoted sender and @ targets.
+function collectQqRelationshipPeople(event) {
+  const selfId = String(event?.selfId || "");
+  const people = [];
+  const add = (userId, name, role) => {
+    const id = String(userId || "").trim();
+    if (!id || id === selfId || id === "assistant") return;
+    people.push({ userId: id, name, role, isOwner: state.qq.ownerUserIds.includes(id) });
+  };
+  if (!event?.qqColdProactive) {
+    add(event?.senderId, event?.senderLabel || event?.senderName, isQqPrivateEvent(event) ? "contact" : "speaker");
+  }
+  if (event?.replyContext && !event.replyContext.isSelf) add(event.replyContext.senderId, event.replyContext.senderName, "quoted");
+  for (const mention of getQqMentionIdentities(event, { excludeSelf: true }).slice(0, 3)) add(mention.userId, mention.name, "mentioned");
+  return people;
+}
+
+// Counts the exchange and applies the model's bounded affinity step toward
+// the speaker. Logs carry only numbers, never the private reason.
+function rememberQqRelationshipTurn(event) {
+  const inner = event?.qqAgentInnerState;
+  const userId = String(event?.senderId || "");
+  if (!inner || !userId || event?.qqColdProactive || userId === String(event?.selfId || "")) return;
+  const scopeId = getQqMemoryScopeId(event);
+  const name = String(event.senderLabel || event.senderName || "").slice(0, 40);
+  const at = new Date().toISOString();
+  let changed = false;
+  let applied = 0;
+  if (!inner.silent) {
+    const interaction = recordQqPersonalityInteraction(state.qq.personality, { userId, name, at });
+    state.qq.personality = interaction.state;
+    changed = interaction.changed || changed;
+  }
+  if (inner.affinityDelta) {
+    const result = applyQqModelAffinityChange(state.qq.personality, {
+      userId,
+      name,
+      delta: inner.affinityDelta,
+      reason: inner.affinityReason,
+      scopeId,
+      isOwner: state.qq.ownerUserIds.includes(userId),
+      at
+    });
+    state.qq.personality = result.state;
+    applied = result.applied;
+    changed = changed || Boolean(result.applied);
+    logger.debug("QQ relationship affinity updated", {
+      operation: "memory.relationship",
+      outcome: result.reason,
+      scopeId,
+      requestedDelta: inner.affinityDelta,
+      appliedDelta: applied,
+      affinityAfter: result.after ?? null
+    }, "learning", qqLogContext(event));
+  }
+  if (inner.nickname) {
+    const nickname = setQqModelNickname(state.qq.personality, { userId, name, nickname: inner.nickname, at });
+    state.qq.personality = nickname.state;
+    changed = changed || nickname.changed;
+  }
+  if (changed) void saveQqPersonality().catch((error) => logger.warn("Unable to save QQ bot personality", { error }, "learning"));
 }
 
 // Follow-up bubbles wait as long as typing them would take, unless the
@@ -14506,6 +14940,10 @@ async function handleApi(req, res) {
 
   if (req.method === "POST" && req.url === "/api/qq/bot-settings") {
     const body = await readBody(req, { requireJson: true });
+    // The custom provider's API key is sent to this URL.
+    if (Object.hasOwn(body, "judgeBaseUrl") && !trustedLoopbackRequest) {
+      return sendJson(res, 403, { error: "The interest model URL can only be changed from this computer" });
+    }
     let change;
     const previousProvider = state.qq.proactive.judge.provider;
     try {
@@ -14542,6 +14980,247 @@ async function handleApi(req, res) {
     }), "web");
     if (change.settings.proactiveEnabled) wakeQqPeriodicScheduler("proactive-settings-enabled");
     return sendJson(res, 200, buildPublicState());
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/qq/interest-models") {
+    return sendJson(res, 200, await buildDashboardInterestModelStatus({
+      refresh: requestUrl.searchParams.get("refresh") === "1"
+    }));
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/qq/interest-models/test") {
+    if (!trustedLoopbackRequest) {
+      return sendJson(res, 403, { error: "Interest model tests can only be started from this computer" });
+    }
+    const body = await readBody(req, { requireJson: true });
+    return sendJson(res, 200, await runDashboardInterestModelTest(body));
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/qq/personality") {
+    return sendJson(res, 200, buildDashboardPersonalityStatus());
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/qq/personality") {
+    const body = await readBody(req, { requireJson: true });
+    const previous = state.qq.personality;
+    try {
+      let profile = state.qq.personality.profile;
+      if (typeof body.preset === "string" && body.preset) profile = applyQqPersonalityPreset(profile, body.preset);
+      if (body.profile && typeof body.profile === "object" && !Array.isArray(body.profile)) {
+        profile = normalizeQqPersonalityProfile({
+          ...profile,
+          ...body.profile,
+          affinity: { ...profile.affinity, ...(body.profile.affinity || {}) },
+          traits: { ...profile.traits, ...(body.profile.traits || {}) },
+          preset: body.profile.preset || (body.profile.traits ? "custom" : profile.preset)
+        });
+      }
+      state.qq.personality = normalizeQqPersonality({ ...state.qq.personality, profile });
+    } catch (error) {
+      if (error instanceof RangeError || error instanceof TypeError) return sendJson(res, 400, { error: error.message });
+      throw error;
+    }
+    try {
+      await saveQqPersonality();
+    } catch (error) {
+      state.qq.personality = previous;
+      throw error;
+    }
+    logger.info("Dashboard personality updated", buildQqOperationLogDetails(null, {
+      operation: "settings.update",
+      outcome: "persisted",
+      source: "dashboard",
+      personalityPreset: state.qq.personality.profile.preset,
+      personalityEnabled: state.qq.personality.profile.enabled,
+      affinityEnabled: state.qq.personality.profile.affinity.enabled
+    }), "web");
+    return sendJson(res, 200, buildDashboardPersonalityStatus());
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/qq/personality/person") {
+    const body = await readBody(req, { requireJson: true });
+    const userId = String(body.userId || "").trim();
+    const previous = state.qq.personality;
+    try {
+      if (body.action === "remove") {
+        state.qq.personality = removeQqPerson(state.qq.personality, userId).state;
+      } else {
+        const patch = {};
+        for (const key of ["affinity", "nickname", "tags", "note", "locked", "name"]) {
+          if (Object.hasOwn(body, key)) patch[key] = body[key];
+        }
+        if (Object.hasOwn(patch, "affinity")) patch.reason = "控制台调整";
+        state.qq.personality = updateQqPersonByOwner(state.qq.personality, userId, patch);
+      }
+    } catch (error) {
+      if (error instanceof RangeError || error instanceof TypeError) return sendJson(res, 400, { error: error.message });
+      throw error;
+    }
+    try {
+      await saveQqPersonality();
+    } catch (error) {
+      state.qq.personality = previous;
+      throw error;
+    }
+    logger.info("Dashboard relationship updated", buildQqOperationLogDetails(null, {
+      operation: "memory.relationship",
+      outcome: body.action === "remove" ? "removed" : "updated",
+      source: "dashboard"
+    }), "web");
+    return sendJson(res, 200, buildDashboardPersonalityStatus());
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/qq/bot-state") {
+    const body = await readBody(req, { requireJson: true });
+    if (body.action === "set-mood" || body.action === "clear-mood") {
+      const mood = body.action === "clear-mood" ? "" : String(body.mood || "").trim();
+      if (body.action === "set-mood" && !mood) return sendJson(res, 400, { error: "mood is required" });
+      const previous = state.qq.botLife;
+      state.qq.botLife = mood
+        ? recordQqBotLifeTurn(state.qq.botLife, { mood }).state
+        : normalizeQqBotLifeState({ ...state.qq.botLife, mood: null });
+      try {
+        await saveQqBotLife();
+      } catch (error) {
+        state.qq.botLife = previous;
+        throw error;
+      }
+      return sendJson(res, 200, buildDashboardPersonalityStatus());
+    }
+    if (body.action === "regenerate-routine") {
+      if (!trustedLoopbackRequest) return sendJson(res, 403, { error: "Routine generation can only be started from this computer" });
+      if (!qqDailyRoutine) return sendJson(res, 409, { error: "The daily routine is disabled (CODEX_REMOTE_CONTACT_QQ_DAILY_ROUTINE=0)" });
+      if (qqBotRoutineJob) return sendJson(res, 409, { error: "A routine is already being generated" });
+      qqBotRoutineJob = trackBackgroundTask(refreshQqBotRoutine(), (error) => {
+        logger.warn("QQ bot daily routine generation failed", { operation: "memory.bot_routine", outcome: "failed", error }, "learning");
+      }).finally(() => {
+        qqBotRoutineJob = null;
+      });
+      return sendJson(res, 202, { accepted: true, ...buildDashboardPersonalityStatus() });
+    }
+    return sendJson(res, 400, { error: "Unknown bot-state action" });
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/settings/admin") {
+    return sendJson(res, 200, await buildDashboardAdminSettings({
+      refresh: requestUrl.searchParams.get("refresh") === "1"
+    }));
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/settings/ai") {
+    const body = await readBody(req, { requireJson: true });
+    const models = describeActiveAgent().modelCatalog ? await codexModelCatalog.list().catch(() => []) : [];
+    const previous = { ...state.ai };
+    try {
+      Object.assign(state.ai, normalizeDashboardAiSettingsPatch(body, state.ai, { models }));
+    } catch (error) {
+      if (error instanceof RangeError || error instanceof TypeError) return sendJson(res, 400, { error: error.message });
+      throw error;
+    }
+    try {
+      await saveSettings();
+    } catch (error) {
+      Object.assign(state.ai, previous);
+      throw error;
+    }
+    logger.info("Dashboard AI settings updated", buildQqOperationLogDetails(null, {
+      operation: "settings.update",
+      outcome: "persisted",
+      source: "dashboard",
+      model: state.ai.model,
+      reasoningEffort: state.ai.reasoningEffort,
+      reasoningSummary: state.ai.reasoningSummary,
+      serviceTier: state.ai.serviceTier || null
+    }), "web");
+    return sendJson(res, 200, await buildDashboardAdminSettings());
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/settings/identity") {
+    // Owner and administrator lists decide who controls the Bot.
+    if (!trustedLoopbackRequest) {
+      return sendJson(res, 403, { error: "Identity and roles can only be changed from this computer" });
+    }
+    const body = await readBody(req, { requireJson: true });
+    const previous = {
+      ownerUserIds: [...state.qq.ownerUserIds],
+      adminUserIds: [...state.qq.adminUserIds],
+      assistantName,
+      ownerLabel,
+      assistantMentions: [...assistantMentionAliases]
+    };
+    let next;
+    try {
+      next = normalizeDashboardIdentityPatch(body, previous);
+    } catch (error) {
+      if (error instanceof RangeError || error instanceof TypeError) return sendJson(res, 400, { error: error.message });
+      throw error;
+    }
+    const applyIdentity = (value) => {
+      state.qq.ownerUserIds = value.ownerUserIds;
+      state.qq.adminUserIds = value.adminUserIds;
+      assistantName = value.assistantName;
+      ownerLabel = value.ownerLabel;
+      assistantMentionAliases = value.assistantMentions;
+    };
+    applyIdentity(next);
+    try {
+      await saveSettings();
+    } catch (error) {
+      applyIdentity(previous);
+      throw error;
+    }
+    logger.info("Dashboard identity settings updated", buildQqOperationLogDetails(null, {
+      operation: "settings.update",
+      outcome: "persisted",
+      source: "dashboard",
+      ownerCount: state.qq.ownerUserIds.length,
+      administratorCount: state.qq.adminUserIds.length,
+      mentionAliasCount: assistantMentionAliases.length
+    }), "web");
+    return sendJson(res, 200, await buildDashboardAdminSettings());
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/qq/command-permissions") {
+    const body = await readBody(req, { requireJson: true });
+    const previous = state.qq.commandPermissions.publicCommands;
+    try {
+      state.qq.commandPermissions.publicCommands = normalizeQqPublicCommandPermissions(
+        normalizeDashboardCommandPermissionsPatch(body, previous, qqCommandCatalog)
+      );
+    } catch (error) {
+      if (error instanceof RangeError || error instanceof TypeError) return sendJson(res, 400, { error: error.message });
+      throw error;
+    }
+    try {
+      await saveSettings();
+    } catch (error) {
+      state.qq.commandPermissions.publicCommands = previous;
+      throw error;
+    }
+    logger.info("Dashboard command permissions updated", buildQqOperationLogDetails(null, {
+      operation: "settings.update",
+      outcome: "persisted",
+      source: "dashboard",
+      publicCommandCount: Object.values(state.qq.commandPermissions.publicCommands).filter(Boolean).length
+    }), "web");
+    return sendJson(res, 200, await buildDashboardAdminSettings());
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/qq/bans") {
+    const body = await readBody(req, { requireJson: true });
+    const userId = String(body.userId || "").trim();
+    if (body.action !== "unban" || !isValidQqUserId(userId)) return sendJson(res, 400, { error: "Only { action: \"unban\", userId } is supported" });
+    const previous = { ids: [...state.qq.bannedUserIds], until: { ...state.qq.bannedUntilByUserId } };
+    state.qq.bannedUserIds = state.qq.bannedUserIds.filter((id) => id !== userId);
+    delete state.qq.bannedUntilByUserId[userId];
+    try {
+      await saveSettings();
+    } catch (error) {
+      state.qq.bannedUserIds = previous.ids;
+      state.qq.bannedUntilByUserId = Object.assign(Object.create(null), previous.until);
+      throw error;
+    }
+    return sendJson(res, 200, await buildDashboardAdminSettings());
   }
 
   if (req.method === "POST" && req.url === "/api/unified-memory/settings") {
@@ -14835,6 +15514,7 @@ if (!qqKnowledgeBaseLoad.blocked && (qqKnowledgeBaseLoad.created || qqKnowledgeB
 await loadQqPersonas();
 await loadQqSelfPersona();
 await loadQqBotLife();
+await loadQqPersonality();
 state.qq.selfPersona = syncQqSelfPersonaActivity(state.qq.selfPersona, state.qq.memory.recentMessages);
 await saveQqSelfPersona();
 if (backfillQqAdaptiveLearningFromRecentMessages()) await saveQqPersonas();

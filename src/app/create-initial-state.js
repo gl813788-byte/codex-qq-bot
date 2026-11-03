@@ -3,6 +3,7 @@ import { createEmptyQqKnowledgeBase } from "../qq-knowledge-base.js";
 import { createEmptyQqPeriodicRuntime } from "../qq-periodic-runtime.js";
 import { createEmptyQqSelfPersona } from "../qq-self-persona.js";
 import { createEmptyQqBotLifeState } from "../qq-bot-life-state.js";
+import { createEmptyQqPersonality } from "../qq-bot-personality.js";
 import {
   createEmptyQqCodexSessionStore,
   normalizeQqCodexSessionSettings
@@ -61,6 +62,8 @@ export function createInitialState({
           model: config.qqProactiveJudgeModel,
           baseUrl: interestModel.baseUrl,
           timeoutMs: config.qqProactiveJudgeTimeoutMs,
+          reasoningEffort: config.qqProactiveJudgeReasoningEffort || "low",
+          agentTimeoutMs: config.qqProactiveJudgeAgentTimeoutMs || 90_000,
           minInterest: config.qqProactiveJudgeMinInterest,
           maxRecentMessages: 8,
           apiKeyConfigured: interestModel.apiKeyConfigured,
@@ -99,6 +102,7 @@ export function createInitialState({
       },
       selfPersona: createEmptyQqSelfPersona(),
       botLife: createEmptyQqBotLifeState(),
+      personality: createEmptyQqPersonality(),
       periodicRuntime: createEmptyQqPeriodicRuntime(),
       conversationMemory: createEmptyQqConversationMemory()
     },

@@ -9,7 +9,8 @@ import {
 
 test("QQ agent output schema is strict and covers reply addressing and attachments", () => {
   assert.equal(qqAgentOutputSchema.additionalProperties, false);
-  assert.deepEqual(qqAgentOutputSchema.required, ["innerThought", "status", "text", "bubbles", "reply", "attachments", "sticker", "mood"]);
+  assert.deepEqual(qqAgentOutputSchema.required, ["innerThought", "status", "text", "bubbles", "reply", "attachments", "sticker", "affinity", "mood"]);
+  assert.deepEqual(qqAgentOutputSchema.properties.affinity.properties.delta.enum, [-3, -2, -1, 0, 1, 2, 3]);
   // The private inner monologue is generated before anything visible.
   assert.equal(Object.keys(qqAgentOutputSchema.properties)[0], "innerThought");
   assert.deepEqual(qqAgentOutputSchema.properties.reply.properties.mode.enum, ["automatic", "plain", "quote", "mention"]);
@@ -84,7 +85,13 @@ test("a structured sticker becomes its own final bubble and inner state is never
   }));
   assert.equal(stickerOnly.output, "[[qq_sticker:狗头]]");
   assert.deepEqual(extractQqAgentInnerState({ innerThought: " 懒得理 ", mood: "困", status: "silent" }), {
-    innerThought: "懒得理", mood: "困", silent: true
+    innerThought: "懒得理", mood: "困", silent: true, affinityDelta: 0, affinityReason: "", nickname: ""
   });
-  assert.deepEqual(extractQqAgentInnerState(null), { innerThought: "", mood: "", silent: false });
+  assert.deepEqual(extractQqAgentInnerState(null), {
+    innerThought: "", mood: "", silent: false, affinityDelta: 0, affinityReason: "", nickname: ""
+  });
+  // A model step outside the schema range is clamped before the Hub sees it.
+  assert.deepEqual(extractQqAgentInnerState({
+    innerThought: "", mood: "", status: "reply", affinity: { delta: 9, reason: " 真心感谢 ", nickname: "[老王]" }
+  }), { innerThought: "", mood: "", silent: false, affinityDelta: 3, affinityReason: "真心感谢", nickname: "老王" });
 });
