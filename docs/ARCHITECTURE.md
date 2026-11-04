@@ -51,6 +51,7 @@ environment + runtime paths
 | `src/qq-message-run-compaction.js` | Model-context repeat-run compaction | semantic identity, count merging, and Chinese count annotations for adjacent duplicate messages |
 | `src/codex-app-server-turn.js` | One-turn Codex app-server client | `thread/start`/`thread/resume`, `turn/start`, in-flight control, direct interrupt-and-restart, inactive-turn race recovery, timeout, and interruption |
 | `src/infrastructure/codex/qq-turn-runner.js` | QQ App Server lifecycle adapter | limits, one engine table holding every Codex/Claude Code difference, isolated child environment, native turn settings, diagnostics, fused-turn recovery, cancellation and quota refresh |
+| `src/infrastructure/codex/codex-protocol-quota.js` | Codex usage from the App Server protocol | Sparse merge of `account/rateLimits/updated` and `thread/tokenUsage/updated` notifications from every Codex turn, plus a throttled short-lived `account/rateLimits/read` (no thread, no model turn) when the Hub has no recent data; current Codex no longer writes usage to rollout files or its log database |
 | `src/infrastructure/agent/agent-turn-process.js` | Engine-neutral turn plumbing | Shared by both turn clients: turn and replacement-idle deadlines, NDJSON framing with an output cap, child supervision (stderr tail, termination, single exit notice), dynamic-tool result normalization and the `CODEX_*` error codes |
 | `src/infrastructure/agent/agent-engines.js` | Engine facts and capabilities | Import-free table of each engine's display name, runtime, model selection and capability flags (`reportsQuota`, `modelCatalog`), plus the `agent` log category, legacy `codex` handling and per-entry engine resolution shared by the logger, log API, terminal viewer and dashboard API |
 | `src/infrastructure/agent/agent-cli-version.js` | Agent CLI version probe | Cached `--version` answer for the dashboard, refreshed in the background with a minimal environment |
@@ -153,7 +154,7 @@ The remaining `src/server.js` code should be reduced in behavior-preserving slic
 
 1. Continue moving individual dashboard/API route handlers behind the new `src/channels/http/hub-http-server.js` boundary.
 2. Move OneBot API calls and QQ reply delivery into `src/channels/qq/`.
-3. Move the remaining Codex quota discovery into `src/infrastructure/codex/`; Agent turn execution is already extracted.
+3. Move the remaining legacy Codex quota readers (rollout files, log database, desktop cache) into `src/infrastructure/codex/`; Agent turn execution and protocol usage reads are already extracted.
 4. Move the remaining memory persistence into repositories under `src/infrastructure/storage/`; settings are already extracted.
 
 Each slice should keep the public API stable and land with its own regression tests. Avoid a single large file-move commit: it makes behavioral review and rollback harder.

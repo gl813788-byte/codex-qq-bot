@@ -51,6 +51,7 @@
 | `src/qq-message-run-compaction.js` | 模型上下文连续复读压缩 | 相邻同文消息的语义签名、计数合并和中文条数标注 |
 | `src/codex-app-server-turn.js` | Codex app-server 单轮客户端 | `thread/start`/`thread/resume`、`turn/start`、运行中控制、直接截断续开、inactive turn 竞态恢复、超时和中断 |
 | `src/infrastructure/codex/qq-turn-runner.js` | QQ App Server 生命周期适配器 | 限流、用一张引擎表集中 Codex/Claude Code 的全部差异、隔离子进程环境、原生轮次参数、诊断、融合恢复、取消和配额刷新 |
+| `src/infrastructure/codex/codex-protocol-quota.js` | 从 App Server 协议读取 Codex 用量 | 稀疏合并每轮 Codex 对话推送的 `account/rateLimits/updated` 和 `thread/tokenUsage/updated` 通知；Hub 没有近期数据时，限频地用短命进程调用一次 `account/rateLimits/read`（不建线程、不跑模型）。新版 Codex 已不再把用量写进 rollout 文件或日志数据库 |
 | `src/infrastructure/agent/agent-turn-process.js` | 引擎无关的轮次底层 | 两个单轮客户端共用：总超时与替代轮空闲超时、带输出上限的 NDJSON 分帧、子进程托管（stderr 尾部、终止、只通知一次退出）、动态工具结果归一化和 `CODEX_*` 错误码 |
 | `src/infrastructure/agent/agent-engines.js` | 引擎信息与能力 | 不依赖任何模块的引擎表：展示名、运行方式、模型选择和能力标记（`reportsQuota`、`modelCatalog`），以及 `agent` 日志分类、旧 `codex` 条目兼容和按条目识别引擎，供日志写入、日志 API、终端查看器和仪表盘接口共用 |
 | `src/infrastructure/agent/agent-cli-version.js` | Agent CLI 版本探测 | 给仪表盘用的 `--version` 缓存结果，用最小环境在后台刷新 |
@@ -153,7 +154,7 @@
 
 1. 继续把单个仪表盘/API 路由放到新的 `src/channels/http/hub-http-server.js` 边界之后。
 2. OneBot API 调用和 QQ 回复发送移到 `src/channels/qq/`。
-3. 把剩余 Codex 额度发现移到 `src/infrastructure/codex/`；Agent turn 执行已完成拆分。
+3. 把剩余的旧版 Codex 额度读取（rollout 文件、日志数据库、桌面缓存）移到 `src/infrastructure/codex/`；Agent turn 执行和协议用量读取已完成拆分。
 4. 把剩余记忆持久化移到 `src/infrastructure/storage/`；settings 已完成拆分。
 
 每个切片都应保持公共接口兼容并带回归测试。避免一次性大规模移动文件，否则难以审查行为变化和回滚。

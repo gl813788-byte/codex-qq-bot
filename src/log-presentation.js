@@ -201,6 +201,7 @@ const messageTranslationsZh = Object.freeze({
   "Codex fused replacement stalled; starting one fresh app-server recovery": "Codex 融合替代轮次停滞，正在用新进程恢复一次",
   "QQ Codex generation stopped": "QQ Codex 生成已停止",
   "Codex quota background refresh failed": "Codex 用量后台刷新失败",
+  "Codex rate-limit read failed": "读取 Codex 用量窗口失败",
   "Unable to load Codex model catalog": "加载 Codex 模型列表失败",
   "Unable to select Codex model": "选择 Codex 模型失败",
   "Unable to load Codex reasoning efforts": "加载 Codex 思考强度失败",
