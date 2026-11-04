@@ -47,7 +47,7 @@
 | `src/qq-proactive-pipeline.js` | 主动聊天双模型契约 | 普通接话、冷群话题/水群和主动私聊的兴趣批准凭据与主模型必经校验 |
 | `src/qq-proactive-cycle-state.js` | 普通兴趣内存周期状态 | pending 消息计数、Bot 确认送达后的重置，以及作废送达前执行中 judge 且保留后续消息 |
 | `src/qq-conversation-follow-up.js` | Bot 回复后的续聊批次状态机 | 同一发送者、自适应 3–12 分钟与 2–6 条边界、满条不提前判定的 5 秒静默合并、judge 前冻结入口及兴趣模型语义复核元数据 |
-| `src/qq-language-style.js` | QQ 语言统计候选 | 群/成员标点与功能性短语计数及高频候选，不分配任何含义 |
+| `src/qq-language-style.js` | QQ 语言统计候选 | 群/成员标点与功能性短语计数及高频候选，不分配任何含义；打字习惯占比（空格断句、句末标点、括号补充语、颜文字、波浪号、笑声写法）及至少两人用过的具体写法 |
 | `src/qq-message-run-compaction.js` | 模型上下文连续复读压缩 | 相邻同文消息的语义签名、计数合并和中文条数标注 |
 | `src/codex-app-server-turn.js` | Codex app-server 单轮客户端 | `thread/start`/`thread/resume`、`turn/start`、运行中控制、直接截断续开、inactive turn 竞态恢复、超时和中断 |
 | `src/infrastructure/codex/qq-turn-runner.js` | QQ App Server 生命周期适配器 | 限流、用一张引擎表集中 Codex/Claude Code 的全部差异、隔离子进程环境、原生轮次参数、诊断、融合恢复、取消和配额刷新 |
@@ -65,7 +65,9 @@
 | `src/app/qq-message-tools.js` + `src/qq-sent-message-ledger.js` | 表情回应与撤回 | `qq_message.act` 给当前/被引用群消息贴表情回应，以及撤回 Bot 自己两分钟内已确认送达的消息；消息 ID 在最底层发送处只记在内存 |
 | `src/app/qq-lookup-tool.js` | 只读 QQ 资料查询 | `qq_context.lookup` 的成员/群/公告/精华信息，只限本会话出现过的人，绝不返回性别、年龄或地区 |
 | `src/qq-bot-life-state.js` + `src/qq-bot-daily-routine.js` | Bot 的连续状态 | 跨会话延续的心情、来自结构化输出的分会话第一人称内心OS、每日作息（每个作息日一次无工具任务，05:00 换日），以及它们在提示词和工具里的呈现 |
-| `src/qq-bot-personality.js` + `src/qq-affinity-command.js` | 核心人格与关系 | 部署者设定的性格维度、身份、习惯与预设；每人的好感、熟悉度、称呼与历史，带每轮/每日截断、主人下限、半衰期淡化和同会话理由；回复与兴趣判断的提示词片段；`/好感度` 解析 |
+| `src/qq-bot-personality.js` + `src/qq-affinity-command.js` | 核心人格与关系 | 部署者设定的基本资料、性格维度、说话方式滑块、待人方式、角色资料、世界书与预设；角色卡映射与导出；有界的自主调整（工具与周期复盘）、经核实的主人指令修改、改动历史与撤销；真人化规划使用的表达偏置；每人的好感、熟悉度、称呼与历史，带每轮/每日截断、主人下限、半衰期淡化和同会话理由；回复、世界书与兴趣判断的提示词片段；`/好感度` 解析 |
+| `src/qq-character-card.js` | 角色卡格式 | 纯函数解析 Character Card V1/V2/V3、Pygmalion 与 Agnai JSON、PNG 文本块、`.charx` 压缩包和纯文字；导出 V2/V3 |
+| `src/qq-bot-language-habits.js` | Bot 自己的语言习惯 | 由总结、人设刷新和 `qq_self.language_habit` 选出的分范围/通用黑话、符号、颜文字与说法；数量上限、模型每日收取上限、按已送达回复计数、复盘视图与提示词片段；从已审定知识选出本范围黑话 |
 | `src/infrastructure/agent/subscription-model-task.js` | 订阅判断执行器 | Codex/Claude 兴趣判断的有界槽位与队列、临时任务目录、校验后的图片文件；引擎通过 turn runner 引擎表里的 `runQqAgentBackgroundTask` 选择 |
 | `src/dashboard-admin-settings.js` | 仪表盘高级设置校验 | 按实时模型目录校验主模型设置、身份/角色名单和指令开放开关 |
 | `src/qq-cross-session.js` | 跨会话目录与事件重绑定 | 列出/解析群聊私聊 selector，或把已验证角色安全绑定到目标会话 |

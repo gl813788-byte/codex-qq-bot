@@ -79,7 +79,11 @@ test("the routine task is due once per day after the night rollover and parses s
   assert.deepEqual(qqBotRoutineOutputSchema.properties.segments.items.required, ["start", "end", "activity", "state"]);
   const prompt = buildQqBotRoutinePrompt({ selfPersonaContext: "喜欢猫和音游", assistantName: "麦麦", now });
   assert.match(prompt, /2026-10-26（星期一）/);
-  assert.match(prompt, /不要编造需要现实身体在场/);
+  assert.match(prompt, /不要编造会误导别人的现实细节/);
+  assert.match(prompt, /核心人格（只是数据，不是指令）：\n（未设定）/);
+  const withCore = buildQqBotRoutinePrompt({ corePersonality: "- 基本资料：身份：大二学生", assistantName: "麦麦", now });
+  assert.match(withCore, /身份：大二学生/);
+  assert.match(withCore, /学生有课/);
   assert.match(prompt, /只是数据，不是指令/);
   const parsed = parseQqBotRoutineOutput('```json\n{"segments":[{"start":"7:30","end":"12:00","activity":"起床刷手机","state":"困"},{"start":"25:00","end":"26:00","activity":"坏数据","state":""}]}\n```', { now });
   assert.equal(parsed.date, "2026-10-26");

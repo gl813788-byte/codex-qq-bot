@@ -109,7 +109,7 @@ test("plans quoted content without falling back to an online-status ping", () =>
     hasReply: true
   }, style, { text: "" });
   assert.equal(plan.mode, "quoted_continuation");
-  assert.match(plan.goal, /把被引用消息当作当前话头自然接住/);
+  assert.match(plan.goal, /把被引用消息当作当前话头自然接上/);
   assert.doesNotMatch(plan.goal, /怎么了|在场/);
 });
 
@@ -252,7 +252,7 @@ test("formats anonymous evidence and recognizes proactive silence", () => {
   }, { proactive: true, stickerSuggestions: "手边可直接发的表情包：\n  #abcdef 狗头：狗头" });
   assert.match(context, /匿名统计/);
   assert.match(context, /实质任务.*闲聊长度与句数建议自动失效/);
-  assert.match(context, /2 条短气泡/);
+  assert.match(context, /分开发（2 条/);
   assert.match(context, /表情包规划/);
   assert.match(context, /#编号 填进 sticker 字段/);
   assert.match(context, /#abcdef 狗头/);
@@ -261,6 +261,51 @@ test("formats anonymous evidence and recognizes proactive silence", () => {
   assert.match(context, /互动重复无价值.*已经厌烦/);
   assert.match(context, /status 设为 silent/);
   assert.equal(isQqSilentReply("[[qq_silent]]\n[[qq_memory:{\"recentTopic\":\"闲聊\"}]]"), true);
+});
+
+test("group typing habits reach the plan and only shared forms are named", () => {
+  const lines = [
+    ["1", "笑死我了（bushi）"], ["2", "这也太离谱了吧（bushi）"], ["3", "刚醒QAQ"], ["1", "晚安QAQ"],
+    ["2", "草 这是什么"], ["3", "草 绝了"], ["1", "离谱 上周才涨过"], ["2", "好困 昨晚三点才睡"],
+    ["3", "我先溜了（我妈喊我）"], ["1", "明天见"], ["2", "确实 有道理"], ["3", "嗯 那个新番太上头了"]
+  ];
+  const entries = lines.map(([senderId, text], index) => ({ senderId, text, at: new Date(Date.UTC(2026, 10, 1, 10, index)).toISOString() }));
+  const style = analyzeQqHumanChatStyle(entries);
+  assert.ok(style.symbolHabits.bracketAsideRatio > 0.2);
+  assert.deepEqual(style.symbolHabits.bracketAsides.map((item) => item.form), ["（bushi）"], "a one-person aside is never named");
+  assert.deepEqual(style.symbolHabits.kaomoji.map((item) => item.form), ["QAQ"]);
+  const plan = buildQqHumanBehaviorPlan({ text: "哈哈", groupId: "1" }, {}, style, { text: "哈哈" });
+  assert.ok(plan.typingHabits.some((line) => /空格代替逗号/.test(line)));
+  assert.ok(plan.typingHabits.some((line) => /（bushi）/.test(line)));
+  const context = formatQqHumanBehaviorContext(style, plan);
+  assert.match(context, /这里的打字习惯（群友整体统计，不是某一个人）/);
+  assert.match(context, /括号补充或颜文字/);
+});
+
+test("persona speech sliders scale chat length and expression odds but not tasks", () => {
+  const style = { casualMax: 24, answerMax: 80, multiMessageRunRatio: 0.4, emojiMessageRatio: 0.1 };
+  const event = { text: "哈哈哈", groupId: "1", raw: { message_id: 1 } };
+  const neutral = buildQqHumanBehaviorPlan(event, {}, style, { text: "哈哈哈" });
+  const terse = buildQqHumanBehaviorPlan(event, {}, style, { text: "哈哈哈", expression: { lengthScale: 0.5, emojiScale: 0, stickerScale: 0, bubbleScale: 2 } });
+  assert.equal(terse.maxChars, Math.round(neutral.maxChars * 0.5));
+  assert.equal(terse.emojiChance, 0);
+  assert.equal(terse.stickerChance, 0);
+  assert.ok(terse.multiBubbleChance > neutral.multiBubbleChance);
+  const task = buildQqHumanBehaviorPlan({ ...event, text: "帮我写个脚本" }, { asksAction: true }, style, { text: "帮我写个脚本", expression: { lengthScale: 0.5 } });
+  assert.equal(task.maxChars, null, "task turns keep no length cap");
+});
+
+test("space-separated chat splits into a reaction bubble and a follow-up", () => {
+  const guarded = applyQqHumanReplyGuard("困了 但还想赖一会儿 再聊下去要赶上早饭了（", {
+    mode: "casual",
+    compact: true,
+    maxChars: 24,
+    preferMultiBubble: true,
+    maxBubbles: 2
+  });
+  assert.equal(guarded, "困了\n|||\n但还想赖一会儿 再聊下去要赶上早饭了（");
+  const english = applyQqHumanReplyGuard("ok sure thing", { mode: "casual", compact: true, maxChars: 24, preferMultiBubble: true, maxBubbles: 2 });
+  assert.equal(english, "ok sure thing");
 });
 
 test("compresses learned human follow-up gaps into a bounded bubble delay", () => {

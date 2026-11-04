@@ -13,6 +13,11 @@ const messageTranslationsZh = Object.freeze({
   "Dashboard command permissions updated": "网页端指令开放范围已更新",
   "Dashboard personality updated": "网页端核心人格已更新",
   "Dashboard relationship updated": "网页端人物关系已更新",
+  "Dashboard character card imported": "网页端已导入角色卡",
+  "Dashboard language habit updated": "网页端 Bot 语言习惯已更新",
+  "QQ language habit change": "Bot 语言习惯变更",
+  "QQ persona self-edit": "Bot 自主调整核心人格",
+  "Unable to save QQ language habits": "保存 Bot 语言习惯失败",
   "Dashboard interest model test finished": "网页端兴趣模型测试完成",
   "QQ relationship affinity updated": "Bot 对人物的好感已更新",
   "Unable to load QQ bot personality": "加载核心人格与关系失败（已保留原文件）",
@@ -376,6 +381,20 @@ const detailLabelsZh = Object.freeze({
   mentionAliasCount: "唤醒别名数",
   publicCommandCount: "公开指令数",
   personalityPreset: "性格预设",
+  field: "设定项",
+  op: "调整方式",
+  cardFormat: "角色卡格式",
+  cardSpec: "角色卡规范",
+  importMode: "导入方式",
+  warningCount: "提醒条数",
+  loreCount: "世界书条目数",
+  globalScope: "通用范围",
+  coreAdjustmentsApplied: "核心人格自我优化已采用",
+  coreAdjustmentsRejected: "核心人格自我优化未采用",
+  languageHabitsAdopted: "新采用的语言习惯",
+  languageHabitsDropped: "去掉的语言习惯",
+  languageHabitCount: "本范围语言习惯数",
+  globalLanguageHabitCount: "通用语言习惯数",
   personalityEnabled: "核心人格启用",
   affinityEnabled: "好感度启用",
   requestedDelta: "模型给出的好感变化",
@@ -867,7 +886,8 @@ const detailValuesZh = Object.freeze({
     "memory.avatar_refresh": "头像刷新", "memory.avatar_features": "头像特征记录",
     "memory.knowledge_image": "知识库配图", "memory.image_prune": "记忆图片清理", "search.images": "联网搜图",
     "memory.bot_state": "Bot 内心状态", "memory.bot_routine": "Bot 作息规划",
-    "memory.relationship": "人物好感与关系", "interest.model_test": "兴趣模型测试"
+    "memory.relationship": "人物好感与关系", "interest.model_test": "兴趣模型测试",
+    "memory.language_habit": "Bot 语言习惯", "memory.persona_self_edit": "核心人格自主调整"
   },
   outcome: {
     loaded: "已加载", created: "已新建", updated: "已更新", rejected: "已拒绝", unchanged: "无变化", recorded: "已记录",
@@ -883,7 +903,11 @@ const detailValuesZh = Object.freeze({
     delivered: "已送达", busy: "繁忙", changed: "头像已更换", empty: "没有新特征", removed: "已清理",
     policy_blocked: "被安全下载策略拦截",
     applied: "已生效", "daily-cap": "已达今日上限", locked: "已锁定未改动", disabled: "功能已关闭",
-    bounded: "已到边界", "no-change": "没有变化"
+    bounded: "已到边界", "no-change": "没有变化",
+    adopted: "已采用", dropped: "已去掉", "already-adopted": "早已采用", "not-found": "没有这个习惯",
+    "invalid-term": "写法无效", "invalid-kind": "类型无效", "invalid-scope": "范围无效", "invalid-action": "操作无效",
+    "owner-locked": "主人设定不可改", full: "已满", imported: "已导入",
+    "invalid-field": "设定不可自改", "invalid-key": "设定项无效", "invalid-value": "取值无效", "not-allowed": "不允许"
   },
   layer: {
     "short-term": "短期记忆", impression: "印象记忆", knowledge: "长期知识", unified: "统一记忆",
@@ -929,7 +953,10 @@ const detailValuesZh = Object.freeze({
   safeFetchMode: { strict: "严格", "proxy-compatible": "代理兼容" },
   judgeVisionMode: { auto: "自动检测", on: "始终附图", off: "关闭" },
   hint: { "proxy-fake-ip": "代理 Fake-IP 环境需启用 proxy-compatible" },
-  kind: { slang: "黑话", note: "普通知识", unknown: "未知" },
+  kind: { slang: "黑话", note: "普通知识", symbol: "符号", kaomoji: "颜文字", phrase: "说法", unknown: "未知" },
+  importMode: { replace: "整体替换", merge: "合并补充" },
+  cardFormat: { json: "JSON", png: "PNG", charx: "CHARX", text: "纯文本" },
+  cardSpec: { v1: "TavernAI V1", v2: "Character Card V2", v3: "Character Card V3", pygmalion: "Pygmalion", agnai: "Agnai", text: "纯文本" },
   type: {
     global: "全局", group: "群", member: "人物", "group-member": "群内人物", current: "当前范围",
     all: "全部", "scope-summary": "范围总结", unknown: "未知"

@@ -113,6 +113,8 @@ subsystems belong in focused modules.
 | Sticker search, reactions/recall, profile lookups | `src/qq-sticker-search.js`, `src/app/qq-sticker-tool.js`, `src/app/qq-message-tools.js`, `src/app/qq-lookup-tool.js` |
 | Bot mood, inner thoughts, daily routine | `src/qq-bot-life-state.js`, `src/qq-bot-daily-routine.js` |
 | Core personality, affinity, `/好感度` | `src/qq-bot-personality.js`, `src/qq-affinity-command.js` |
+| Character-card import/export (V1/V2/V3, PNG, CHARX, text) | `src/qq-character-card.js` |
+| The Bot's own scoped language habits | `src/qq-bot-language-habits.js` |
 | Subscription (Codex/Claude) interest judgments | `src/infrastructure/agent/subscription-model-task.js` via `runQqAgentBackgroundTask` |
 | Dashboard advanced-settings validation | `src/dashboard-bot-settings.js`, `src/dashboard-admin-settings.js` |
 | Settings persistence | `src/infrastructure/storage/settings-repository.js` |
@@ -323,7 +325,8 @@ refactor with a behavior change.
   `memory.knowledge_update`, `memory.person_promotion`,
   `memory.avatar_refresh`, `memory.avatar_features`,
   `memory.knowledge_image`, `memory.image_prune`, `memory.bot_state`,
-  `memory.bot_routine`, `memory.relationship` and `interest.model_test`.
+  `memory.bot_routine`, `memory.relationship`, `memory.language_habit`,
+  `memory.persona_self_edit` and `interest.model_test`.
   Language-statistics logs are low-noise checkpoints, contain counts/ratios rather than copied chat
   or inferred meaning, and fire when frequent candidates change or every 25
   text messages. Preserve stable English `message` values for JSON/API
@@ -367,9 +370,31 @@ locked people, keeps the owner floor, and never lets requests to raise
 affinity count. Relationship prompt lines only show change reasons from the
 same scope, so private-chat reasons never reach a group. Personality and
 affinity shape tone and willingness only, never facts, permissions or safety.
-The 活人感 rules (varied length, no restating/lists/AI phrasing,
-sticker-only/reaction-only/silent turns) must keep truthful answers when someone
-sincerely asks whether the Bot is an AI.
+The 活人感 rules (varied length, no restating/lists/AI phrasing, friend rather
+than caretaker tone, sticker-only/reaction-only/silent turns) must keep truthful
+answers when someone sincerely asks whether the Bot is an AI. Typing follows
+group-level habits from `analyzeQqSymbolHabits` (spaces, end punctuation,
+bracketed asides, kaomoji, laughter forms; a concrete form is named only when at
+least two people used it), never one member's quirk.
+Imported character cards are persona material only: the core block forbids
+novel-style narration and declares card demands on output format, rule
+ignoring, safety or permissions inapplicable; keyed lore enters only when the
+current message or quote mentions a key.
+The Bot chooses its own language habits: scope summaries adopt/drop 0-3 per
+scope from reviewed group-wide slang and shared symbols using usage counts from
+delivered replies, the global refresh only promotes general internet language,
+and `qq_self.language_habit` lets the main model adopt at most three a day.
+Scoped habits never leave their scope; owner-added habits cannot be dropped by
+the model; logs carry kind and outcome only, never terms.
+The Bot may also adjust its own core persona through `qq_self.persona` (sliders
+±10 per change, three chat changes a day, owner locks and off switch, boundaries
+add-only, names/card text/lore/affinity rules excluded) and up to three
+`coreAdjustments` per persona refresh. `onBehalfOfOwner=true` on
+`qq_self.persona` or `qq_self.language_habit` is honored only when the Hub
+verifies the original speaker as owner or administrator (never on proactive
+turns); it then reaches almost every persona setting without those limits.
+Every change is logged with source and is undoable from the dashboard when
+simple; `memory.persona_self_edit` logs field/op/outcome only.
 
 Manual AI tasks support independent `--force`, `--full`, and `--background` options (QQ: `/AI任务 强制 后台 全部`; local API: `background: true`). Background acceptance returns a job id and is never completion. Inspect `jobs` in `/api/qq/ai-tasks` or `ncc ai-tasks`; bounded job history lasts only for the current Hub process. Native runtime tools always submit AI tasks in the background. Both engines reject synchronous nested model calls from dynamic tools with `CODEX_NESTED_TURN_BLOCKED`; never raise global concurrency to hide that deadlock. Background work retains the normal limiter, task locks, permissions, and deadlines.
 
@@ -440,10 +465,11 @@ Important state includes:
 - `data/qq-conversation-memory.json`: scoped social impressions
 - `data/qq-knowledge-base.json`: titled scoped long-term knowledge
 - `data/qq-memory-images/`: content-addressed avatars and knowledge pictures
-- `data/qq-personas.json` and `data/qq-self-persona.json`: adaptive behavior and
-  generated self-persona
-- `data/qq-bot-personality.json`: operator-set core personality and per-person
-  affinity, familiarity, nickname and history
+- `data/qq-personas.json` and `data/qq-self-persona.json`: adaptive behavior,
+  generated self-persona and the Bot's own language habits
+- `data/qq-bot-personality.json`: operator-set (or card-imported) core
+  personality, character sheet and lorebook, plus per-person affinity,
+  familiarity, nickname and history
 - `data/qq-codex-sessions.json`: bounded scope-to-thread mappings
 - `runtime/`: logs, replies, and per-request workspaces
 

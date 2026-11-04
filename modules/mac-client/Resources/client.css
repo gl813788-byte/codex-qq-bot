@@ -918,8 +918,70 @@ dialog::backdrop { background: rgba(10, 12, 16, 0.45); backdrop-filter: blur(2px
 
 /* ---------- Persona ---------- */
 .persona-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 0; flex-wrap: wrap; }
+.persona-tabs { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.persona-tabs::-webkit-scrollbar { display: none; }
+.persona-tabs button { flex: none; }
 .persona-panel { display: grid; gap: 16px; min-width: 0; }
-.persona-grid { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); align-items: start; }
+.persona-form { display: grid; gap: 16px; min-width: 0; }
+.persona-subfields { margin-top: 14px; }
+/* Sliders sit four to a row; the meaning line stays one line (full text in the tooltip). */
+.trait-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 18px; row-gap: 10px; }
+.trait-grid .trait-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-import-actions { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+.card-import-actions .compact-field { min-width: 140px; }
+.toolbar-spacer { flex: 1 1 auto; }
+#cardMeta { margin-top: 10px; align-items: center; }
+.card-preview:empty { display: none; }
+.lore-list { display: grid; gap: 10px; }
+.lore-entry { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-sunken); }
+.lore-entry-head { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto auto auto; gap: 10px; align-items: end; }
+.lore-entry .switch-label { min-height: 36px; }
+.habit-group { display: grid; gap: 6px; }
+.habit-group h4 { margin: 4px 0 0; color: var(--muted); font-size: 12px; font-weight: 600; }
+.habit-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.habit-term { padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-weight: 600; font-size: 13px; white-space: nowrap; }
+.habit-copy { display: grid; gap: 2px; min-width: 0; font-size: 13px; }
+.habit-copy small { color: var(--muted); font-size: 12px; }
+.habit-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-top: 12px; }
+.habit-form .field { min-width: 120px; }
+.habit-form .field.grow { flex: 1 1 200px; }
+/* Equal columns like Settings; cards in one row share a height. */
+.persona-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
+.persona-grid > .card, .persona-grid > .behavior-column { min-width: 0; }
+.persona-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.form-grid.three .span-2 { grid-column: span 2; }
+.collapsible-card { padding: 0; }
+.collapsible-card > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; cursor: pointer; list-style: none; }
+.collapsible-card > summary::-webkit-details-marker { display: none; }
+.collapsible-card > summary > span { display: grid; gap: 3px; flex: 1 1 auto; min-width: 0; }
+.collapsible-card > summary strong { font-size: 15px; }
+.collapsible-card > summary small { color: var(--muted); font-size: 12px; }
+.collapsible-card > summary::after { content: ""; flex: none; width: 8px; height: 8px; margin-left: 4px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); transition: transform 0.15s; }
+.collapsible-card[open] > summary::after { transform: rotate(-135deg); }
+.collapsible-card[open] > summary { border-bottom: 1px solid var(--border); }
+.collapsible-card > :not(summary) { margin: 14px 18px 18px; }
+.lock-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.lock-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 999px; font-size: 12px; cursor: pointer; }
+.lock-chip input { width: auto; min-height: 0; margin: 0; accent-color: var(--accent); }
+.lock-chip:has(input:checked) { border-color: var(--warn); background: var(--warn-soft); color: var(--warn-text); }
+#selfEditLog li { grid-template-columns: 76px minmax(0, 0.8fr) minmax(0, 1.6fr) auto auto; }
+#selfEditLog li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-note { align-items: center; margin-bottom: 12px; font-size: 13px; color: var(--text-2); }
+.link-button { padding: 0; border: 0; background: none; color: var(--accent-text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.link-button:hover { text-decoration: underline; }
+.kind-tag.habit { background: var(--accent-soft); color: var(--accent-text); }
+.habit-term.link { border: 0; cursor: pointer; font: inherit; font-weight: 600; font-size: 13px; }
+.people-relations { display: grid; gap: 8px; }
+.people-relations .affinity-distribution { margin-bottom: 0; }
+.people-toolbar select { width: auto; }
+.person-relation { display: grid; gap: 6px; }
+.person-relation-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.person-relation-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.person-relation .affinity-meter { display: block; }
+.overview-person { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; padding: 2px 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.overview-person > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overview-person:hover > span:nth-child(2) { color: var(--accent-text); }
 .span-all { grid-column: 1 / -1; }
 .preset-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .preset-chip {
@@ -1043,6 +1105,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 /* ---------- Responsive ---------- */
 @media (max-width: 1180px) {
   .overview-main, .overview-lower, .behavior-grid, .persona-grid { grid-template-columns: minmax(0, 1fr); }
+  .trait-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .preset-grid { grid-template-columns: minmax(0, 1fr); }
   .knowledge-workspace { grid-template-columns: 180px minmax(0, 1fr); }
   .knowledge-inspector { grid-column: 1 / -1; position: static; }
@@ -1072,7 +1135,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   .log-details { padding-left: 18px; }
   .mobile-nav {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-    display: grid; grid-template-columns: repeat(8, minmax(0, 1fr));
+    display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
     padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--border);
     background: color-mix(in srgb, var(--surface) 92%, transparent);
@@ -1102,8 +1165,16 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   .status-banner-actions { width: 100%; }
   .status-banner-actions .button { flex: 1; }
   .stat-value { font-size: 20px; }
-  .toggle-grid, .tuning-grid, .form-grid, .detail-sections { grid-template-columns: minmax(0, 1fr); }
+  .toggle-grid, .tuning-grid, .form-grid, .form-grid.three, .detail-sections { grid-template-columns: minmax(0, 1fr); }
+  .form-grid.three .span-2 { grid-column: auto; }
+  .trait-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #selfEditLog li { grid-template-columns: minmax(0, 1fr) auto; }
+  #selfEditLog li > time, #selfEditLog li > em { display: none; }
   .field.wide, .form-grid .span-2 { grid-column: auto; }
+  .lore-entry-head { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+  .lore-entry-head .field:first-child { grid-column: 1 / -1; }
+  .card-import-actions .button { flex: 1 1 auto; }
+  .toolbar-spacer { display: none; }
   .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .filter-grid .field.wide { grid-column: span 2; order: -1; }
   .setting-row { flex-direction: column; align-items: stretch; }
