@@ -502,6 +502,12 @@ function updatePageIdentity() {
 }
 
 function setView(view, { updateHash = true, quiet = true, focus = false } = {}) {
+  // Extensions may fold an old view into one of theirs (e.g. #intelligence is
+  // now the Behavior tab of the persona view).
+  for (const extension of dashboardExtensions) {
+    const mapped = typeof extension.resolveView === "function" ? extension.resolveView(view) : null;
+    if (mapped) view = mapped;
+  }
   if (!validViews.has(view)) view = "overview";
   app.view = view;
   $$("[data-view-panel]").forEach((panel) => {
@@ -1452,16 +1458,22 @@ function renderMemory() {
 }
 
 // Person impressions with the QQ avatar the Bot recognizes people by.
-function renderPeopleMemory(people) {
+// Extensions may merge more people (e.g. relationships) and add a toolbar,
+// metrics, extra search text and their own filter/sort.
+function renderPeopleMemory(memoryPeople) {
+  const model = runExtensionHook("peopleMemoryModel", memoryPeople).find(Boolean) || null;
+  const people = model?.people || memoryPeople;
   const query = app.memoryQuery.trim().toLowerCase();
-  const matches = query
+  const matches = (query
     ? people.filter((person) => [
       person.displayName, person.userId, ...(person.aliases || []), person.impressionSummary, person.impressionDetail,
-      person.avatar?.features?.summary, person.avatar?.features?.detail, ...(person.avatar?.history || []).map((item) => item.summary)
+      person.avatar?.features?.summary, person.avatar?.features?.detail, ...(person.avatar?.history || []).map((item) => item.summary),
+      model?.searchText?.(person) || ""
     ].join(" ").toLowerCase().includes(query))
-    : people;
+    : people).filter((person) => !model?.filter || model.filter(person));
+  if (model?.sort) matches.sort(model.sort);
   const count = (status) => people.filter((person) => person.avatar?.status === status).length;
-  const metrics = [
+  const metrics = model?.metrics || [
     { label: t("peopleTotal"), value: formatNumber(people.length), icon: icons.channels },
     { label: t("peopleWithAvatar"), value: formatNumber(people.filter((person) => person.avatar?.imageId).length), icon: icons.knowledge },
     { label: t("peopleDescribed"), value: formatNumber(count("described")), icon: icons.shieldCheck },
@@ -1470,6 +1482,7 @@ function renderPeopleMemory(people) {
   const visible = matches.slice(0, app.peopleLimit);
   return `<div class="people-view">
     <div class="stat-row">${metrics.map(statCard).join("")}</div>
+    ${model?.toolbar || ""}
     ${visible.length ? `<div class="people-grid">${visible.map(renderPersonCard).join("")}</div>` : emptyState(t("noPeople"))}
     ${matches.length > visible.length ? `<button class="button ghost people-more" type="button" data-more-people>${escapeHtml(t("showMorePeople", { count: matches.length - visible.length }))}</button>` : ""}
   </div>`;
@@ -1488,6 +1501,7 @@ function renderPersonCard(person) {
       <header class="person-head"><strong>${escapeHtml(name)}</strong><span class="person-id">QQ ${escapeHtml(person.userId)}</span>${person.isRobot ? `<span class="kind-tag">${escapeHtml(t("robotTag"))}</span>` : ""}<span class="chip ${status[0]}">${escapeHtml(t(status[1]))}</span></header>
       ${features.summary ? `<section class="person-section"><h4>${escapeHtml(t("avatarFeatures"))}</h4><p>${escapeHtml(features.summary)}</p>${features.detail ? `<p class="person-detail">${escapeHtml(features.detail)}</p>` : ""}<span class="person-meta">${escapeHtml(t("avatarDescribedMeta", { source: t(sources[features.source] || "avatarSourceAgent"), time: formatTime(features.describedAt) }))}</span></section>` : ""}
       ${(avatar.history || []).length ? `<section class="person-section"><h4>${escapeHtml(t("avatarPreviousFeatures"))}</h4>${avatar.history.slice().reverse().map((item) => `<p class="person-detail">${escapeHtml(item.summary)}</p>`).join("")}</section>` : ""}
+      ${runExtensionHook("personCardExtra", person).join("")}
       ${person.impressionSummary ? `<section class="person-section"><h4>${escapeHtml(t("personImpression"))}</h4><p>${escapeHtml(person.impressionSummary)}</p>${impressionDetail ? `<details><summary>${escapeHtml(t("personImpressionDetail"))}</summary><p class="person-detail">${escapeHtml(impressionDetail)}</p></details>` : ""}</section>` : ""}
       <footer class="person-meta">${escapeHtml([t("personMessages", { count: formatNumber(person.messageCount || 0) }), person.updatedAt ? t("updated", { time: formatTime(person.updatedAt) }) : "", avatar.fetchedAt ? t("avatarFetchedAt", { time: formatTime(avatar.fetchedAt) }) : ""].filter(Boolean).join(" · "))}</footer>
     </div>
@@ -1760,7 +1774,7 @@ function renderKnowledgeList(entries, selected) {
     const variants = entry.visibleVariants;
     const scopes = [...new Set(variants.map((variant) => knowledgeScopeName(variant.scope?.type)))];
     return `<button class="knowledge-card ${entry.id === selected.entry?.id ? "active" : ""}" type="button" data-knowledge-entry="${escapeHtml(entry.id)}" data-knowledge-variant="${escapeHtml(variants[0]?.id || "")}">
-      <span class="knowledge-card-top"><span class="kind-tag ${escapeHtml(entry.kind)}">${escapeHtml(entry.kind === "slang" ? t("knowledgeKindSlang") : t("knowledgeKindNote"))}</span><time>${escapeHtml(formatRelative(entry.updatedAt))}</time></span>
+      <span class="knowledge-card-top"><span class="kind-tag ${escapeHtml(entry.kind)}">${escapeHtml(entry.kind === "slang" ? t("knowledgeKindSlang") : t("knowledgeKindNote"))}</span>${runExtensionHook("knowledgeBadge", entry).join("")}<time>${escapeHtml(formatRelative(entry.updatedAt))}</time></span>
       <strong>${escapeHtml(entry.title)}</strong>
       <p>${escapeHtml(variants[0]?.content || "")}</p>
       <span class="knowledge-card-foot"><span>${scopes.map((scope) => `<span class="kind-tag">${escapeHtml(scope)}</span>`).join("")}</span><span>${knowledgeEntryImageCount(entry) ? `${escapeHtml(t("knowledgeImageCount", { count: knowledgeEntryImageCount(entry) }))} · ` : ""}${escapeHtml(t("knowledgeHitValue", { count: knowledgeEntryHits(entry) }))}</span></span>

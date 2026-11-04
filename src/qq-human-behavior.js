@@ -1,6 +1,10 @@
+import { analyzeQqSymbolHabits, describeQqSymbolHabits } from "./qq-language-style.js";
 
 const mediaOnlyPattern = /^(?:\[(?:图片|表情|语音|文件)(?:[^\]]*)?\]|[\p{Extended_Pictographic}\uFE0F\s]+)$/u;
-const casualEmotionPattern = /(累|困|晕|烦|气死|难受|开心|高兴|想睡|睡懵|绷不住|笑死|离谱|无语|我去|卧槽|草|好耶|寄了|麻了)/i;
+const casualEmotionPattern = /(累|困|晕|烦|气死|难受|开心|高兴|想睡|睡懵|绷不住|笑死|离谱|无语|我去|卧槽|草|好耶|寄了|麻了|焦虑|难过|伤心|emo|崩溃|郁闷|心累|不开心|想哭|委屈|慌|孤独|失眠)/i;
+// “说不上为什么”“不知道怎么办” share how someone feels; they are not asking
+// for an explanation.
+const rhetoricalQuestionPattern = /(?:说不上|不知道|也不懂|搞不懂|想不通)(?:为什么|为啥|怎么回事|怎么办|咋办)/;
 const imageQuestionPattern = /(看|看看|识别|评价|锐评|什么图|这是啥|这是什么|什么梗|什么意思|图里|截图|表情包)/i;
 const socialRequestPattern = /(叫.{0,8}(?:爸爸|爹|妈)|揍|打|锤|夸我|骂我|亲一个|抱一下|给.{0,8}(?:点.{0,4}赞|点赞)|充.{0,8}(?:会员|svip)|借我|唱一个)/i;
 const protectedMarkerPattern = /\[\[qq_(?:memory|image|file|sticker|reply|command|progress|task_budget):[^\n]*?\]\]|\[\[qq_(?:done|task_continue)\]\]/g;
@@ -67,6 +71,7 @@ export function analyzeQqHumanChatStyle(entries = [], { privateChat = false, win
     sampleSize: humans.length,
     textSampleSize: textMessages.length,
     confidence: textMessages.length >= 40 ? "high" : textMessages.length >= 16 ? "medium" : "low",
+    symbolHabits: analyzeQqSymbolHabits(humans, { windowSize }),
     medianTextChars: median,
     p90TextChars: p90,
     shortMessageRatio: ratio(shortMessages, lengths.length),
@@ -129,15 +134,20 @@ export function analyzeQqBotChatStyle(entries = [], { windowSize = 160 } = {}) {
   };
 }
 
-export function buildQqHumanBehaviorPlan(event = {}, intent = {}, style = {}, { text = "" } = {}) {
+// `expression` comes from the owner's speech sliders (see
+// getQqPersonalityExpressionBias): it scales chat-length hints and the emoji,
+// sticker and multi-bubble odds, never task turns.
+export function buildQqHumanBehaviorPlan(event = {}, intent = {}, style = {}, { text = "", expression = null } = {}) {
   const source = String(text || event?.text || "").replace(/\s+/g, " ").trim();
   const privateChat = Boolean(style.privateChat || event.type === "private_message" || !event.groupId);
   const hasImages = Boolean(intent.hasImages);
   const explicitImageQuestion = hasImages && imageQuestionPattern.test(source);
   const barePing = !source || /^[?？!！~～。\s]+$/.test(source);
   const emotional = casualEmotionPattern.test(source);
+  // A feeling shared without a real question is emotional chat, not a Q&A.
+  const venting = emotional && !/[?？]/.test(source) && (rhetoricalQuestionPattern.test(source) || !intent.isQuestion);
   let mode = "casual";
-  let goal = "接住当前一句，不扩写成说明文";
+  let goal = "像群友那样随口接一句，不扩写成说明文";
   let maxChars = Number(style.casualMax || (privateChat ? 48 : 24));
   let maxSentences = privateChat ? 2 : 1;
   let compact = true;
@@ -160,7 +170,7 @@ export function buildQqHumanBehaviorPlan(event = {}, intent = {}, style = {}, { 
     mode = "quoted_continuation";
     goal = intent.isQuestion
       ? "直接回答被引用消息里的问题，不退回无内容的在线确认或让对方重说"
-      : "把被引用消息当作当前话头自然接住，不退回无内容的在线确认或索取重复说明";
+      : "把被引用消息当作当前话头自然接上，不退回无内容的在线确认或索取重复说明";
     maxChars = Math.min(Number(style.answerMax || (privateChat ? 96 : 60)), privateChat ? 110 : 72);
     maxSentences = 2;
     compact = true;
@@ -211,6 +221,11 @@ export function buildQqHumanBehaviorPlan(event = {}, intent = {}, style = {}, { 
     maxChars = Math.min(Number(style.answerMax || 80), privateChat ? 110 : 64);
     maxSentences = 2;
     compact = false;
+  } else if (venting && !explicitImageQuestion) {
+    mode = "social_emotion";
+    goal = "像朋友那样反应：共鸣、吐槽或说说自己的类似情况都行，不分析、不说教、不给方案，也别像心理咨询";
+    maxChars = Math.min(Number(style.casualMax || 28) + 8, privateChat ? 64 : 34);
+    maxSentences = 2;
   } else if (intent.isQuestion || explicitImageQuestion) {
     mode = source.length <= 14 ? "casual_answer" : "answer";
     goal = source.length <= 14
@@ -223,18 +238,22 @@ export function buildQqHumanBehaviorPlan(event = {}, intent = {}, style = {}, { 
     compact = source.length <= 14;
   } else if (emotional) {
     mode = "social_emotion";
-    goal = "回应情绪或处境本身，不立刻分析、教育或给方案";
+    goal = "像朋友那样反应：共鸣、吐槽或说说自己的类似情况都行，不分析、不说教、不给方案，也别像心理咨询";
     maxChars = Math.min(Number(style.casualMax || 28) + 8, privateChat ? 64 : 34);
     maxSentences = 2;
   }
 
-  const multiBubbleChance = getMultiBubbleChance(mode, privateChat, style);
+  const bias = normalizeExpressionBias(expression);
+  if (Number.isFinite(maxChars) && maxChars != null && !completionDriven) {
+    maxChars = Math.max(4, Math.round(maxChars * bias.lengthScale));
+  }
+  const multiBubbleChance = clamp(getMultiBubbleChance(mode, privateChat, style) * bias.bubbleScale, 0, 0.85);
   const preferMultiBubble = multiBubbleChance > 0
     && stableFraction(`${event.groupId || "private"}:${event.senderId || ""}:${event.raw?.message_id || ""}:${source}`) < multiBubbleChance;
-  const emojiChance = getEmojiChance(mode, source, style);
+  const emojiChance = clamp(getEmojiChance(mode, source, style) * bias.emojiScale, 0, 0.6);
   const preferEmoji = emojiChance > 0
     && stableFraction(`emoji:${event.groupId || "private"}:${event.senderId || ""}:${event.raw?.message_id || ""}:${source}`) < emojiChance;
-  const stickerChance = getStickerChance(mode, source, style, { privateChat, hasImages });
+  const stickerChance = clamp(getStickerChance(mode, source, style, { privateChat, hasImages }) * bias.stickerScale, 0, 0.7);
   const preferSticker = stickerChance > 0
     && stableFraction(`sticker:${event.groupId || "private"}:${event.senderId || ""}:${event.raw?.message_id || ""}:${source}`) < stickerChance;
   return {
@@ -252,7 +271,22 @@ export function buildQqHumanBehaviorPlan(event = {}, intent = {}, style = {}, { 
     emojiChance,
     emojiPalette: Array.isArray(style.emojiPalette) ? style.emojiPalette.slice(0, 5) : [],
     preferSticker,
-    stickerChance
+    stickerChance,
+    typingHabits: describeQqSymbolHabits(style.symbolHabits)
+  };
+}
+
+function normalizeExpressionBias(value) {
+  const scale = (input, fallback = 1) => {
+    const number = Number(input);
+    return Number.isFinite(number) && number >= 0 ? Math.min(3, number) : fallback;
+  };
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    lengthScale: Math.max(0.3, scale(source.lengthScale)),
+    emojiScale: scale(source.emojiScale),
+    stickerScale: scale(source.stickerScale),
+    bubbleScale: scale(source.bubbleScale)
   };
 }
 
@@ -261,7 +295,7 @@ export function formatQqHumanBehaviorContext(style = {}, plan = {}, {
   stickerSuggestions = ""
 } = {}) {
   const bubbles = plan.preferMultiBubble
-    ? `本轮倾向连续发 2 条短气泡（最多 ${plan.maxBubbles || 2} 条）：第一条先接住/给结论，后面只补细节、后劲或接梗；没有自然的第二层意思就仍发 1 条，严禁凑数。`
+    ? `本轮像真人那样分开发（2 条，最多 ${plan.maxBubbles || 2} 条）：第一条先给反应或结论，下一条补一句后劲、细节或吐槽；实在只有一句话才发 1 条，别硬拆半句。`
     : "本轮默认 1 条气泡；确实有自然的补一句时才用 2 条，不把长文机械切碎。";
   const emojiInstruction = plan.preferEmoji
     ? `本轮可以自然带 1 个 emoji${plan.emojiPalette?.length ? `，近期群里常见的是 ${plan.emojiPalette.join(" ")}` : ""}；只在语气确实需要时用，不要每条固定挂同一个。`
@@ -282,7 +316,10 @@ export function formatQqHumanBehaviorContext(style = {}, plan = {}, {
     plan.preferSticker && stickerSuggestions ? stickerSuggestions : null,
     "- 真人群聊通常只回应当前最值得接的一点，会省略双方已经知道的主语和背景；不要复述问题，不要把每句口语补成完整书面语。",
     "- 对方只是在分享、感叹或发图时，先给具体反应；没有求建议就不要自动分析、科普、安慰教程或列能力清单。",
-    "- 可以自然用短句、语气词、问号或一个合适表情，但不要强塞网络黑话、错别字或口癖。被认真问到是不是 AI 时如实回答。",
+    plan.typingHabits?.length
+      ? `- 这里的打字习惯（群友整体统计，不是某一个人）：${plan.typingHabits.join("；")}。你打字也跟着这些习惯走，频率和大家差不多就行。`
+      : null,
+    "- 可以自然用短句、语气词、问号、括号补充或颜文字；这里通用的黑话可以照大家的用法用，但别硬塞、别用错意思，也别模仿某个人独有的口癖。被认真问到是不是 AI 时如实回答。",
     proactive
       ? "- 这是兴趣模型已经批准的执行轮；先理解内容并正常执行，但主模型仍可在上下文已经过时、互动重复无价值、自己已经厌烦或安全/事实边界不允许时把 status 设为 silent。"
       : null
@@ -306,6 +343,9 @@ export function applyQqHumanReplyGuard(reply, plan = {}, style = {}, { bubbleSep
     if (units.length === 1) {
       const clauses = splitNaturalClauses(visible);
       if (clauses.length > 1) units = clauses;
+      // Space-separated chat (“困了 但还想赖一会儿”) has no commas to split on:
+      // the first chunk goes out as the reaction and the rest follows.
+      else units = splitSpacedChunks(visible);
     }
     const maxBubbles = Math.max(2, Number(plan.maxBubbles || 2));
     if (units.length >= 2
@@ -399,6 +439,14 @@ function splitNaturalUnits(text, bubbleSeparator) {
     }
   }
   return units.length ? units : [normalized];
+}
+
+function splitSpacedChunks(text) {
+  const value = String(text || "").trim();
+  if (/\n/.test(value)) return [value];
+  const chunks = value.split(/(?<=\p{Script=Han}[）)～~！!？?]?) +(?=\p{Script=Han})/u).map((part) => part.trim()).filter(Boolean);
+  if (chunks.length < 2 || characterLength(chunks[0]) < 2) return [value];
+  return [chunks[0], chunks.slice(1).join(" ")];
 }
 
 function splitNaturalClauses(text) {

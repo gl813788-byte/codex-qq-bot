@@ -88,7 +88,18 @@ import {
   formatQqAffinityReport,
   formatQqPersonalityCoreContext,
   formatQqRelationshipContext,
+  applyQqCharacterCardToProfile,
+  applyQqPersonaOwnerEdit,
+  applyQqPersonaSelfEdit,
   applyQqPersonalityPreset,
+  describeQqPersonaSelfEditState,
+  listQqPersonalityPresets,
+  QQ_PERSONALITY_SOCIAL,
+  QQ_PERSONA_OWNER_EDIT_FIELDS,
+  revertQqPersonaSelfEdit,
+  buildQqPersonalityCardExport,
+  formatQqPersonaLoreContext,
+  getQqPersonalityExpressionBias,
   normalizeQqPersonality,
   normalizeQqPersonalityProfile,
   recordQqPersonalityInteraction,
@@ -98,6 +109,21 @@ import {
   summarizeQqPersonalityForJudge,
   updateQqPersonByOwner
 } from "./qq-bot-personality.js";
+import {
+  QQ_CHARACTER_CARD_MAX_BYTES,
+  QqCharacterCardError,
+  parseQqCharacterCard
+} from "./qq-character-card.js";
+import {
+  applyQqModelLanguageHabitChange,
+  applyQqOwnerLanguageHabitChange,
+  formatQqLanguageHabitsContext,
+  recordQqLanguageHabitUsage,
+  removeQqLanguageHabit,
+  applyQqLanguageHabitProposals,
+  selectQqScopeSlangCandidates,
+  summarizeQqLanguageHabits
+} from "./qq-bot-language-habits.js";
 import { createQqRequestStore, formatQqRequestEntry } from "./qq-request-store.js";
 import {
   buildQqActiveJoinGroupPayload,
@@ -2688,8 +2714,13 @@ async function runQqSelfPersonaScopeSummary(scope, {
     previousTopics: currentScope.topics,
     previousSocialMemory: currentScope.socialMemory,
     previousLanguageStyle: currentScope.languageStyle,
-    reviewId: historySnapshot.snapshotId
+    reviewId: historySnapshot.snapshotId,
+    languageHabits: state.qq.selfPersona.languageHabits,
+    slangCandidates: selectQqScopeSlangCandidates(state.qq.knowledgeBase, currentScope.kind === "group"
+      ? { groupId: scopeId, limit: 16 }
+      : { privateUserId: scopeId.slice("private:".length), limit: 16 })
   });
+  const habitsBefore = new Set((state.qq.selfPersona.languageHabits?.items || []).map((item) => item.id));
   const output = await runQqSelfPersonaModelPrompt(prompt, `scope-${currentScope.kind}`);
   const summary = parseQqSelfPersonaJson(output);
   if (!summary) throw new Error("scope summarizer did not return valid FINAL_JSON");
@@ -2731,6 +2762,8 @@ async function runQqSelfPersonaScopeSummary(scope, {
   }
   const storedLanguageStyle = storedScopeSummary?.languageStyle || {};
   const storedSocialMemory = storedScopeSummary?.socialMemory || {};
+  const habitsAfter = state.qq.selfPersona.languageHabits?.items || [];
+  const scopeHabitCount = habitsAfter.filter((item) => item.scope === scopeId).length;
   const result = {
     ok: true,
     scopeId,
@@ -2755,6 +2788,9 @@ async function runQqSelfPersonaScopeSummary(scope, {
     sentencePatternCount: Number(storedLanguageStyle.sentencePatterns?.length || 0),
     punctuationRuleCount: Number(storedLanguageStyle.punctuationUsageRules?.length || 0),
     memberLanguagePatternCount: Number(storedLanguageStyle.memberPatterns?.length || 0),
+    languageHabitsAdopted: habitsAfter.filter((item) => !habitsBefore.has(item.id)).length,
+    languageHabitsDropped: [...habitsBefore].filter((id) => !habitsAfter.some((item) => item.id === id)).length,
+    languageHabitCount: scopeHabitCount,
     atmosphereCount: Number(storedSocialMemory.atmosphere?.length || 0),
     interactionHabitCount: Number(storedSocialMemory.interactionHabits?.length || 0),
     notablePersonCount: Number(storedSocialMemory.notablePeople?.length || 0),
@@ -2793,13 +2829,22 @@ async function runQqGlobalSelfPersonaGeneration({ force = false, source = "perio
   }
   try {
     const output = await runQqSelfPersonaModelPrompt(
-      buildQqSelfPersonaGenerationPrompt(state.qq.selfPersona),
+      buildQqSelfPersonaGenerationPrompt(state.qq.selfPersona, {
+        corePersonality: formatQqPersonalityCoreContext(state.qq.personality, {
+          assistantName: state.qq.selfPersona.account?.nickname || assistantName
+        }).slice(0, 4000),
+        coreEditable: describeQqPersonaSelfEditState(state.qq.personality)
+      }),
       "global"
     );
     const persona = parseQqSelfPersonaJson(output);
     if (!persona) throw new Error("global persona generator did not return valid FINAL_JSON");
     state.qq.selfPersona = applyGeneratedQqSelfPersona(state.qq.selfPersona, persona);
-    await saveQqSelfPersona();
+    const coreReview = applyQqPersonaReviewAdjustments(persona.coreAdjustments);
+    await Promise.all([
+      saveQqSelfPersona(),
+      coreReview.applied ? saveQqPersonality() : Promise.resolve()
+    ]);
     const result = {
       ok: true,
       revision: state.qq.selfPersona.generation.revision,
@@ -2813,6 +2858,9 @@ async function runQqGlobalSelfPersonaGeneration({ force = false, source = "perio
       source,
       interestKeywordCount: state.qq.selfPersona.persona.interestKeywords.length,
       interestCount: state.qq.selfPersona.persona.interests.length,
+      globalLanguageHabitCount: (state.qq.selfPersona.languageHabits?.items || []).filter((item) => item.scope === "global").length,
+      coreAdjustmentsApplied: coreReview.applied,
+      coreAdjustmentsRejected: coreReview.rejected,
       humanMessages: state.qq.selfPersona.totals.humanMessages,
       botReplies: state.qq.selfPersona.totals.botReplies
     }, "learning");
@@ -2878,6 +2926,9 @@ async function refreshQqBotRoutine() {
   await ensureCodexReplyWorkspace();
   const result = await runSteerableQqCodexTurn(buildQqBotRoutinePrompt({
     selfPersonaContext: formatQqSelfPersonaContext(state.qq.selfPersona, { interestOnly: true }),
+    corePersonality: formatQqPersonalityCoreContext(state.qq.personality, {
+      assistantName: state.qq.selfPersona.account.nickname || assistantName
+    }).slice(0, 2400),
     assistantName: state.qq.selfPersona.account.nickname || state.qq.selfPersona.persona.name || assistantName,
     now,
     previousRoutine: state.qq.botLife.routine
@@ -3517,7 +3568,15 @@ function buildDashboardPersonalityStatus() {
       thoughts: (life.thoughts || []).slice(-30).map((thought) => ({ ...thought })),
       thoughtsByScope
     },
-    generatedPersona: summarizeQqSelfPersona(state.qq.selfPersona).persona || null
+    generatedPersona: summarizeQqSelfPersona(state.qq.selfPersona).persona || null,
+    languageHabits: {
+      ...summarizeQqLanguageHabits(state.qq.selfPersona.languageHabits),
+      scopeNames: Object.fromEntries((state.qq.selfPersona.languageHabits?.items || [])
+        .filter((item) => item.scope !== "global")
+        .map((item) => [item.scope, item.scope.startsWith("private:")
+          ? `私聊 ${item.scope.slice("private:".length)}`
+          : getQqKnowledgeGroupName(state.qq.knowledgeBase, item.scope) || `群 ${item.scope}`]))
+    }
   };
 }
 
@@ -7661,6 +7720,12 @@ async function executeQqStructuredNativeTool(call, event, context = {}) {
       reply: formatQqBotLifeDetail(state.qq.botLife, { scopeId: getQqMemoryScopeId(rootEvent) })
     };
   }
+  if (call?.namespace === "qq_self" && call?.tool === "language_habit") {
+    return executeQqLanguageHabitTool(call.arguments || {}, context.rootEvent || event);
+  }
+  if (call?.namespace === "qq_self" && call?.tool === "persona") {
+    return executeQqPersonaSelfEditTool(call.arguments || {}, context.rootEvent || event);
+  }
   if (call?.namespace === "qq_memory" && call?.tool === "avatar") {
     return executeQqAvatarNativeTool(call, context.rootEvent || event, context.replyScope);
   }
@@ -10227,7 +10292,10 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   const humanChatStyle = adaptiveSignals
     ? personalizeQqHumanStyle(baseHumanChatStyle, adaptiveSignals)
     : baseHumanChatStyle;
-  const humanBehaviorPlan = buildQqHumanBehaviorPlan(event, conversationIntent, humanChatStyle, { text });
+  const humanBehaviorPlan = buildQqHumanBehaviorPlan(event, conversationIntent, humanChatStyle, {
+    text,
+    expression: getQqPersonalityExpressionBias(state.qq.personality)
+  });
   // Sticker-friendly turns get a few ready candidates so a sticker does not
   // always cost a tool search; the full library stays behind qq_sticker.
   const stickerCatalog = state.qq.enhancer.enabled ? await buildQqStickerCatalog(qqStickerDir) : [];
@@ -10261,6 +10329,22 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   event.qqKnowledgeMatches = knowledgeMatches;
   const selfPersonaContext = formatQqSelfPersonaContext(state.qq.selfPersona);
   const scopeTopicContext = formatQqSelfPersonaScopeTopicContext(state.qq.selfPersona, scopeId);
+  // The Bot's own slang/symbol habits for this scope plus slang people here
+  // use; lore entries follow what the current exchange mentions.
+  const languageHabitsContext = state.qq.enhancer.enabled && !event.qqColdProactive
+    ? formatQqLanguageHabitsContext({
+      habits: state.qq.selfPersona.languageHabits,
+      scopeId,
+      scopeSlang: selectQqScopeSlangCandidates(state.qq.knowledgeBase, isQqPrivateEvent(event)
+        ? { privateUserId: event.senderId }
+        : { groupId: event.groupId }),
+      toolsEnabled: !event.qqPrivateProactive
+    })
+    : "";
+  const personaLoreContext = formatQqPersonaLoreContext(state.qq.personality, {
+    text: [text, event.replyContext?.text || ""].filter(Boolean).join("\n"),
+    assistantName: state.qq.selfPersona.account?.nickname || assistantName
+  });
   const robotProfilesContext = formatQqRobotProfilesContext(state.qq.conversationMemory, event);
   event.qqMemoryPeople = resolveQqMemoryPeople(state.qq.conversationMemory, event);
   event.qqRobotProfileCandidates = collectQqRobotProfileCandidates(event);
@@ -10449,6 +10533,10 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       !persistentResume && selfPersonaContext ? "" : null,
       !persistentResume ? scopeTopicContext : null,
       !persistentResume && scopeTopicContext ? "" : null,
+      !persistentResume ? languageHabitsContext : null,
+      !persistentResume && languageHabitsContext ? "" : null,
+      personaLoreContext || null,
+      personaLoreContext ? "" : null,
       botLifeContext || null,
       botLifeContext ? "" : null,
       relationshipContext || null,
@@ -12374,6 +12462,7 @@ async function processQqReplyEvent(event, options = {}) {
       }
       if (memoryReply && !commandAction?.skipMemory) {
         await rememberQqExchange(event, memoryReply);
+        if (deliveredReply) recordQqLanguageHabitUsageForReply(event, deliveredReply);
         if (record.send?.ok !== false && !event.qqColdProactive) {
           state.qq.conversationMemory = updateQqConversationMemoryFromExchange(
             state.qq.conversationMemory,
@@ -13508,6 +13597,190 @@ function startQqTypingIndicator(event) {
     stopped = true;
     if (timer) clearTimeout(timer);
   };
+}
+
+// qq_self.language_habit: the Bot adopting, dropping or listing its own
+// slang/symbol habits for the original conversation. Logs carry the action,
+// kind and outcome only.
+async function executeQqLanguageHabitTool(args, event) {
+  const scopeId = getQqMemoryScopeId(event);
+  if (!scopeId) return { ok: false, error: "当前会话没有可用的范围。" };
+  const action = ["list", "adopt", "drop"].includes(args.action) ? args.action : "list";
+  if (action === "list") {
+    const items = summarizeQqLanguageHabits(state.qq.selfPersona.languageHabits).items
+      .filter((item) => item.scope === "global" || item.scope === scopeId);
+    return {
+      ok: true,
+      reply: items.length
+        ? items.map((item) => `${item.term}（${item.kind}，${item.scope === "global" ? "通用" : "这里"}，用过 ${item.uses} 次）${item.usage ? `：${item.usage}` : ""}`).join("\n")
+        : "你在这里还没有固定的语言习惯。"
+    };
+  }
+  const ownerRequest = args.onBehalfOfOwner === true;
+  if (ownerRequest && !(hasQqPrivilegedAccess(event) && !event.qqColdProactive && !event.qqPrivateProactive)) {
+    return { ok: false, error: "只有已验证的主人或 Bot 管理员直接要求时才能代为修改语言习惯。" };
+  }
+  const result = ownerRequest
+    ? applyQqOwnerLanguageHabitChange(state.qq.selfPersona.languageHabits, {
+      action,
+      kind: args.kind,
+      term: args.term,
+      usage: args.usage,
+      scopeId: args.scope === "global" ? "global" : scopeId
+    })
+    : applyQqModelLanguageHabitChange(state.qq.selfPersona.languageHabits, {
+      action,
+      kind: args.kind,
+      term: args.term,
+      usage: args.usage,
+      reason: args.reason,
+      scopeId,
+      global: args.scope === "global"
+    });
+  logger.info("QQ language habit change", {
+    operation: "memory.language_habit",
+    outcome: result.reason,
+    action,
+    kind: String(args.kind || ""),
+    scopeType: scopeId.startsWith("private:") ? "private" : "group",
+    globalScope: args.scope === "global"
+  }, "learning", qqLogContext(event));
+  if (!result.ok) {
+    const reasons = {
+      "invalid-term": "这个写法不能作为习惯（太长、含链接/@ 或为空）。",
+      "invalid-kind": "kind 只能是 slang/symbol/kaomoji/phrase。",
+      "daily-cap": "今天已经收了 3 个新习惯，明天再说。",
+      "already-adopted": "这已经是你的习惯了。",
+      "not-found": "你没有这个习惯。",
+      "owner-locked": "这是主人设定的习惯，不能自己去掉。",
+      full: "这里的习惯已经满了，先去掉一个不常用的。"
+    };
+    return { ok: false, error: reasons[result.reason] || "没有改动。" };
+  }
+  state.qq.selfPersona = { ...state.qq.selfPersona, languageHabits: result.habits };
+  await saveQqSelfPersona();
+  return { ok: true, reply: action === "adopt" ? `已经把“${result.habit?.term}”收为自己的习惯。` : `以后不再刻意用“${result.habit?.term}”。` };
+}
+
+// qq_self.persona: the Bot viewing or adjusting its own core persona. Logs
+// carry field, operation and outcome only, never the new text.
+async function executeQqPersonaSelfEditTool(args, event) {
+  // Owner-directed edits need the verified original speaker; a model claim
+  // alone never unlocks them.
+  const ownerRequest = args.onBehalfOfOwner === true;
+  const privileged = hasQqPrivilegedAccess(event) && !event.qqColdProactive && !event.qqPrivateProactive;
+  if (ownerRequest && !privileged) {
+    return { ok: false, error: "只有已验证的主人或 Bot 管理员直接要求时才能代为修改；这次只能按你自己的意愿小幅调整。" };
+  }
+  if (args.action !== "adjust") {
+    const editable = describeQqPersonaSelfEditState(state.qq.personality);
+    const profile = state.qq.personality.profile;
+    return {
+      ok: true,
+      reply: JSON.stringify({
+        selfAdjustment: editable || "off",
+        ...(privileged ? {
+          ownerEditableFields: QQ_PERSONA_OWNER_EDIT_FIELDS,
+          current: {
+            enabled: profile.enabled, preset: profile.preset, name: profile.name, selfReference: profile.selfReference,
+            age: profile.age, gender: profile.gender, occupation: profile.occupation, identity: profile.identity,
+            traits: profile.traits, speech: profile.speech, social: profile.social, quirks: profile.quirks,
+            speechHabits: profile.speechHabits, catchphrases: profile.catchphrases, likes: profile.likes,
+            dislikes: profile.dislikes, boundaries: profile.boundaries, affinity: profile.affinity, selfEdit: profile.selfEdit,
+            loreCount: profile.lore.length, descriptionChars: [...profile.description].length
+          },
+          presets: listQqPersonalityPresets().map((item) => item.id),
+          socialOptions: Object.fromEntries(QQ_PERSONALITY_SOCIAL.map((item) => [item.id, item.options.map((entry) => entry.id)]))
+        } : {})
+      })
+    };
+  }
+  const result = ownerRequest
+    ? applyQqPersonaOwnerEdit(state.qq.personality, {
+      field: args.field,
+      key: args.key,
+      op: args.op,
+      value: args.value,
+      delta: args.delta,
+      reason: args.reason,
+      actor: event.isOwner ? "owner" : "admin"
+    })
+    : applyQqPersonaSelfEdit(state.qq.personality, {
+      field: args.field,
+      key: args.key,
+      op: args.op,
+      value: args.value,
+      delta: args.delta,
+      reason: args.reason,
+      source: "chat"
+    });
+  logger.info("QQ persona self-edit", {
+    operation: "memory.persona_self_edit",
+    outcome: result.reason,
+    field: String(args.field || "").slice(0, 24),
+    op: String(args.op || "").slice(0, 12),
+    source: ownerRequest ? "owner-request" : "agent"
+  }, "learning", qqLogContext(event));
+  if (!result.applied) {
+    const reasons = {
+      disabled: "核心人格现在不允许自主调整。",
+      locked: "主人锁定了这部分设定。",
+      "daily-cap": "今天已经调整过 3 处了，明天再说。",
+      "invalid-field": "这个设定不能自己改（名字、角色卡资料和好感规则只由主人设置）。",
+      "invalid-key": "key 不对，先用 view 看可用的滑块或反应 id。",
+      "invalid-value": "value 无效。",
+      "not-allowed": "底线只能加，不能删。",
+      "not-found": "列表里没有这一项。",
+      full: "这个列表已经满了，先去掉一项。",
+      unchanged: "和现在一样，没有变化。"
+    };
+    return { ok: false, error: reasons[result.reason] || "没有改动。" };
+  }
+  const previous = state.qq.personality;
+  state.qq.personality = result.state;
+  try {
+    await saveQqPersonality();
+  } catch (error) {
+    state.qq.personality = previous;
+    throw error;
+  }
+  return {
+    ok: true,
+    reply: ownerRequest
+      ? `已按要求修改 ${result.entry.field}${result.entry.key ? `.${result.entry.key}` : ""}，下一轮起生效。`
+      : "已调整，下一轮起生效；主人可以在控制台撤销。"
+  };
+}
+
+// Applies the periodic refresh's self-optimization proposals (at most three).
+function applyQqPersonaReviewAdjustments(adjustments) {
+  let applied = 0;
+  let rejected = 0;
+  for (const adjustment of (Array.isArray(adjustments) ? adjustments : []).slice(0, 3)) {
+    const result = applyQqPersonaSelfEdit(state.qq.personality, { ...adjustment, source: "review" });
+    if (result.applied) {
+      state.qq.personality = result.state;
+      applied += 1;
+    } else {
+      rejected += 1;
+    }
+  }
+  return { applied, rejected };
+}
+
+// Counts the Bot's own language habits in a delivered reply so periodic
+// reviews can keep the ones it really uses and drop the rest.
+function recordQqLanguageHabitUsageForReply(event, deliveredReply) {
+  const scopeId = getQqMemoryScopeId(event);
+  if (!scopeId || !state.qq.selfPersona.languageHabits?.items?.length) return;
+  const result = recordQqLanguageHabitUsage(state.qq.selfPersona.languageHabits, stripQqReplyMarkersForHabits(deliveredReply), { scopeId });
+  if (!result.used.length) return;
+  state.qq.selfPersona = { ...state.qq.selfPersona, languageHabits: result.habits };
+  void saveQqSelfPersona().catch((error) => logger.warn("Unable to save QQ language habits", { error }, "learning"));
+}
+
+function stripQqReplyMarkersForHabits(value) {
+  return String(value || "").replace(/\[\[qq_[^\]]*\]\]/g, " ");
 }
 
 // Keeps the Bot's private inner monologue and mood for its next turns. Logs
@@ -15019,6 +15292,9 @@ async function handleApi(req, res) {
     const body = await readBody(req, { requireJson: true });
     const previous = state.qq.personality;
     try {
+      if (typeof body.revertSelfEdit === "string" && body.revertSelfEdit) {
+        state.qq.personality = revertQqPersonaSelfEdit(state.qq.personality, body.revertSelfEdit).state;
+      }
       let profile = state.qq.personality.profile;
       if (typeof body.preset === "string" && body.preset) profile = applyQqPersonalityPreset(profile, body.preset);
       if (body.profile && typeof body.profile === "object" && !Array.isArray(body.profile)) {
@@ -15027,7 +15303,13 @@ async function handleApi(req, res) {
           ...body.profile,
           affinity: { ...profile.affinity, ...(body.profile.affinity || {}) },
           traits: { ...profile.traits, ...(body.profile.traits || {}) },
-          preset: body.profile.preset || (body.profile.traits ? "custom" : profile.preset)
+          speech: { ...profile.speech, ...(body.profile.speech || {}) },
+          social: { ...profile.social, ...(body.profile.social || {}) },
+          card: { ...profile.card, ...(body.profile.card || {}) },
+          selfEdit: { ...profile.selfEdit, ...(body.profile.selfEdit || {}) },
+          selfEditLog: profile.selfEditLog,
+          selfEditDaily: profile.selfEditDaily,
+          preset: body.profile.preset || (body.profile.traits || body.profile.speech || body.profile.social ? "custom" : profile.preset)
         });
       }
       state.qq.personality = normalizeQqPersonality({ ...state.qq.personality, profile });
@@ -15048,6 +15330,106 @@ async function handleApi(req, res) {
       personalityPreset: state.qq.personality.profile.preset,
       personalityEnabled: state.qq.personality.profile.enabled,
       affinityEnabled: state.qq.personality.profile.affinity.enabled
+    }), "web");
+    return sendJson(res, 200, buildDashboardPersonalityStatus());
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/qq/personality/card") {
+    const spec = requestUrl.searchParams.get("spec") === "v3" ? "v3" : "v2";
+    const card = buildQqPersonalityCardExport(state.qq.personality, {
+      spec,
+      assistantName: state.qq.selfPersona.account?.nickname || assistantName
+    });
+    return sendJson(res, 200, card);
+  }
+
+  // Character card import: preview parses and maps without saving; import
+  // persists. The raw file arrives as base64 (PNG/CHARX can be large), or as
+  // pasted text in any format.
+  if (req.method === "POST" && requestUrl.pathname === "/api/qq/personality/card") {
+    const body = await readBody(req, { requireJson: true, maxBytes: Math.ceil(QQ_CHARACTER_CARD_MAX_BYTES * 1.4) + 4096 });
+    const mode = body.mode === "merge" ? "merge" : "replace";
+    let parsed;
+    let mapped;
+    try {
+      parsed = parseQqCharacterCard({
+        data: typeof body.data === "string" && body.data ? body.data : null,
+        text: typeof body.text === "string" ? body.text : null,
+        fileName: String(body.fileName || "")
+      });
+      mapped = applyQqCharacterCardToProfile(state.qq.personality.profile, parsed, {
+        mode,
+        sourceName: String(body.fileName || "").slice(0, 80)
+      });
+    } catch (error) {
+      if (error instanceof QqCharacterCardError || error instanceof RangeError || error instanceof TypeError) {
+        return sendJson(res, 400, { error: error.message });
+      }
+      throw error;
+    }
+    const cardSummary = {
+      name: parsed.name,
+      spec: parsed.spec,
+      format: parsed.format,
+      creator: parsed.creator,
+      tags: parsed.tags.slice(0, 12),
+      loreCount: mapped.profile.lore.length,
+      restoredSettings: Boolean(parsed.native)
+    };
+    if (body.action !== "import") {
+      return sendJson(res, 200, { preview: true, profile: mapped.profile, warnings: mapped.warnings, card: cardSummary });
+    }
+    const previous = state.qq.personality;
+    state.qq.personality = normalizeQqPersonality({ ...state.qq.personality, profile: mapped.profile });
+    try {
+      await saveQqPersonality();
+    } catch (error) {
+      state.qq.personality = previous;
+      throw error;
+    }
+    logger.info("Dashboard character card imported", buildQqOperationLogDetails(null, {
+      operation: "settings.update",
+      outcome: "imported",
+      source: "dashboard",
+      cardFormat: parsed.format,
+      cardSpec: parsed.spec,
+      importMode: mode,
+      warningCount: mapped.warnings.length,
+      loreCount: mapped.profile.lore.length
+    }), "web");
+    return sendJson(res, 200, { ...buildDashboardPersonalityStatus(), warnings: mapped.warnings, card: cardSummary });
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/qq/language-habits") {
+    const body = await readBody(req, { requireJson: true });
+    let habits = state.qq.selfPersona.languageHabits;
+    if (body.action === "remove") {
+      const result = removeQqLanguageHabit(habits, String(body.id || ""));
+      if (!result.removed) return sendJson(res, 404, { error: "没有这个语言习惯" });
+      habits = result.habits;
+    } else if (body.action === "add") {
+      const scope = String(body.scope || "global");
+      const result = applyQqLanguageHabitProposals(habits, {
+        adopt: [{ kind: body.kind, term: body.term, usage: body.usage, reason: "主人在控制台添加" }],
+        drop: []
+      }, { scopeId: scope, source: "owner" });
+      if (!result.adopted.length) return sendJson(res, 400, { error: "写法无效、范围无效或该范围已满（不超过 16 字，不含链接和 @）" });
+      habits = result.habits;
+    } else {
+      return sendJson(res, 400, { error: "action must be add or remove" });
+    }
+    const previous = state.qq.selfPersona;
+    state.qq.selfPersona = { ...state.qq.selfPersona, languageHabits: habits };
+    try {
+      await saveQqSelfPersona();
+    } catch (error) {
+      state.qq.selfPersona = previous;
+      throw error;
+    }
+    logger.info("Dashboard language habit updated", buildQqOperationLogDetails(null, {
+      operation: "memory.language_habit",
+      outcome: body.action === "remove" ? "removed" : "adopted",
+      source: "dashboard"
     }), "web");
     return sendJson(res, 200, buildDashboardPersonalityStatus());
   }

@@ -11,6 +11,7 @@ import {
   getDueQqSelfPersonaScopes,
   matchQqSelfPersonaInterestKeywords,
   parseQqSelfPersonaJson,
+  qqSelfPersonaGlobalOutputSchema,
   qqSelfPersonaScopeOutputSchema,
   recordQqSelfPersonaActivity,
   shouldRegenerateQqSelfPersona,
@@ -99,7 +100,8 @@ test("QQ nickname is a fixed interest keyword across generated persona updates",
   assert.deepEqual(matchQqSelfPersonaInterestKeywords(store, "这个编程 bug").keywords, ["编程"]);
   assert.match(formatQqSelfPersonaContext(store), /完整兴趣描述/);
   assert.match(formatQqSelfPersonaContext(store), /全局稳定角色内核/);
-  assert.match(formatQqSelfPersonaContext(store), /表层风格边界/);
+  assert.match(formatQqSelfPersonaContext(store), /角色扮演原则/);
+  assert.match(formatQqSelfPersonaContext(store), /别人眼里的你：喜欢研究技术/);
 });
 
 test("scope topic context gives the main model evolving summary-derived knowledge topics", () => {
@@ -220,11 +222,55 @@ test("scope summaries are due by bounded message/reply thresholds and feed globa
   assert.match(prompt, /可长期角色扮演的稳定角色内核/);
   assert.match(prompt, /不能合成“平均群友”/);
   assert.match(prompt, /把人格与协作方式分开/);
-  assert.match(prompt, /即使 existingPersona 里已有这类表层模仿，也要在本轮清除/);
+  assert.match(prompt, /统一放进 botLanguageHabits/);
+  assert.match(prompt, /第三人称和平实口语/);
+  assert.doesNotMatch(prompt, /corePersonality 是部署者亲自设定/, "no core personality means no core rule");
   assert.doesNotMatch(prompt, /private:20001|10001/);
   const payload = JSON.parse(prompt.split("\n").at(-1));
   assert.deepEqual(payload.summaries[0].socialAtmosphere, []);
   assert.deepEqual(payload.summaries[0].socialInteractionHabits, []);
+  const withCore = buildQqSelfPersonaGenerationPrompt(store, { corePersonality: "【核心人格】- 你是谁：懒散的大学生" });
+  assert.match(withCore, /corePersonality 是部署者亲自设定的核心人格/);
+  assert.equal(JSON.parse(withCore.split("\n").at(-1)).corePersonality, "【核心人格】- 你是谁：懒散的大学生");
+});
+
+test("summaries let the Bot choose, keep and drop its own scoped language habits", () => {
+  const at = Date.UTC(2026, 10, 1, 8, 0);
+  let store = recordQqSelfPersonaActivity(createEmptyQqSelfPersona(), "10001", { humanMessages: 96, at });
+  store = recordQqSelfPersonaActivity(store, "20002", { humanMessages: 96, at });
+  const prompt = buildQqSelfPersonaScopeSummaryPrompt("10001", [{ senderId: "1", text: "笑死（bushi）" }], {
+    slangCandidates: [{ term: "饭堂刺客", meaning: "贵得离谱的食堂菜", hits: 3 }]
+  });
+  assert.match(prompt, /botLanguageHabits 是 Bot 自己在这个范围里的语言习惯/);
+  const payload = JSON.parse(prompt.split("\n").at(-1));
+  assert.equal(payload.sharedSlang[0].term, "饭堂刺客");
+  assert.ok(payload.statisticalLanguageProfile.symbolHabits);
+  assert.deepEqual(qqSelfPersonaScopeOutputSchema.properties.botLanguageHabits.required, ["adopt", "drop"]);
+  store = applyQqSelfPersonaScopeSummary(store, "10001", {
+    summary: "群里爱开玩笑",
+    botLanguageHabits: {
+      adopt: [
+        { kind: "symbol", term: "（bushi）", usage: "开完玩笑反口", reason: "大家都用" },
+        { kind: "slang", term: "https://x.example", usage: "", reason: "" }
+      ],
+      drop: []
+    }
+  }, { at });
+  assert.deepEqual(store.languageHabits.items.map((item) => [item.term, item.scope, item.source]), [["（bushi）", "10001", "summary"]]);
+  const again = buildQqSelfPersonaScopeSummaryPrompt("10001", [], { languageHabits: store.languageHabits });
+  assert.equal(JSON.parse(again.split("\n").at(-1)).currentBotLanguageHabits[0].term, "（bushi）");
+  const otherScope = buildQqSelfPersonaScopeSummaryPrompt("20002", [], { languageHabits: store.languageHabits });
+  assert.deepEqual(JSON.parse(otherScope.split("\n").at(-1)).currentBotLanguageHabits, [], "another group never sees this group's habit");
+  store = applyQqSelfPersonaScopeSummary(store, "10001", { summary: "不再这样说", botLanguageHabits: { adopt: [], drop: ["（bushi）"] } }, { at: at + 1000 });
+  assert.equal(store.languageHabits.items.length, 0);
+  store = applyGeneratedQqSelfPersona(store, {
+    name: "小星",
+    quirks: ["一被夸就嘴硬"],
+    botLanguageHabits: { adopt: [{ kind: "slang", term: "草", usage: "被逗笑时", reason: "各群都通用" }], drop: [] }
+  }, { at });
+  assert.deepEqual(store.persona.quirks, ["一被夸就嘴硬"]);
+  assert.equal(store.languageHabits.items[0].scope, "global");
+  assert.match(formatQqSelfPersonaContext({ ...store, generation: { revision: 1 }, persona: { ...store.persona, selfDescription: "嘴硬" } }), /小毛病和反差：一被夸就嘴硬/);
 });
 
 test("higher activity thresholds combine with shorter wall-clock cooldowns", () => {
@@ -300,4 +346,13 @@ test("parses the final persona JSON instead of earlier analysis", () => {
   ].join("\n"));
   assert.equal(parsed.name, "小星");
   assert.deepEqual(parsed.interestKeywords, ["小星", "AI"]);
+});
+
+test("the persona refresh may propose core adjustments only when they are allowed", () => {
+  assert.ok(qqSelfPersonaGlobalOutputSchema.required.includes("coreAdjustments"));
+  const store = updateQqSelfPersonaAccount(createEmptyQqSelfPersona(), { nickname: "小星" }).store;
+  const allowed = buildQqSelfPersonaGenerationPrompt(store, { coreEditable: { unlockedGroups: ["traits"], traits: { humor: 50 } } });
+  assert.match(allowed, /coreAdjustments 是 Bot 对自己核心人格的自我优化/);
+  assert.deepEqual(JSON.parse(allowed.split("\n").at(-1)).coreEditable.traits, { humor: 50 });
+  assert.match(buildQqSelfPersonaGenerationPrompt(store), /coreAdjustments 必须是空数组/);
 });

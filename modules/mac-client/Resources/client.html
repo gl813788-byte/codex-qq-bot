@@ -29,10 +29,6 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5.5h15v10h-9l-4.5 3.5v-3.5h-1.5z" /><path d="M8.5 9.5h7M8.5 12h4" /></svg>
             <span data-i18n="navChannels">通道</span>
           </button>
-          <button class="nav-item" type="button" data-view="intelligence">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5v15M8 7.5a3.5 3.5 0 0 1 4-3 3.5 3.5 0 0 1 4 3 3.5 3.5 0 0 1 2.5 5.5A3.5 3.5 0 0 1 16 19.5a3.5 3.5 0 0 1-4 0 3.5 3.5 0 0 1-4 0A3.5 3.5 0 0 1 5.5 13 3.5 3.5 0 0 1 8 7.5Z" /></svg>
-            <span data-i18n="navIntelligence">行为</span>
-          </button>
           <button class="nav-item" type="button" data-view="persona">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5" /><path d="M17.5 4.5l.6 1.3 1.4.2-1 1 .2 1.4-1.2-.7-1.3.7.3-1.4-1-1 1.4-.2z" /></svg>
             <span data-i18n="navPersona">人格</span>
@@ -213,8 +209,200 @@
             </section>
           </section>
 
-          <!-- Intelligence -->
-          <section class="view" id="view-intelligence" data-view-panel="intelligence" hidden>
+          <!-- Persona: personality, relationships, state, learning and behavior.
+               The former "Bot behavior" view is the Behavior tab here. -->
+          <section class="view" id="view-persona" data-view-panel="persona" hidden>
+            <div id="personaStats" class="stat-row" aria-live="polite"></div>
+            <div class="persona-toolbar">
+              <div id="personaTabs" class="segmented persona-tabs" role="tablist" aria-label="人格分区" data-i18n-aria-label="personaSections">
+                <button type="button" role="tab" data-persona-tab="profile" data-i18n="personaTabProfile">人设</button>
+                <button type="button" role="tab" data-persona-tab="state" data-i18n="personaTabState">状态</button>
+                <button type="button" role="tab" data-persona-tab="learning" data-i18n="personaTabLearning">学习</button>
+                <button type="button" role="tab" data-persona-tab="behavior" data-i18n="personaTabBehavior">行为</button>
+              </div>
+              <div class="persona-toolbar-actions">
+                <span id="personaSaveState" class="save-state" data-i18n="settingsSynced">设置已同步</span>
+                <button id="resetPersonaForm" class="button small ghost" type="button" data-persona-form-action data-i18n="revertChanges">撤销修改</button>
+                <button id="savePersona" class="button small primary" type="submit" form="personaForm" data-persona-form-action data-i18n="savePersona">保存人格</button>
+              </div>
+            </div>
+
+            <div id="personaPanelProfile" class="persona-panel">
+              <form id="personaForm" class="persona-form">
+                <div class="grid persona-grid">
+                  <section class="card">
+                    <header class="card-head">
+                      <div><h2 data-i18n="personaCore">核心设定</h2><p data-i18n="personaCoreHint">部署者设定的稳定角色，优先于自动学习出的人设。所有文字都不限格式。</p></div>
+                      <label class="switch-label"><span class="switch"><input id="personaEnabled" type="checkbox" /><span aria-hidden="true"></span></span><em data-i18n="personaEnabled">启用</em></label>
+                    </header>
+                    <div class="stack">
+                      <div class="field"><span data-i18n="personaPreset">性格预设</span><div id="personaPresets" class="preset-chips" role="group"></div></div>
+                      <div class="form-grid three">
+                        <label class="field"><span data-i18n="personaName">角色名</span><input id="personaName" maxlength="40" placeholder="留空则用 QQ 昵称" data-i18n-placeholder="personaNameHint" /></label>
+                        <label class="field"><span data-i18n="personaSelfReference">自称</span><input id="personaSelfReference" maxlength="8" placeholder="例如：我 / 咱 / 本喵" data-i18n-placeholder="personaSelfReferenceHint" /></label>
+                        <label class="field"><span data-i18n="personaAge">年龄感</span><input id="personaAge" maxlength="20" placeholder="例如：二十出头" data-i18n-placeholder="personaAgeHint" /></label>
+                        <label class="field"><span data-i18n="personaGender">性别</span><input id="personaGender" maxlength="16" placeholder="可留空" data-i18n-placeholder="personaOptional" /></label>
+                        <label class="field span-2"><span data-i18n="personaOccupation">身份 / 职业</span><input id="personaOccupation" maxlength="40" placeholder="例如：大二学生、夜班便利店店员" data-i18n-placeholder="personaOccupationHint" /></label>
+                      </div>
+                      <label class="field"><span data-i18n="personaIdentity">我是谁</span><textarea id="personaIdentity" rows="2" maxlength="600" placeholder="一句话：例如 群里最爱研究新玩意儿的技术宅，嘴上嫌弃其实很热心" data-i18n-placeholder="personaIdentityHint"></textarea></label>
+                      <label class="field"><span data-i18n="personaBackground">经历与背景</span><textarea id="personaBackground" rows="2" maxlength="2000" placeholder="随便写：来历、经历、和大家怎么认识的……" data-i18n-placeholder="personaBackgroundHint"></textarea></label>
+                    </div>
+                  </section>
+                  <div class="behavior-column">
+                    <section class="card card-import">
+                      <header class="card-head">
+                        <div><h2 data-i18n="characterCard">角色卡</h2><p data-i18n="characterCardHint">导入 SillyTavern、RisuAI、Chub、Agnai 等的角色卡（PNG / JSON / CHARX），或直接粘贴任意格式的设定文字；也可以把当前人设导出成标准角色卡。</p></div>
+                      </header>
+                      <div class="card-import-actions">
+                        <label class="field compact-field"><span data-i18n="cardImportMode">导入方式</span><select id="cardImportMode"><option value="replace" data-i18n="cardModeReplace">整体替换</option><option value="merge" data-i18n="cardModeMerge">合并补充</option></select></label>
+                        <button id="importCardFile" class="button primary" type="button" data-i18n="cardImportFile">导入文件</button>
+                        <input id="cardFileInput" class="sr-only" type="file" accept=".png,.json,.charx,.txt,.md,.yaml,.yml,image/png,application/json,text/plain" tabindex="-1" />
+                        <button id="pasteCardText" class="button ghost" type="button" data-i18n="cardPasteText">粘贴文字</button>
+                        <button id="exportCardV2" class="button ghost" type="button" data-i18n="cardExportV2">导出 V2</button>
+                        <button id="exportCardV3" class="button ghost" type="button" data-i18n="cardExportV3">导出 V3</button>
+                      </div>
+                      <div id="cardMeta" class="chip-row" aria-live="polite"></div>
+                    </section>
+                    <section class="card">
+                      <header class="card-head"><div><h2 data-i18n="personaSocial">待人方式</h2><p data-i18n="personaSocialHint">留空表示按性格自然发挥。</p></div></header>
+                      <div id="personaSocial" class="form-grid three"></div>
+                      <label class="field persona-subfields"><span data-i18n="personaOwnerRelation">和主人的关系</span><input id="personaOwnerRelation" maxlength="160" placeholder="例如：主人是从小一起长大的朋友，可以互怼" data-i18n-placeholder="personaOwnerRelationHint" /></label>
+                    </section>
+                  </div>
+                </div>
+
+                <section class="card">
+                  <header class="card-head"><div><h2 data-i18n="personaTraits">性格维度</h2><p data-i18n="personaTraitsHint">50 为中性不写入提示词；越靠两端，表现越明显。</p></div></header>
+                  <div id="personaTraits" class="trait-list trait-grid"></div>
+                  <div class="form-grid persona-subfields">
+                    <label class="field"><span data-i18n="personaPersonality">性格补充</span><textarea id="personaPersonality" rows="2" maxlength="2000" placeholder="滑块说不清的部分，用自己的话写" data-i18n-placeholder="personaPersonalityHint"></textarea></label>
+                    <label class="field"><span data-i18n="personaQuirks">小毛病和小习惯</span><textarea id="personaQuirks" rows="2" placeholder="每行一条，例如：熬夜后反应慢半拍" data-i18n-placeholder="personaQuirksHint"></textarea></label>
+                  </div>
+                </section>
+
+                <section class="card">
+                  <header class="card-head"><div><h2 data-i18n="personaSpeech">说话方式</h2><p data-i18n="personaSpeechHint">这些滑块也会直接调整回复长度、emoji、表情包和连发的概率。</p></div></header>
+                  <div id="personaSpeech" class="trait-list trait-grid"></div>
+                  <div class="form-grid persona-subfields">
+                    <label class="field"><span data-i18n="personaSpeechHabits">说话习惯</span><textarea id="personaSpeechHabits" rows="2" placeholder="每行一条" data-i18n-placeholder="onePerLine"></textarea></label>
+                    <label class="field"><span data-i18n="personaCatchphrases">口头禅</span><textarea id="personaCatchphrases" rows="2" placeholder="每行一条" data-i18n-placeholder="onePerLine"></textarea></label>
+                  </div>
+                </section>
+
+                <div class="grid persona-grid">
+                  <section class="card">
+                    <header class="card-head"><div><h2 data-i18n="personaPreferences">喜好与底线</h2><p data-i18n="personaPreferencesHint">也会告诉兴趣模型 Bot 爱接什么话题。</p></div></header>
+                    <div class="form-grid">
+                      <label class="field"><span data-i18n="personaLikes">喜欢</span><textarea id="personaLikes" rows="3" placeholder="每行一条" data-i18n-placeholder="onePerLine"></textarea></label>
+                      <label class="field"><span data-i18n="personaDislikes">不喜欢</span><textarea id="personaDislikes" rows="3" placeholder="每行一条" data-i18n-placeholder="onePerLine"></textarea></label>
+                      <label class="field span-2"><span data-i18n="personaBoundaries">底线</span><textarea id="personaBoundaries" rows="2" placeholder="每行一条，例如：不参与人身攻击" data-i18n-placeholder="personaBoundariesHint"></textarea></label>
+                    </div>
+                  </section>
+                  <section class="card">
+                    <header class="card-head">
+                      <div><h2 data-i18n="selfEditTitle">自主调整</h2><p data-i18n="selfEditHint">Bot 觉得哪里不像自己、或人设复盘发现设定与实际表现不符时，可以小幅调整未锁定的部分（滑块每次最多 ±10，聊天中每天最多 3 处）；底线只能加不能删。你或管理员在 QQ 里一句话让 Bot 改自己的设定时不受这些限制。</p></div>
+                      <label class="switch-label"><span class="switch"><input id="selfEditEnabled" type="checkbox" /><span aria-hidden="true"></span></span><em data-i18n="personaEnabled">启用</em></label>
+                    </header>
+                    <div class="field"><span data-i18n="selfEditLocks">锁定，不让 Bot 自己改</span><div id="selfEditLocks" class="lock-chips"></div></div>
+                    <div class="persona-subfields"><h3 class="dialog-subtitle" data-i18n="selfEditHistory">最近的改动</h3><ol id="selfEditLog" class="history-list"></ol></div>
+                  </section>
+                </div>
+
+                <details id="personaCardSection" class="card collapsible-card">
+                  <summary><span><strong data-i18n="personaCardText">角色资料</strong><small data-i18n="personaCardTextHint">角色卡的描述、场景、示例对话等，格式随意（纯文字、W++、PList、Markdown 都行）。{{char}} / {{user}} 会自动替换。</small></span><em id="personaCardBadge" class="badge"></em></summary>
+                  <div class="form-grid">
+                    <label class="field span-2"><span data-i18n="personaDescription">角色描述</span><textarea id="personaDescription" rows="6" maxlength="6000"></textarea></label>
+                    <label class="field"><span data-i18n="personaScenario">场景 / 世界观</span><textarea id="personaScenario" rows="3" maxlength="2000"></textarea></label>
+                    <label class="field"><span data-i18n="personaNotes">作者补充</span><textarea id="personaNotes" rows="3" maxlength="2000" placeholder="来自角色卡的系统提示等；只影响角色表现，不能改变安全和权限" data-i18n-placeholder="personaNotesHint"></textarea></label>
+                    <label class="field"><span data-i18n="personaExamples">对话示例</span><textarea id="personaExamples" rows="4" maxlength="4000" placeholder="只用来把握语气，不会被照抄" data-i18n-placeholder="personaExamplesHint"></textarea></label>
+                    <label class="field"><span data-i18n="personaGreeting">开场白</span><textarea id="personaGreeting" rows="4" maxlength="2000" placeholder="QQ 里不会主动发；保留给导出" data-i18n-placeholder="personaGreetingHint"></textarea></label>
+                  </div>
+                </details>
+
+                <details id="personaLoreSection" class="card collapsible-card">
+                  <summary><span><strong data-i18n="personaLore">世界书</strong><small data-i18n="personaLoreHint">聊到关键词时才带上的设定；常驻条目每轮都在。最多 48 条。</small></span><em id="personaLoreBadge" class="badge"></em></summary>
+                  <div id="personaLoreList" class="lore-list"></div>
+                  <div class="form-actions"><button id="addLoreEntry" class="button small ghost" type="button" data-i18n="addLoreEntry">添加条目</button></div>
+                </details>
+
+                <details id="personaPreviewSection" class="card collapsible-card">
+                  <summary><span><strong data-i18n="personaPreview">提示词预览</strong><small data-i18n="personaPreviewHint">保存后主模型实际看到的人格与关系段落（关系示例取好感最高的人）。</small></span></summary>
+                  <pre id="personaPreview" class="prompt-preview"></pre>
+                </details>
+              </form>
+            </div>
+
+            <div id="personaPanelState" class="persona-panel" hidden>
+              <div class="grid behavior-grid">
+                <div class="behavior-column">
+                  <section class="card">
+                    <header class="card-head"><div><h2 data-i18n="botMood">此刻心情</h2><p data-i18n="botMoodHint">每轮结束时由主模型更新，跨会话延续并逐渐淡去。</p></div></header>
+                    <div id="moodCurrent" class="mood-current"></div>
+                    <form id="moodForm" class="inline-form">
+                      <label class="field grow"><span class="sr-only" data-i18n="setMood">设置心情</span><input id="moodInput" maxlength="16" placeholder="2-8 个字，例如：有点困" data-i18n-placeholder="moodPlaceholder" /></label>
+                      <button class="button primary" type="submit" data-i18n="setMood">设置心情</button>
+                      <button id="clearMood" class="button ghost" type="button" data-i18n="clearMood">清除</button>
+                    </form>
+                  </section>
+                  <section class="card">
+                    <header class="card-head">
+                      <div><h2 data-i18n="botRoutine">今日作息</h2><p data-i18n="botRoutineHint">每天生成一次，让 Bot 的在线状态和语气更像真人。</p></div>
+                      <button id="regenerateRoutine" class="button small ghost" type="button" data-i18n="regenerateRoutine">重新生成</button>
+                    </header>
+                    <div id="routineTimeline" class="routine-timeline"></div>
+                  </section>
+                </div>
+                <div class="behavior-column">
+                  <section class="card">
+                    <header class="card-head"><div><h2 data-i18n="innerThoughts">内心OS</h2><p data-i18n="innerThoughtsHint">只在本机控制台可见，从不发送；按会话保留最近几条。</p></div></header>
+                    <div id="innerThoughts" class="thought-list"></div>
+                  </section>
+                </div>
+              </div>
+            </div>
+
+            <div id="personaPanelLearning" class="persona-panel" hidden>
+              <div class="grid behavior-grid">
+                <div class="behavior-column behavior-column-main">
+                  <section class="card">
+                    <header class="card-head">
+                      <div><h2 data-i18n="selfPersona">Bot 全局人设</h2><p data-i18n="selfPersonaHint">从各群和私聊的匿名摘要生成；QQ 昵称固定作为名字。</p><p class="muted small-text"><span data-i18n="learnedPersonaCoreNote">它只补充核心人格没写到的部分。</span> <button type="button" class="link-button" data-persona-goto="profile" data-i18n="editInPersona">去人设里改</button></p></div>
+                      <button class="button small ghost" type="button" data-open-feature-logs="learning" data-log-query="self persona" data-i18n="viewDetailedLogs">查看日志</button>
+                    </header>
+                    <div id="qqSelfPersona" class="stack"></div>
+                  </section>
+                  <section class="card">
+                    <header class="card-head">
+                      <div><h2 data-i18n="languageHabits">语言习惯</h2><p data-i18n="languageHabitsHint">Bot 自己从群聊里挑来用的黑话、括号补充语、颜文字和说法；群聊总结和全局人设刷新会根据实际使用情况复盘，Bot 聊天时也能自己收下或去掉。</p></div>
+                      <span id="languageHabitCount" class="badge">0</span>
+                    </header>
+                    <div id="languageHabitList" class="stack"></div>
+                    <form id="languageHabitForm" class="habit-form">
+                      <label class="field"><span data-i18n="habitTerm">写法</span><input id="habitTerm" maxlength="16" required placeholder="例如：（bushi）" data-i18n-placeholder="habitTermHint" /></label>
+                      <label class="field"><span data-i18n="habitKind">类型</span><select id="habitKind"><option value="slang" data-i18n="habitKindSlang">黑话</option><option value="symbol" data-i18n="habitKindSymbol">符号</option><option value="kaomoji" data-i18n="habitKindKaomoji">颜文字</option><option value="phrase" data-i18n="habitKindPhrase">说法</option></select></label>
+                      <label class="field"><span data-i18n="habitScope">范围</span><select id="habitScope"></select></label>
+                      <label class="field grow"><span data-i18n="habitUsage">什么时候用</span><input id="habitUsage" maxlength="80" /></label>
+                      <button class="button ghost" type="submit" data-i18n="habitAdd">添加</button>
+                    </form>
+                  </section>
+                  <section class="card">
+                    <header class="card-head">
+                      <div><h2 data-i18n="adaptiveLearning">自动适应</h2><p data-i18n="adaptiveLearningHint">按群学习活跃时段与成员节奏，并每 24 小时复盘 Bot 的表达。</p></div>
+                      <button class="button small ghost" type="button" data-open-feature-logs="learning" data-i18n="viewDetailedLogs">查看日志</button>
+                    </header>
+                    <div id="qqAdaptiveLearning" class="stack"></div>
+                  </section>
+                </div>
+                <div class="behavior-column behavior-column-side">
+                  <section class="card">
+                    <header class="card-head"><div><h2 data-i18n="stickerFrequency">表情包频率</h2><p data-i18n="stickerFrequencyHint">真人与 Bot 在各群的实际使用率。</p><p id="stickerPersonaHint" class="muted small-text"></p></div></header>
+                    <div id="qqStickerFrequency" class="stack"></div>
+                  </section>
+                </div>
+              </div>
+            </div>
+
+            <div id="personaPanelBehavior" class="persona-panel" hidden>
             <section class="card bot-control-panel">
               <header class="card-head">
                 <div><h2 data-i18n="botControlHeading">功能开关与调试参数</h2><p data-i18n="botControlBody">开关立即生效；判定参数只影响主动兴趣，不影响直接 @ Bot 的回复。</p></div>
@@ -268,6 +456,7 @@
                 <div><h2 data-i18n="interestPresetHeading">兴趣偏好</h2><p data-i18n="interestPresetHint">人设学习完成前，兴趣模型按这里判断 Bot 喜欢和不喜欢什么；每行一条。</p></div>
                 <span id="interestPresetStatus" class="save-state" data-i18n="settingsSynced">设置已同步</span>
               </header>
+              <div id="interestPersonaLink" class="link-note chip-row"></div>
               <form id="interestPresetForm" class="preset-grid">
                 <label class="field"><span data-i18n="presetLikes">感兴趣</span><textarea id="presetLikes" rows="5" maxlength="4000"></textarea></label>
                 <label class="field"><span data-i18n="presetDislikes">不感兴趣</span><textarea id="presetDislikes" rows="5" maxlength="4000"></textarea></label>
@@ -276,158 +465,23 @@
               </form>
             </section>
 
-            <div class="grid behavior-grid">
-              <div class="behavior-column behavior-column-main">
-                <section class="card">
-                  <header class="card-head">
-                    <div><h2 data-i18n="selfPersona">Bot 全局人设</h2><p data-i18n="selfPersonaHint">从各群和私聊的匿名摘要生成；QQ 昵称固定作为名字。</p></div>
-                    <button class="button small ghost" type="button" data-open-feature-logs="learning" data-log-query="self persona" data-i18n="viewDetailedLogs">查看日志</button>
-                  </header>
-                  <div id="qqSelfPersona" class="stack"></div>
-                </section>
-                <section class="card">
-                  <header class="card-head">
-                    <div><h2 data-i18n="adaptiveLearning">自动适应</h2><p data-i18n="adaptiveLearningHint">按群学习活跃时段与成员节奏，并每 24 小时复盘 Bot 的表达。</p></div>
-                    <button class="button small ghost" type="button" data-open-feature-logs="learning" data-i18n="viewDetailedLogs">查看日志</button>
-                  </header>
-                  <div id="qqAdaptiveLearning" class="stack"></div>
-                </section>
-              </div>
-              <div class="behavior-column behavior-column-side">
-                <section class="card">
-                  <header class="card-head"><div><h2 data-i18n="stickerFrequency">表情包频率</h2><p data-i18n="stickerFrequencyHint">真人与 Bot 在各群的实际使用率。</p></div></header>
-                  <div id="qqStickerFrequency" class="stack"></div>
-                </section>
-                <section class="card">
-                  <header class="card-head">
-                    <div><h2 data-i18n="coldInterest">冷群兴趣发言</h2><p data-i18n="coldInterestHint">按最后一条消息计时，结合群节奏决定发一句或保持沉默。</p></div>
-                    <button class="button small ghost" type="button" data-open-feature-logs="interest" data-log-query="cold-group" data-i18n="viewDetailedLogs">查看日志</button>
-                  </header>
-                  <div id="qqColdInterest" class="stack"></div>
-                </section>
-                <section class="card">
-                  <header class="card-head">
-                    <div><h2 data-i18n="privateInterest">私聊主动兴趣</h2><p data-i18n="privateInterestHint">按互动频率与间隔估算概率，连续未回复会自动退避。</p></div>
-                    <button class="button small ghost" type="button" data-open-feature-logs="interest" data-log-query="private proactive" data-i18n="viewDetailedLogs">查看日志</button>
-                  </header>
-                  <div id="qqPrivateInterest" class="stack"></div>
-                </section>
-              </div>
-            </div>
-          </section>
-
-          <!-- Persona -->
-          <section class="view" id="view-persona" data-view-panel="persona" hidden>
-            <div id="personaStats" class="stat-row" aria-live="polite"></div>
-            <div class="persona-toolbar">
-              <div id="personaTabs" class="segmented" role="tablist" aria-label="人格分区" data-i18n-aria-label="personaSections">
-                <button type="button" role="tab" data-persona-tab="profile" data-i18n="personaTabProfile">性格</button>
-                <button type="button" role="tab" data-persona-tab="people" data-i18n="personaTabPeople">关系</button>
-                <button type="button" role="tab" data-persona-tab="state" data-i18n="personaTabState">状态</button>
-              </div>
-              <span id="personaSaveState" class="save-state" data-i18n="settingsSynced">设置已同步</span>
-            </div>
-
-            <div id="personaPanelProfile" class="persona-panel">
-              <form id="personaForm" class="grid persona-grid">
-                <section class="card">
-                  <header class="card-head">
-                    <div><h2 data-i18n="personaCore">核心设定</h2><p data-i18n="personaCoreHint">部署者设定的稳定性格，优先于自动学习出的人设。</p></div>
-                    <label class="switch-label"><span class="switch"><input id="personaEnabled" type="checkbox" /><span aria-hidden="true"></span></span><em data-i18n="personaEnabled">启用</em></label>
-                  </header>
-                  <div class="stack">
-                    <div class="field"><span data-i18n="personaPreset">性格预设</span><div id="personaPresets" class="preset-chips" role="group"></div></div>
-                    <label class="field"><span data-i18n="personaIdentity">我是谁</span><textarea id="personaIdentity" rows="3" maxlength="600" placeholder="例如：群里最爱研究新玩意儿的技术宅，嘴上嫌弃其实很热心" data-i18n-placeholder="personaIdentityHint"></textarea></label>
-                    <div class="form-grid">
-                      <label class="field"><span data-i18n="personaSpeechHabits">说话习惯</span><textarea id="personaSpeechHabits" rows="4" placeholder="每行一条" data-i18n-placeholder="onePerLine"></textarea></label>
-                      <label class="field"><span data-i18n="personaCatchphrases">口头禅</span><textarea id="personaCatchphrases" rows="4" placeholder="每行一条" data-i18n-placeholder="onePerLine"></textarea></label>
-                      <label class="field"><span data-i18n="personaLikes">喜欢</span><textarea id="personaLikes" rows="4" placeholder="每行一条" data-i18n-placeholder="onePerLine"></textarea></label>
-                      <label class="field"><span data-i18n="personaDislikes">不喜欢</span><textarea id="personaDislikes" rows="4" placeholder="每行一条" data-i18n-placeholder="onePerLine"></textarea></label>
-                      <label class="field span-2"><span data-i18n="personaBoundaries">底线</span><textarea id="personaBoundaries" rows="3" placeholder="每行一条，例如：不参与人身攻击" data-i18n-placeholder="personaBoundariesHint"></textarea></label>
-                    </div>
-                  </div>
-                </section>
-                <div class="behavior-column">
-                  <section class="card">
-                    <header class="card-head"><div><h2 data-i18n="personaTraits">性格维度</h2><p data-i18n="personaTraitsHint">50 为中性不写入提示词；越靠两端，表现越明显。</p></div></header>
-                    <div id="personaTraits" class="trait-list"></div>
-                  </section>
-                  <section class="card">
-                    <header class="card-head">
-                      <div><h2 data-i18n="affinityRules">好感规则</h2><p data-i18n="affinityRulesHint">模型每轮只能小幅调整好感，并受每日上限约束，不能被话术刷分。</p></div>
-                      <label class="switch-label"><span class="switch"><input id="affinityEnabled" type="checkbox" /><span aria-hidden="true"></span></span><em data-i18n="personaEnabled">启用</em></label>
-                    </header>
-                    <div class="form-grid">
-                      <label class="field"><span data-i18n="affinityMaxDelta">每轮最大变化</span><input id="affinityMaxDelta" type="number" min="1" max="10" step="1" /></label>
-                      <label class="field"><span data-i18n="affinityDailyCap">每人每日上限</span><input id="affinityDailyCap" type="number" min="1" max="50" step="1" /></label>
-                      <label class="field"><span data-i18n="affinityHalfLife">淡化半衰期（天，0 不衰减）</span><input id="affinityHalfLife" type="number" min="0" max="3650" step="1" /></label>
-                      <label class="field"><span data-i18n="affinityOwnerFloor">主人好感下限</span><input id="affinityOwnerFloor" type="number" min="-100" max="100" step="1" /></label>
-                      <label class="toggle-card span-2"><span><strong data-i18n="affinityReveal">允许用户查看自己的好感度</strong><small data-i18n="affinityRevealHint">关闭后普通用户发送 /好感度 只会得到一句玩笑。</small></span><span class="switch"><input id="affinityReveal" type="checkbox" /><span aria-hidden="true"></span></span></label>
-                    </div>
-                  </section>
-                </div>
-                <section class="card span-all">
-                  <header class="card-head">
-                    <div><h2 data-i18n="personaPreview">提示词预览</h2><p data-i18n="personaPreviewHint">保存后主模型实际看到的人格与关系段落（关系示例取好感最高的人）。</p></div>
-                    <div class="form-actions">
-                      <button id="resetPersonaForm" class="button ghost" type="button" data-i18n="revertChanges">撤销修改</button>
-                      <button id="savePersona" class="button primary" type="submit" data-i18n="savePersona">保存人格</button>
-                    </div>
-                  </header>
-                  <pre id="personaPreview" class="prompt-preview"></pre>
-                </section>
-              </form>
-            </div>
-
-            <div id="personaPanelPeople" class="persona-panel" hidden>
-              <section class="card">
-                <header class="card-head">
-                  <div><h2 data-i18n="relationships">好感与关系</h2><p data-i18n="relationshipsHint">Bot 对每个人的好感、熟悉度、称呼与印象。点击一行可编辑或锁定。</p></div>
-                  <span id="peopleCount" class="badge">0</span>
-                </header>
-                <div id="affinityDistribution" class="affinity-distribution" aria-hidden="true"></div>
-                <div class="toolbar people-toolbar">
-                  <label class="search-field grow"><input id="peopleSearch" type="search" placeholder="搜索名字、QQ 号、称呼或印象" data-i18n-placeholder="peopleSearch" data-i18n-aria-label="peopleSearch" /></label>
-                  <select id="peopleLevelFilter" aria-label="好感等级" data-i18n-aria-label="affinityLevel"></select>
-                  <select id="peopleSort" aria-label="排序" data-i18n-aria-label="sortBy">
-                    <option value="affinity" data-i18n="sortAffinity">按好感</option>
-                    <option value="familiarity" data-i18n="sortFamiliarity">按熟悉度</option>
-                    <option value="recent" data-i18n="sortRecent">按最近互动</option>
-                  </select>
-                  <button id="addPerson" class="button ghost" type="button" data-i18n="addPerson">添加人物</button>
-                </div>
-                <div id="peopleList" class="people-list" aria-live="polite"></div>
-              </section>
-            </div>
-
-            <div id="personaPanelState" class="persona-panel" hidden>
               <div class="grid behavior-grid">
                 <div class="behavior-column">
                   <section class="card">
-                    <header class="card-head"><div><h2 data-i18n="botMood">此刻心情</h2><p data-i18n="botMoodHint">每轮结束时由主模型更新，跨会话延续并逐渐淡去。</p></div></header>
-                    <div id="moodCurrent" class="mood-current"></div>
-                    <form id="moodForm" class="inline-form">
-                      <label class="field grow"><span class="sr-only" data-i18n="setMood">设置心情</span><input id="moodInput" maxlength="16" placeholder="2-8 个字，例如：有点困" data-i18n-placeholder="moodPlaceholder" /></label>
-                      <button class="button primary" type="submit" data-i18n="setMood">设置心情</button>
-                      <button id="clearMood" class="button ghost" type="button" data-i18n="clearMood">清除</button>
-                    </form>
-                  </section>
-                  <section class="card">
                     <header class="card-head">
-                      <div><h2 data-i18n="botRoutine">今日作息</h2><p data-i18n="botRoutineHint">每天生成一次，让 Bot 的在线状态和语气更像真人。</p></div>
-                      <button id="regenerateRoutine" class="button small ghost" type="button" data-i18n="regenerateRoutine">重新生成</button>
+                      <div><h2 data-i18n="coldInterest">冷群兴趣发言</h2><p data-i18n="coldInterestHint">按最后一条消息计时，结合群节奏决定发一句或保持沉默。</p></div>
+                      <button class="button small ghost" type="button" data-open-feature-logs="interest" data-log-query="cold-group" data-i18n="viewDetailedLogs">查看日志</button>
                     </header>
-                    <div id="routineTimeline" class="routine-timeline"></div>
+                    <div id="qqColdInterest" class="stack"></div>
                   </section>
                 </div>
                 <div class="behavior-column">
                   <section class="card">
-                    <header class="card-head"><div><h2 data-i18n="innerThoughts">内心OS</h2><p data-i18n="innerThoughtsHint">只在本机控制台可见，从不发送；按会话保留最近几条。</p></div></header>
-                    <div id="innerThoughts" class="thought-list"></div>
-                  </section>
-                  <section class="card">
-                    <header class="card-head"><div><h2 data-i18n="generatedPersona">自动学习的人设</h2><p data-i18n="generatedPersonaHint">从聊天摘要中学到的兴趣与风格，作为核心人格之下的补充。</p></div></header>
-                    <div id="generatedPersona" class="stack"></div>
+                    <header class="card-head">
+                      <div><h2 data-i18n="privateInterest">私聊主动兴趣</h2><p data-i18n="privateInterestHint">按互动频率与间隔估算概率，连续未回复会自动退避。</p></div>
+                      <button class="button small ghost" type="button" data-open-feature-logs="interest" data-log-query="private proactive" data-i18n="viewDetailedLogs">查看日志</button>
+                    </header>
+                    <div id="qqPrivateInterest" class="stack"></div>
                   </section>
                 </div>
               </div>
@@ -621,7 +675,6 @@
     <nav class="mobile-nav" id="mobileNav" aria-label="移动端导航" data-i18n-aria-label="mobileNavigation">
       <button class="active" type="button" data-view="overview"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="8" rx="1.8" /><rect x="13.5" y="3.5" width="7" height="5" rx="1.8" /><rect x="3.5" y="14.5" width="7" height="6" rx="1.8" /><rect x="13.5" y="11.5" width="7" height="9" rx="1.8" /></svg><span data-i18n="navOverview">总览</span></button>
       <button type="button" data-view="channels"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5.5h15v10h-9l-4.5 3.5v-3.5h-1.5z" /></svg><span data-i18n="navChannels">通道</span></button>
-      <button type="button" data-view="intelligence"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5v15M8 7.5a3.5 3.5 0 0 1 4-3 3.5 3.5 0 0 1 4 3 3.5 3.5 0 0 1 2.5 5.5A3.5 3.5 0 0 1 16 19.5a3.5 3.5 0 0 1-4 0 3.5 3.5 0 0 1-4 0A3.5 3.5 0 0 1 5.5 13 3.5 3.5 0 0 1 8 7.5Z" /></svg><span data-i18n="navIntelligence">行为</span></button>
       <button type="button" data-view="persona"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5" /><path d="M17.5 4.5l.6 1.3 1.4.2-1 1 .2 1.4-1.2-.7-1.3.7.3-1.4-1-1 1.4-.2z" /></svg><span data-i18n="navPersona">人格</span></button>
       <button type="button" data-view="memory"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6.5" rx="7" ry="2.8" /><path d="M5 6.5v11c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-11" /></svg><span data-i18n="navMemory">记忆</span></button>
       <button type="button" data-view="knowledge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5z" /></svg><span data-i18n="navKnowledge">知识</span></button>
@@ -713,6 +766,40 @@
           <span class="grow"></span>
           <button class="button ghost" type="button" data-close-person data-i18n="cancel">取消</button>
           <button class="button primary" type="submit" data-i18n="save">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="affinityDialog" class="modal wide" aria-labelledby="affinityDialogTitle">
+      <form id="affinityForm" class="modal-body">
+        <header class="modal-head"><h2 id="affinityDialogTitle" data-i18n="affinityRules">好感规则</h2><button class="icon-button" type="button" data-close-affinity aria-label="关闭" data-i18n-aria-label="close">×</button></header>
+        <p class="muted" data-i18n="affinityRulesHint">模型每轮只能小幅调整好感，并受每日上限约束，不能被话术刷分。</p>
+        <div class="form-grid">
+          <label class="toggle-card span-2"><span><strong data-i18n="affinityEnabledLabel">启用好感度</strong></span><span class="switch"><input id="affinityEnabled" type="checkbox" /><span aria-hidden="true"></span></span></label>
+          <label class="field"><span data-i18n="affinityMaxDelta">每轮最大变化</span><input id="affinityMaxDelta" type="number" min="1" max="10" step="1" /></label>
+          <label class="field"><span data-i18n="affinityDailyCap">每人每日上限</span><input id="affinityDailyCap" type="number" min="1" max="50" step="1" /></label>
+          <label class="field"><span data-i18n="affinityHalfLife">淡化半衰期（天，0 不衰减）</span><input id="affinityHalfLife" type="number" min="0" max="3650" step="1" /></label>
+          <label class="field"><span data-i18n="affinityOwnerFloor">主人好感下限</span><input id="affinityOwnerFloor" type="number" min="-100" max="100" step="1" /></label>
+          <label class="toggle-card span-2"><span><strong data-i18n="affinityReveal">允许用户查看自己的好感度</strong><small data-i18n="affinityRevealHint">关闭后普通用户发送 /好感度 只会得到一句玩笑。</small></span><span class="switch"><input id="affinityReveal" type="checkbox" /><span aria-hidden="true"></span></span></label>
+        </div>
+        <div class="modal-actions spread">
+          <span class="grow"></span>
+          <button class="button ghost" type="button" data-close-affinity data-i18n="cancel">取消</button>
+          <button id="saveAffinityRules" class="button primary" type="submit" data-i18n="save">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="cardDialog" class="modal wide" aria-labelledby="cardDialogTitle">
+      <form id="cardForm" class="modal-body">
+        <header class="modal-head"><h2 id="cardDialogTitle" data-i18n="cardDialogTitle">导入角色卡</h2><button class="icon-button" type="button" data-close-card aria-label="关闭" data-i18n-aria-label="close">×</button></header>
+        <label id="cardTextField" class="field"><span data-i18n="cardPasteLabel">粘贴角色卡 JSON，或任意格式的设定文字</span><textarea id="cardTextInput" rows="10" spellcheck="false"></textarea></label>
+        <div id="cardPreview" class="card-preview" aria-live="polite"></div>
+        <div class="modal-actions spread">
+          <span class="grow"></span>
+          <button class="button ghost" type="button" data-close-card data-i18n="cancel">取消</button>
+          <button id="cardPreviewButton" class="button ghost" type="button" data-i18n="cardPreviewAction">预览</button>
+          <button id="cardImportButton" class="button primary" type="submit" data-i18n="cardImportAction">导入</button>
         </div>
       </form>
     </dialog>
