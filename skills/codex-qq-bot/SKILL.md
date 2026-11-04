@@ -45,13 +45,15 @@ On this configured machine:
 - OneBot API: `http://127.0.0.1:3000`
 - Hub and dashboard: `http://127.0.0.1:3789`
 - Structured log default: `runtime/logs/hub.jsonl`
-- Tests: run `npm run check` and then `node --test --test-concurrency=1`.
-  The parallel default of `npm run verify` / `npm test` exhausts memory and
-  Android kills the whole Termux session (NapCat, Hub and the agent), even
-  with the stack stopped. Ask before a full serial run while the stack is up.
-  Starting QQ/NapCat (`ncc all`, `ncc napcat`) from inside an agent session
-  has the same effect; start only the Hub there for short checks and let the
-  user start the full stack.
+- Tests: never run the parallel default of `npm run verify` / `npm test`; it
+  exhausts memory and Android kills the whole Termux session (NapCat, Hub and
+  the agent), even with the stack stopped. Use
+  `node --test --test-concurrency=1`. `npm run check` starts four
+  `node --check` children at once and has also killed the session while the
+  stack was up; then check only the changed files one at a time, and run the
+  full serial suite while the stack is stopped (ask first otherwise). The
+  limit is sudden memory spikes, not process ownership: starting services
+  (`ncc all`, `ncc hub`, `ncc napcat`) from an agent session is fine.
 - Interactive Codex CLI: `~/.codex/config.toml` sets
   `features.daemon_auto_start = false`. Its shared app-server daemon socket
   path exceeds the Unix socket limit under PRoot, and PRoot's remap is private
@@ -514,8 +516,9 @@ Do not kill QQ, NapCat, Node, or screen sessions merely to inspect status. After
 dashboard or Hub code changes, first confirm no active QQ generation, then stop
 and start only the Hub; leave NapCat running.
 
-On this memory-constrained Termux/PRoot host, use `ncc napcat` only for short
-bridge diagnostics and stop it with `ncc stop-napcat` when finished. Startup uses
+On this memory-constrained Termux/PRoot host, avoid sudden memory spikes while
+the stack runs. A NapCat started only for bridge diagnostics (`ncc napcat`)
+should be stopped with `ncc stop-napcat` when finished. Startup uses
 the shared resource planner (`scripts/resource-profile.mjs`) to detect available
 physical memory, CPU affinity and nested cgroup v1/v2 CPU/memory limits once.
 It reserves system headroom, excludes swap, and sizes QQ, Hub heap, agent/OneBot

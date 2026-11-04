@@ -7,6 +7,7 @@ import { summarizeProcessDiagnostics } from "../../process-diagnostics.js";
 import { buildQqOperationLogDetails } from "../../qq-operation-log.js";
 import { AGENT_LOG_CATEGORY, getAgentEngine } from "../agent/agent-engines.js";
 import { assertAgentTurnNotNested, runAgentToolCall } from "../agent/agent-tool-context.js";
+import { notifyObserver } from "../agent/agent-turn-process.js";
 import { buildCodexLeanQqConfig } from "./codex-lean-config.js";
 
 // Every difference between the two engines lives in this table (display
@@ -113,7 +114,8 @@ export function createQqCodexTurnRunner({
   logger,
   logModelOutput,
   trackBackgroundTask,
-  refreshQuota
+  refreshQuota,
+  observeQuotaNotification
 } = {}) {
   assertFunction(limiter?.run, "limiter.run");
   assertFunction(getReplyScope, "getReplyScope");
@@ -180,7 +182,14 @@ export function createQqCodexTurnRunner({
             ? (...args) => runAgentToolCall(() => options.onDynamicToolCall(...args))
             : undefined,
           onServerRequest: options.onServerRequest,
-          onNotification: options.onNotification,
+          // Codex streams account rate limits and token usage as protocol
+          // notifications; an engine without a usage feed skips the observer.
+          onNotification: agent.reportsQuota && typeof observeQuotaNotification === "function"
+            ? (message) => {
+              notifyObserver(observeQuotaNotification, message);
+              notifyObserver(options.onNotification, message);
+            }
+            : options.onNotification,
           onItem: options.onItem,
           onProgress: options.onProgress,
           onRestarted: attempt.onRestarted,

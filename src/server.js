@@ -52,6 +52,7 @@ import { createQqManualAiTaskRunner } from "./qq-manual-ai-task-runner.js";
 import { formatQqVisualMenu } from "./qq-menu.js";
 import { createConcurrencyLimiter } from "./concurrency-limiter.js";
 import { createCodexModelCatalog, findCodexModel } from "./codex-model-catalog.js";
+import { createCodexProtocolQuota, readCodexAccountRateLimits } from "./infrastructure/codex/codex-protocol-quota.js";
 import { buildCodexChildEnv } from "./codex-child-env.js";
 import {
   CODEX_TASK_TYPES,
@@ -636,6 +637,14 @@ const semanticLayerLogGate = createLogChangeGate();
 const codexModelCatalog = createCodexModelCatalog({
   codexPath: codexCliPath,
   envProvider: () => buildCodexChildEnv()
+});
+const codexProtocolQuota = createCodexProtocolQuota({
+  readRateLimits: () => readCodexAccountRateLimits({
+    codexPath: codexCliPath,
+    cwd: codexWorkspaceDir,
+    env: buildCodexChildEnv()
+  }),
+  onReadError: (error) => logger.warn("Codex rate-limit read failed", { engine: "codex", error }, AGENT_LOG_CATEGORY)
 });
 
 function fallbackMemoryStore() {
@@ -3671,18 +3680,18 @@ async function getCachedCodexQuotaSnapshot({ force = false } = {}) {
   const fresh = cached && Date.now() - codexQuotaRefreshedAt < codexQuotaCacheTtlMs;
   if (!force && fresh) return cached;
   if (!force && cached) {
-    trackBackgroundTask(refreshCodexQuotaCache(), (error) => {
+    trackBackgroundTask(refreshCodexQuotaCache({ force }), (error) => {
       logger.warn("Codex quota background refresh failed", { engine: "codex", error }, AGENT_LOG_CATEGORY);
       return cached;
     });
     return cached;
   }
-  return refreshCodexQuotaCache();
+  return refreshCodexQuotaCache({ force });
 }
 
-function refreshCodexQuotaCache() {
+function refreshCodexQuotaCache({ force = false } = {}) {
   if (codexQuotaRefreshPromise) return codexQuotaRefreshPromise;
-  const refresh = readLatestCodexQuotaSnapshot()
+  const refresh = readLatestCodexQuotaSnapshot({ force })
     .then((snapshot) => {
       state.maintenance.codex.quota = snapshot;
       codexQuotaRefreshedAt = Date.now();
@@ -3708,7 +3717,12 @@ async function readUtf8FileTail(filePath, maxBytes) {
   }
 }
 
-async function readLatestCodexQuotaSnapshot() {
+async function readLatestCodexQuotaSnapshot({ force = false } = {}) {
+  // Current Codex reports usage only through the App Server protocol; the
+  // rollout, log-database and desktop-cache readers below remain for older CLIs.
+  const protocolSnapshot = await codexProtocolQuota.refresh({ force, busy: activeCodexChildren.size > 0 });
+  if (codexProtocolQuota.hasRateLimits()) return protocolSnapshot;
+
   const desktopSnapshot = await readDesktopCodexQuotaSnapshot().catch(() => null);
   const liveSnapshot = await readLiveCodexQuotaSnapshot().catch(() => null);
   const latestSessionPath = await findLatestRolloutJsonl(codexSessionsDir);
@@ -13272,7 +13286,8 @@ const runSteerableQqCodexTurn = createQqCodexTurnRunner({
   logger,
   logModelOutput: logAgentModelOutput,
   trackBackgroundTask,
-  refreshQuota: refreshCodexQuotaSnapshotAfterRun
+  refreshQuota: refreshCodexQuotaSnapshotAfterRun,
+  observeQuotaNotification: (message) => codexProtocolQuota.observeNotification(message)
 });
 
 // Subscription interest judgments get their own small slot pool so a burst
