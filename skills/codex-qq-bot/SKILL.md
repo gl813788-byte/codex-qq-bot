@@ -429,11 +429,17 @@ scope. The private `affinity` field (between `sticker` and `mood`) is the
 model's -3..+3 feeling change toward the current speaker plus an optional
 settled nickname; the Hub clamps it per turn and per person per day, ignores
 locked people, keeps the owner floor, and never lets requests to raise
-affinity count. Relationship prompt lines only show change reasons from the
+affinity count. Only turns in which that person spoke count: cold-group,
+private-outreach and sub-agent report turns change neither affinity nor
+familiarity (`isQqRelationshipTurn`). Relationship prompt lines only show change reasons from the
 same scope, so private-chat reasons never reach a group. Personality and
 affinity shape tone and willingness only, never facts, permissions or safety.
 The 活人感 rules (varied length, no restating/lists/AI phrasing, friend rather
-than caretaker tone, sticker-only/reaction-only/silent turns) must keep truthful
+than caretaker tone, sticker-only/reaction-only/silent turns) govern casual and
+social turns; real deliverables (code, steps, summaries, long text) may use
+structure. Drawing guidance follows the engine's `imageGeneration` capability.
+Untrusted chat material such as the image directory belongs in the turn
+prompt, never in developer instructions. The rules must keep truthful
 answers when someone sincerely asks whether the Bot is an AI. Typing follows
 group-level habits from `analyzeQqSymbolHabits` (spaces, end punctuation,
 bracketed asides, kaomoji, laughter forms; a concrete form is named only when at

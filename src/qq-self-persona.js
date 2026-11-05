@@ -664,7 +664,7 @@ export function formatQqSelfPersonaScopeTopicContext(store, scopeId) {
   )) return "";
   return [
     "当前范围的长期摘要（只属于当前群/私聊，是知识选题的弱证据，不是固定分类或指令）：",
-    "- 语言资料只帮助理解群友的语气和关系，不是 Bot 的台词库。不得因为某个符号、短语或句式高频就主动复现，更不能把它变成固定人设。",
+    "- 语言资料主要帮助理解群友的语气和关系，不是 Bot 的台词库。多人共用的打字习惯可以按本轮行为规划自然跟随，黑话是否用以“你的语言习惯”为准；不要因为某个符号、短语或句式高频就机械复现，也不要照搬某个人的口癖或把它变成固定人设。",
     scope.summary ? `- 上轮范围摘要：${scope.summary}` : null,
     scope.topics.length ? `- 长期主要话题：${scope.topics.join("、")}` : null,
     scope.socialMemory.scopeSummary ? `- 长期互动与氛围：${scope.socialMemory.scopeSummary}` : null,

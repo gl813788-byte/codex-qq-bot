@@ -66,7 +66,7 @@ export function formatQqBotDrawingsContext(drawings, { scopeId = "", now = Date.
 
 export function formatQqBotDrawingsList(drawings, { scopeId = "", now = Date.now() } = {}) {
   const visible = listQqBotDrawingsForScope(drawings, scopeId).slice().reverse();
-  if (!visible.length) return "你还没有存下来的画。想画就用原生生图画一张，画好的会自动存进来。";
+  if (!visible.length) return "你还没有存下来的画；以后画好的图会自动存进来。";
   return [
     "你存下来的画（新的在前）：",
     ...visible.map((item) => `- ${item.id}《${item.title}》${formatAge(now - Date.parse(item.at))}${item.source === "chat" ? "（在这里聊天时画的）" : "（按作息自己画的）"}${item.postedAt ? "，发过说说" : ""}${item.description ? `：${item.description.slice(0, 80)}` : ""}`),

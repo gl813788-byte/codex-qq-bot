@@ -45,7 +45,7 @@ test("experiences are recorded, bounded in time and shown as real things the Bot
   life = recordQqLifeExperience(life, { kind: "video", activity: "刷视频", summary: "刷到一个猫猫迷惑行为合集，笑死", detail: "BV1… UP 某某" }, { now });
   assert.equal(life.experiences.length, 1);
   const context = formatQqLifeExperienceContext(life, { now: now + 30 * 60_000 });
-  assert.match(context, /你今天真实做过的事/);
+  assert.match(context, /你最近真实做过的事/);
   assert.match(context, /30 分钟前：刷到一个猫猫迷惑行为合集/);
   assert.equal(formatQqLifeExperienceContext(life, { now: now + 20 * 3_600_000 }), "");
   const reloaded = normalizeQqBotLifeState(JSON.parse(JSON.stringify(life)));

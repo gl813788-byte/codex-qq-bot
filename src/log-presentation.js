@@ -506,7 +506,6 @@ const detailLabelsZh = Object.freeze({
   retainedOccurrenceCount: "保留证据数",
   reviewPipeline: "审核模型链路",
   reviewStage: "审核阶段",
-  deleted: "是否删除",
   modelDecision: "模型决定",
   staleGuardApplied: "新活动保护",
   requestedAt: "申请时间",
@@ -679,7 +678,7 @@ const detailLabelsZh = Object.freeze({
   outputChars: "输出字符数",
   outputTruncated: "输出是否截断",
   taskType: "任务类型",
-  label: "任务标签",
+  label: "名称",
   reasoningEffort: "思考强度",
   triggerMode: "触发方式",
   triggerReason: "触发原因",
@@ -881,7 +880,6 @@ const detailLabelsZh = Object.freeze({
   endHour: "结束小时",
   wrapsMidnight: "是否跨午夜",
   openHours: "包含小时",
-  label: "时段",
   ordinaryInterestPendingGroups: "待处理兴趣群数",
   ordinaryInterestPendingMessages: "待处理兴趣消息数"
 });
@@ -917,7 +915,7 @@ const detailValuesZh = Object.freeze({
     "memory.language_habit": "Bot 语言习惯", "memory.persona_self_edit": "核心人格自主调整",
     "media.tool": "媒体工具", "media.voice": "语音识别", "agent.subagent": "子代理",
     "memory.life_activity": "Bot 作息活动", "social.qzone_self": "Bot 自主空间动态",
-    "social.card": "卡片与特殊消息", "friend.add": "主动加好友", "memory.bot_drawing": "Bot 画作"
+    "social.card": "卡片与特殊消息", "memory.bot_drawing": "Bot 画作"
   },
   outcome: {
     loaded: "已加载", created: "已新建", updated: "已更新", rejected: "已拒绝", unchanged: "无变化", recorded: "已记录",

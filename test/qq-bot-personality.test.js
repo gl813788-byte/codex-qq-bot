@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isQqRelationshipTurn,
   applyQqModelAffinityChange,
   applyQqPersonalityPreset,
   computeQqFamiliarity,
@@ -273,4 +274,13 @@ test("owner-directed edits reach almost every setting without the small-step rul
   const loreEntry = state.profile.selfEditLog.find((entry) => entry.field === "lore");
   assert.equal(revertQqPersonaSelfEdit(state, loreEntry.id).reverted, false, "structural edits are not auto-reverted");
   assert.equal(applyQqPersonaOwnerEdit(state, { field: "name", value: "管理员改", actor: "admin" }).entry.source, "admin");
+});
+
+test("only turns where the person spoke can change the relationship", () => {
+  assert.equal(isQqRelationshipTurn({ senderId: "10001", selfId: "20002" }), true);
+  assert.equal(isQqRelationshipTurn({ senderId: "10001", qqPrivateProactive: true }), false);
+  assert.equal(isQqRelationshipTurn({ senderId: "10001", qqColdProactive: true }), false);
+  assert.equal(isQqRelationshipTurn({ senderId: "10001", qqSubagentReport: { id: "a1" } }), false);
+  assert.equal(isQqRelationshipTurn({ senderId: "20002", selfId: "20002" }), false);
+  assert.equal(isQqRelationshipTurn({}), false);
 });

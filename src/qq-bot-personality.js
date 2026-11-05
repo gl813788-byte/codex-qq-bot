@@ -981,6 +981,15 @@ export function getQqFamiliarityLabel(value) {
 }
 
 // One delivered reply to a person. Bursts inside 90 seconds count once.
+// Only a turn the person actually spoke in can change how the Bot feels about
+// them: Bot-initiated turns (cold-group and private outreach, sub-agent
+// reports) have no new message from the "current speaker".
+export function isQqRelationshipTurn(event = {}) {
+  const userId = String(event?.senderId || "");
+  if (!userId || userId === String(event?.selfId || "")) return false;
+  return !(event.qqColdProactive || event.qqPrivateProactive || event.qqSubagentReport);
+}
+
 export function recordQqPersonalityInteraction(state, { userId, name = "", at = new Date().toISOString() } = {}) {
   const id = normalizeUserId(userId);
   const next = normalizeQqPersonality(state);

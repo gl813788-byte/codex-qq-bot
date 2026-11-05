@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { access, copyFile, mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, open, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -103,6 +103,7 @@ import {
   normalizeQqPersonality,
   normalizeQqPersonalityProfile,
   recordQqPersonalityInteraction,
+  isQqRelationshipTurn,
   removeQqPerson,
   setQqModelNickname,
   summarizeQqPersonality,
@@ -134,7 +135,7 @@ import {
 import { createQqSocialBridgeClient } from "./qq-social-bridge-client.js";
 import { createQqStickerLabelStore, normalizeQqStickerTags } from "./qq-sticker-label-store.js";
 import { createQqStickerInventory } from "./qq-sticker-inventory.js";
-import { buildQqStickerReply, formatQqStickerSendModeInstruction } from "./qq-sticker-delivery.js";
+import { buildQqStickerReply } from "./qq-sticker-delivery.js";
 import { inspectAnimatedSticker, probeAnimation } from "./qq-animated-sticker.js";
 import {
   extractQqReplyStickerCandidates,
@@ -230,7 +231,6 @@ import {
   extractQqKnowledgeMarkers,
   findQqKnowledgeMatches,
   formatQqKnowledgeEntries,
-  formatQqKnowledgeMatches,
   getDueQqKnowledgeDeletionReviews,
   getQqKnowledgeGroupName,
   listQqKnowledgeEntries,
@@ -464,8 +464,7 @@ import {
   buildImpressionSemanticItems,
   buildKnowledgeSemanticItems,
   buildQqSemanticScope,
-  buildShortTermSemanticItems,
-  formatSemanticMemoryPrompt
+  buildShortTermSemanticItems
 } from "./unified-memory/qq-memory-items.js";
 import {
   buildQqSemanticRecallQuery,
@@ -480,7 +479,7 @@ import {
   resolveQqMemoryPeople,
   selectDetectedQqMemoryPeople
 } from "./unified-memory/qq-person-memory.js";
-import { createWebSearch, formatWebSearchProviderName } from "./web-search.js";
+import { createWebSearch } from "./web-search.js";
 import { isSupportedImageContentType, readResponseJson, writeResponseBodyToFile } from "./bounded-stream.js";
 import { createQqMediaRuntime } from "./qq-media/media-runtime.js";
 import { collectQqMediaCandidates, formatQqMediaCandidates, isQqWatchableVideoUrl } from "./qq-media/media-candidates.js";
@@ -640,32 +639,17 @@ const {
   claudeModel,
   claudeReasoningEffort,
   codexCliPath,
-  codexModel,
-  codexReasoningEffort,
-  codexReasoningSummary,
-  codexPersonality,
-  codexServiceTier,
   codexMaxConcurrency,
   codexMaxPending,
   codexQuotaCacheTtlMs,
   codexTaskTimeouts,
-  qqEnhancerEnabled,
-  qqMemoryLimit,
-  qqGroupMemoryLimit,
-  qqProactiveReplyEnabled,
-  qqProactiveJudgeEveryMessages,
-  qqProactiveJudgeEveryMinutes,
   qqProactiveMinutePollMs,
-  qqProactiveJudgeEnabled,
   qqAccountStickersEnabled,
   qqAccountStickerCount,
   qqAccountStickerCacheMs,
   qqProactiveJudgeProvider,
-  qqProactiveJudgeModel,
-  qqProactiveJudgeTimeoutMs,
   qqProactiveJudgeVision,
   qqProactiveJudgeAgentConcurrency,
-  qqProactiveJudgeMinInterest,
   qqSelfPersonaScopeInitialMessages,
   qqSelfPersonaScopeMessages,
   qqSelfPersonaScopeBotReplies,
@@ -676,7 +660,6 @@ const {
   qqSelfPersonaGenerationScopeSummaries,
   qqSelfPersonaGenerationCooldownHours,
   qqSelfPersonaFailureRetryHours,
-  qqWebLookupEnabled,
   qqWebLookupTimeoutMs,
   qqWebLookupAttemptTimeoutMs,
   qqWebSearchProvider,
@@ -4199,22 +4182,6 @@ async function refreshCodexQuotaSnapshotAfterRun({ startedAtMs, previousQuota = 
   return getCachedCodexQuotaSnapshot({ force: true }).catch(() => previousQuota);
 }
 
-function didQuotaSnapshotAdvance(snapshot, {
-  startedAtMs = 0,
-  previousUpdatedAtMs = 0,
-  previousTotalTokens = null,
-  previousPrimaryUsedPercent = null,
-  previousSecondaryUsedPercent = null
-} = {}) {
-  const updatedAtMs = snapshot?.updatedAt ? Date.parse(snapshot.updatedAt) : 0;
-  if (updatedAtMs && startedAtMs && updatedAtMs >= startedAtMs - 1500) return true;
-  if (updatedAtMs && previousUpdatedAtMs && updatedAtMs > previousUpdatedAtMs) return true;
-  if (previousTotalTokens != null && snapshot?.totalTokens != null && snapshot.totalTokens !== previousTotalTokens) return true;
-  if (previousPrimaryUsedPercent != null && snapshot?.primary?.usedPercent != null && snapshot.primary.usedPercent !== previousPrimaryUsedPercent) return true;
-  if (previousSecondaryUsedPercent != null && snapshot?.secondary?.usedPercent != null && snapshot.secondary.usedPercent !== previousSecondaryUsedPercent) return true;
-  return false;
-}
-
 async function getLatestCodexThread() {
   const rows = await querySqliteRows(codexStateDbPath, [
     "select id, title, cwd, updated_at",
@@ -4259,10 +4226,6 @@ async function querySqliteRows(dbPath, query) {
     maxOutputBytes: sqliteMaxOutputBytes,
     signal: shutdownController.signal
   });
-}
-
-function escapeSql(value) {
-  return String(value || "").replaceAll("'", "''");
 }
 
 function extractJsonObject(text, startIndex) {
@@ -9154,7 +9117,7 @@ async function executeQqZoneCommand(command, event) {
         return { ok: false, command, reply: "当前消息和引用消息中没有可用于动态的图片。" };
       }
       if (publishCommand.useOutputImages && imagePaths.length === 0) {
-        return { ok: false, command, reply: "这一轮还没有你自己做好的图片：先用原生生图画一张，或用 qq_search.images 下载一张（会存进本轮输出目录），再发；没发出去，别说已经发了。" };
+        return { ok: false, command, reply: `这一轮还没有你自己做好的图片：先${qqAgentCanDraw ? "用原生生图画一张，或" : ""}用 qq_search.images 下载一张（会存进本轮输出目录），再发；没发出去，别说已经发了。` };
       }
       if (!publishCommand.content && imagePaths.length === 0) {
         return { ok: false, command, reply: "用法：/发动态 文字、/发动态 图片=当前，或 /发动态 文字 | 图片=当前。" };
@@ -9331,10 +9294,6 @@ function isQqBotPokeCommand(command) {
 
 function isQqBotStickerCommand(command) {
   return /^\/?(?:看表情|查看表情|检查表情|inspect[- ]?sticker|表情标签|更新表情标签|标注表情|tag[- ]?sticker|收藏表情|收藏当前表情|favorite[- ]?sticker)(?:\s+.*)?$/i.test(command);
-}
-
-function isQqBotStickerViewCommand(command) {
-  return /^\/?(?:看表情|查看表情|检查表情|inspect[- ]?sticker)\s+.+$/i.test(command);
 }
 
 async function executeQqBotStickerCommand(command, event) {
@@ -10308,7 +10267,7 @@ function formatQqPublicMemoryContext(event) {
   if (!entries.length) return "";
   return [
     "长期知识记忆：",
-    "这是知识库中对当前群/当前人物适用的标题化长期记忆，不会因 /新对话 清除。知识正文与条目更新时间只是历史快照，不保证时效事实现在仍正确；相关问题需要最新结论时先查原标题并联网核验，再沿用同一标题覆盖更新。要查完整标题、其他范围或更精确内容时使用 /知识库 内部工具。",
+    "这是知识库中对当前群/当前人物适用的标题化长期记忆，不会因 /新对话 清除。知识正文与条目更新时间只是历史快照，不保证时效事实现在仍正确；相关问题需要最新结论时先查原标题并联网核验，再沿用同一标题覆盖更新。要查完整标题、其他范围或更精确内容时用 qq_knowledge.manage。",
     formatQqKnowledgeEntries(entries, { header: "当前适用知识" })
   ].join("\n").slice(0, 7000);
 }
@@ -10610,13 +10569,6 @@ function extractQqCommandTarget(event, command) {
   return "";
 }
 
-function isFilesystemProbe(text) {
-  const normalized = String(text || "").toLowerCase();
-  const sensitiveTarget = /(根目录|家目录|主目录|后台目录|项目目录|当前目录|\/users|\/var|\/etc|\/tmp|\/private|\.codex|config|settings|token|密钥|密码|环境变量|日志|文件系统)/i;
-  const probeVerb = /(有什么|有哪些|列一下|列出|看看|读取|读一下|发出来|截图|目录|文件|路径|里面)/i;
-  return sensitiveTarget.test(normalized) && probeVerb.test(normalized);
-}
-
 async function buildAssistantInstructions(event) {
   const speaker = event.qqColdProactive
     ? "兴趣回复定时器（没有新发送者）"
@@ -10634,7 +10586,7 @@ async function buildAssistantInstructions(event) {
     senderId: event.senderId,
     enhancerEnabled: Boolean(state.qq.enhancer.enabled),
     toolsEnabled: !event.qqPrivateProactive,
-    imageMemoryContext: event.qqPrivateProactive ? "" : formatQqImageMemoryCandidates(getQqImageMemoryCandidates(event)),
+    canGenerateImages: qqAgentCanDraw,
     assistantProfile: assistantSkillBrief
   });
 }
@@ -10650,22 +10602,6 @@ async function loadAssistantSkillBrief() {
     "部署者自定义 profile：",
     text
   ].join("\n").slice(0, 1800);
-}
-
-function extractSection(text, startMarker, endMarker) {
-  const start = text.indexOf(startMarker);
-  if (start === -1) return "";
-  const end = text.indexOf(endMarker, start + startMarker.length);
-  return text.slice(start, end === -1 ? undefined : end).trim();
-}
-
-function summarizeBullets(text, limit) {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("- "))
-    .slice(0, limit)
-    .join("\n");
 }
 
 function cleanCodexReply(text) {
@@ -10928,6 +10864,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       : event.proactiveDecision?.proactive
         ? formatQqApprovedProactivePrompt({
           kind: "ordinary",
+          conversationFollowUp: Boolean(event.proactiveDecision.conversationFollowUp?.candidate),
           activityAdvancedDuringJudge: Boolean(event.proactiveDecision.activityAdvancedDuringJudge),
           additionalActivityCount: event.proactiveDecision.additionalActivityCount
         })
@@ -11089,13 +11026,15 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       event.proactiveDecision?.replyContext?.length ? "" : null,
       event.pendingImageRequestText ? `触发原因：${ownerLabel}刚刚说“${event.pendingImageRequestText}”，随后这张 QQ 图片到达。请直接看这张图并回应。` : null,
       event.pendingImageRequestText ? "" : null,
-      hasAnyQqImageReference(event) && !shouldInspectImages ? "本条 QQ 消息或引用消息带了图片，但文本兴趣不足或未明确要求看图；Hub 已跳过视觉输入以节省 token。不要声称看过图片内容。" : null,
+      hasAnyQqImageReference(event) && !shouldInspectImages
+        ? `本条 QQ 消息或引用消息带了图片，但没有明确要求看图，Hub 没有预先附上视觉输入。${event.qqPrivateProactive ? "" : "图片和回答有关时先用 qq_context.images 查看；"}没看过就不要声称看过图片内容。`
+        : null,
       shouldInspectImages ? `收到的 QQ 图片：${formatQqImageSummary(qqModelImages)}` : null,
       event.qqPrivateProactive ? null : formatQqImageMemoryCandidates(getQqImageMemoryCandidates(event)),
       event.qqPrivateProactive ? null : formatQqAvatarFeatureContextForEvent(event) || null,
       imagePaths.length ? `可查看的本地图片数量：${imagePaths.length}` : null,
       event.qqAnimationVision?.length ? `动图信息：${event.qqAnimationVision.join("；")}。你可以自行决定要展开几个动图、每个抽几帧以及抽哪些位置；需要时用 qq_sticker 的 inspect（selector=当前N，description 填 20%,50%,80%、中段3帧或均匀5帧）。不要把同一动图的多帧误当成多张独立表情。` : null,
-      imagePaths.length ? "你可以查看图片内容，但回复要像群聊自然接话：不必默认逐条解析图片。只有对方明确让你看图、判断内容、评价截图/表情包，或图片是回答关键时，才说明看到的主元素、文字、构图或梗图大意；完全无法辨认主体时才说看不清。" : null,
+      imagePaths.length ? "你可以查看图片内容，但回复要像聊天时自然接话：不必默认逐条解析图片。只有对方明确让你看图、判断内容、评价截图/表情包，或图片是回答关键时，才说明看到的主元素、文字、构图或梗图大意；完全无法辨认主体时才说看不清。" : null,
       hasAnyQqImageReference(event) ? "" : null,
       "",
       event.qqColdProactive
@@ -11114,7 +11053,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       event.qqColdProactive
         ? formatQqColdProactiveCompletionInstruction()
         : event.qqPrivateProactive
-        ? "现在只输出一句要发给对方的自然消息；只有安全边界或关键事实无法可靠确认时才把 status 设为 silent。"
+        ? "现在只输出一句要发给对方的自然消息；读完上下文后没有真想说的内容、这类联系已经显得多余，或安全与关键事实无法可靠确认时，把 status 设为 silent。"
         : isQqPrivateEvent(event)
         ? "请按输出 Schema 提交要发送到 QQ 私聊里的最终回复。不要追加服务式追问或“我还能继续帮你”的结尾。"
         : "请按输出 Schema 提交要发送到 QQ 群里的最终回复。不要追加服务式追问或“我还能继续帮你”的结尾。"
@@ -11618,7 +11557,8 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
       { maxBytes: qqFileMaxBytes }
     ),
     requestText: text,
-    isImageGeneration
+    isImageGeneration,
+    canGenerateImages: qqAgentCanDraw
   });
   const nativeProgress = createQqNativeAgentProgressObserver(event, { replyScope });
 
@@ -12011,76 +11951,6 @@ function stableModuloLocal(seed, modulo) {
     hash = (hash * 31 + char.codePointAt(0)) >>> 0;
   }
   return modulo > 0 ? hash % modulo : 0;
-}
-
-async function buildWebLookupContext(event) {
-  const text = stripMentionText(event.text);
-  const triggerReason = webLookupTriggerReason(event, text);
-  if (!triggerReason) return "";
-  const query = buildWebLookupQuery(text);
-  logger.debug("QQ web lookup trigger matched", {
-    query,
-    reason: triggerReason,
-    text: text.slice(0, 500),
-    groupId: event.groupId || null,
-    senderId: event.senderId || null,
-    messageType: event.type || null,
-    imageCount: Array.isArray(event.images) ? event.images.length : 0,
-    hasReply: Boolean(event.replyContext || event.replyMessageId),
-    isAt: isExplicitQqAtEvent(event)
-  }, "search", qqLogContext(event));
-  try {
-    const results = await searchWeb(query, { traceId: event.traceId });
-    if (results.length === 0) return "";
-    logger.debug("QQ web lookup results selected", {
-      query,
-      resultCount: results.length,
-      results: results.map((result) => ({
-        title: result.title,
-        url: result.url,
-        snippet: String(result.snippet || "").slice(0, 280),
-        source: result.source || null
-      }))
-    }, "search", qqLogContext(event));
-    return [
-      "联网查询摘要：",
-      "以下是 Hub 为这个 QQ 群聊问题临时查询到的网页搜索摘要。只在相关时参考；不要编造未查到的细节；如果结果不可靠，可以说不确定。",
-      ...results.map((result, index) => [
-        `${index + 1}. ${result.title}`,
-        result.snippet ? `摘要：${result.snippet}` : null,
-        result.url ? `链接：${result.url}` : null
-      ].filter(Boolean).join("\n"))
-    ].join("\n");
-  } catch (error) {
-    return [
-      "联网查询摘要：",
-      `这次联网查询失败：${error.message}。如果问题依赖最新资料或陌生定义，请简短说明现在查不到。`
-    ].join("\n");
-  }
-}
-
-function shouldUseWebLookup(event, text) {
-  return Boolean(webLookupTriggerReason(event, text));
-}
-
-function webLookupTriggerReason(event, text) {
-  const normalized = String(text || "").trim();
-  if (!state.qq.webLookup.enabled || !normalized) return "";
-  if (isFilesystemProbe(normalized)) return "";
-  if (/(是什么意思|什么意思|啥意思|什么梗|啥梗|什么定义|定义|是谁|谁是|是什么东西|是什么|百科|查一下|搜一下|网上|最近|最新|新闻|出处|来源)/i.test(normalized)) return "命中显式搜索/百科/最新信息关键词";
-  if (/(最好|最好用|推荐|排行|排名|强度|攻略|通关|配装|卡牌|角色|装备|技能|流派|打法|弱点|结局|路线|隐藏|解锁|mod|MOD|版本|补丁)/i.test(normalized)
-    && /(游戏|手游|Steam|steam|Switch|switch|主机|东方|虹龙洞|原神|崩铁|明日方舟|碧蓝|gal|galgame|GameCube|GC|任天堂|索尼|Xbox|xbox|卡牌|角色|装备|关卡)/i.test(normalized)) {
-    return "命中游戏攻略/版本/排行类问题";
-  }
-  if (/(哪[个些]|几个|多少|为什么|怎么|如何|能不能|可以吗|对不对|是不是|有没有|靠谱吗|厉害吗|强吗)/.test(normalized)
-    && /[A-Za-z0-9]{3,}|[·《》]|东方|虹龙洞|游戏|手游|番|角色|卡牌|装备|模型|软件|项目|插件|版本|系统|硬件|显卡|驱动/.test(normalized)) {
-    return "命中具体名词或产品相关问题";
-  }
-  return "";
-}
-
-function buildWebLookupQuery(text) {
-  return String(text || "").trim();
 }
 
 function noteQqImageRequest(event) {
@@ -13220,21 +13090,6 @@ function needsBroaderContextWindow(event) {
   return /(在干什么|在干啥|在干嘛|干什么|干啥|做什么|在做什么|做啥|在做啥|在聊什么|在聊啥|聊什么|聊啥|群里|大家|他们|她们|刚才|刚刚|前面|什么情况|咋回事|怎么回事)/.test(text);
 }
 
-function shouldUseGroupRecentContext(event) {
-  if (event.type === "private_message" || !event.groupId) return false;
-  if (event.proactiveDecision?.includeRecentContext) return true;
-  if (event.replyContext) return true;
-  const text = stripMentionText(event.text);
-  if (!text) return false;
-  const hasExplicitTarget = extractMentionedUserIds(event).length > 0 || extractPossibleTargetNames(text).length > 0;
-  const asksForRecentContext = /(刚刚|刚才|刚|刚那|刚那会|前面|上面|之前|前文|上文|前几句|前几条|上一条|这几句|这几条|这波|刚干|干的事|做的事|发生什么|发生啥|什么情况|啥情况|咋回事|怎么回事|咋了|怎么了|聊到哪|说到哪|上下文)/.test(text);
-  const asksForJudgement = /(评价|锐评|评一下|点评|怎么看|说说|讲讲|总结|概括|复盘|分析一下|解释一下|翻译一下|帮我看|看一下|看看|捋一下|理一下|聊什么|聊啥|说什么|说啥|在说什么|在说啥|在聊啥|在聊什么|干什么|干啥|在干嘛|在干什么|在干啥|做什么|做啥|在做什么|在做啥)/.test(text);
-  const asksForWholeGroup = /(群里|群友|大家|他们|她们|这群|这帮|这几个人|刚才那几个人|前面那几个人).*(聊什么|聊啥|说什么|说啥|在聊|在说|在干嘛|在干什么|在干啥|干什么|干啥|做什么|做啥|在做什么|在做啥|什么情况|啥情况|咋回事|怎么回事|总结|概括|复盘)|^((刚刚|刚才|前面|上面|之前|刚才那会儿|刚才那会)?(聊什么|聊啥|在聊什么|在聊啥|说什么|说啥|在说什么|在说啥|什么情况|啥情况|咋回事|怎么回事|发生什么|发生啥)|总结一下|概括一下|复盘一下)$/i.test(text.trim());
-  const shortGeneric = /^(在吗|测试|状态|你好|哈喽|hello|hi|来|出来|探头|叫你一下)$/i.test(text.trim());
-  if (shortGeneric) return false;
-  return asksForWholeGroup || (hasExplicitTarget && (asksForRecentContext || asksForJudgement)) || (asksForRecentContext && asksForJudgement);
-}
-
 function extractMentionedUserIds(event) {
   const ids = new Set((event.atTargets || []).map(String).filter((id) => id !== String(event.selfId)));
   const text = String(event.text || "");
@@ -13607,11 +13462,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function normalizeQqBubbleSeparator(value) {
-  const separator = String(value || "").trim();
-  return separator || "|||";
-}
-
 function buildDefaultQqSendPlan(_event, reply) {
   return buildQqReplySendPlan(reply, {
     separator: qqBubbleSeparator,
@@ -13625,10 +13475,6 @@ function flattenQqReplyForMemory(event, reply) {
   return plan.flattened || (plan.bubbles || []).join("\n") || String(reply || "").trim();
 }
 
-function formatQqBubbleInstruction() {
-  return `如果你想让 Bot 连续发送多条 QQ 消息，请在两条消息之间单独写一行 ${qqBubbleSeparator}。分隔符必须独占一行；不要解释这个分隔符。`;
-}
-
 function formatQuotedContext(event) {
   if (!event.replyContext) return "";
   const context = event.replyContext;
@@ -13639,8 +13485,8 @@ function formatQuotedContext(event) {
   const imageSummary = formatQqImageSummary(context.images || []);
   if (!text && !imageSummary) return "";
   const replyHint = context.isSelf
-    ? "这条群消息是在回复你上一条消息。"
-    : "这条群消息引用了下面这条上下文。";
+    ? "这条消息是在回复你上一条消息。"
+    : "这条消息引用了下面这条上下文。";
   return [
     "被回复/引用的消息上下文：",
     replyHint,
@@ -14785,8 +14631,8 @@ function collectQqRelationshipPeople(event) {
 // the speaker. Logs carry only numbers, never the private reason.
 function rememberQqRelationshipTurn(event) {
   const inner = event?.qqAgentInnerState;
-  const userId = String(event?.senderId || "");
-  if (!inner || !userId || event?.qqColdProactive || userId === String(event?.selfId || "")) return;
+  if (!inner || !isQqRelationshipTurn(event)) return;
+  const userId = String(event.senderId);
   const scopeId = getQqMemoryScopeId(event);
   const name = String(event.senderLabel || event.senderName || "").slice(0, 40);
   const at = new Date().toISOString();
@@ -15463,35 +15309,6 @@ async function buildQqAccountStickerCatalog() {
   return catalog;
 }
 
-function normalizeQqAccountStickerCatalog(data) {
-  const rawList = Array.isArray(data) ? data : extractQqStickerLikeValues(data);
-  const catalog = [];
-  const seen = new Set();
-  for (const [index, item] of rawList.entries()) {
-    const url = extractQqStickerUrl(item);
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
-    const label = extractQqStickerLabel(item) || `账号表情${catalog.length + 1}`;
-    catalog.push({
-      name: label,
-      id: extractQqStickerId(item) || undefined,
-      url,
-      source: "account",
-      index: index + 1
-    });
-  }
-  return catalog;
-}
-
-function extractQqStickerId(item) {
-  if (!item || typeof item !== "object") return "";
-  const summary = item.summary && typeof item.summary === "object" ? item.summary : {};
-  const rich = summary.richMediaSummary && typeof summary.richMediaSummary === "object" ? summary.richMediaSummary : {};
-  return [item.cid, item.id, item.faceId, item.fileId, item.md5, item.resId, rich.id, rich.resId]
-    .map((value) => String(value || "").trim())
-    .find(Boolean) || "";
-}
-
 function extractQqStickerLikeValues(value) {
   if (Array.isArray(value)) return value;
   if (!value || typeof value !== "object") return [];
@@ -15511,51 +15328,6 @@ function extractQqStickerLikeValues(value) {
     if (list.length) return list;
   }
   return [];
-}
-
-function extractQqStickerUrl(item) {
-  if (typeof item === "string") return isHttpUrl(item) ? item : "";
-  if (!item || typeof item !== "object") return "";
-  const direct = [
-    item.url,
-    item.src,
-    item.uri,
-    item.downloadUrl,
-    item.originalUri,
-    item.originalUrl,
-    item.thumb,
-    item.thumbnail,
-    item.imageUrl,
-    item.fileUrl
-  ].find((value) => isHttpUrl(value));
-  if (direct) return String(direct);
-  const summary = item.summary && typeof item.summary === "object" ? item.summary : {};
-  const rich = summary.richMediaSummary && typeof summary.richMediaSummary === "object" ? summary.richMediaSummary : {};
-  const richDirect = [
-    rich.originalUri,
-    rich.originalUrl,
-    ...(Array.isArray(rich.picList) ? rich.picList : [])
-  ].find((value) => isHttpUrl(value));
-  return richDirect ? String(richDirect) : "";
-}
-
-function extractQqStickerLabel(item) {
-  if (!item || typeof item !== "object") return "";
-  const summary = item.summary && typeof item.summary === "object" ? item.summary : {};
-  const rich = summary.richMediaSummary && typeof summary.richMediaSummary === "object" ? summary.richMediaSummary : {};
-  return [
-    item.name,
-    item.title,
-    item.desc,
-    item.summary,
-    item.text,
-    summary.textSummary,
-    rich.title,
-    rich.brief,
-    item.cid ? `账号表情${item.cid}` : ""
-  ]
-    .map((value) => String(value || "").trim())
-    .find((value) => value && value !== "[object Object]");
 }
 
 function mergeQqStickerCatalogs(...catalogs) {
@@ -15732,15 +15504,6 @@ async function fileExists(filePath) {
   try {
     const stats = await stat(filePath);
     return stats.isFile();
-  } catch {
-    return false;
-  }
-}
-
-async function pathExists(filePath) {
-  try {
-    await stat(filePath);
-    return true;
   } catch {
     return false;
   }
