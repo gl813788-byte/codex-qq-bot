@@ -56,10 +56,19 @@ On this configured machine:
   (`ncc all`, `ncc hub`, `ncc napcat`) from an agent session is fine. Local
   media work (ASR/storyboard/yt-dlp runs, model download and extraction) is a
   spike too and has killed the session: never run it while the stack is up.
-  On this machine a Claude Code PreToolUse hook
-  (`~/.claude/hooks/memory-guard.sh`) refuses Bash commands when MemAvailable
-  is below 500 MB, heavy commands below 1500 MB and parallel test runs below
-  3500 MB; check `ncc status` after any heavy step.
+  On this machine every command is reviewed by
+  `/root/memguard/review-command.sh` (memory, free swap and Android's 32
+  phantom-process limit): the Claude Code PreToolUse hook
+  (`~/.claude/hooks/memory-guard.sh`) and interactive root bash
+  (`/root/memguard/shell-guard.bash` from `~/.bashrc`) use it; `ncc all` /
+  `ncc napcat` need confirmation below 3000 MB available or 1500 MB free swap.
+  The `memguard` daemon (`ncc memguard`, auto-started by `ncc all|hub|napcat`)
+  terminates expendable work (tests, media, downloads, installs, background
+  CLIs; at the limit a per-turn `codex app-server`) before Android kills
+  Termux, and never touches QQ/NapCat, the Hub or Claude. Disabling the
+  phantom-process killer needs adb (`~/disable-phantom-killer.sh` in Termux,
+  with wireless debugging paired on the phone). Check `ncc status` after any
+  heavy step.
 - Interactive Codex CLI: `~/.codex/config.toml` sets
   `features.daemon_auto_start = false`. Its shared app-server daemon socket
   path exceeds the Unix socket limit under PRoot, and PRoot's remap is private
