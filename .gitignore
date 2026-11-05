@@ -46,6 +46,11 @@ data/qq-sticker-inventory.json
 data/qq-sticker-labels.json
 data/qq-stickers/
 data/qq-codex-sessions.json
+data/qq-bot-life.json
+data/qq-bot-personality.json
+data/qq-bot-drawings/
+data/qq-human-actions.json
+data/qq-memory-images/
 data/semantic-memory.sqlite*
 data/keep-awake.pid
 data/previous-brightness.txt

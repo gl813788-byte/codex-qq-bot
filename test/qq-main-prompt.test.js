@@ -12,7 +12,10 @@ test("main instructions advertise selectable image memory and require fresh visu
   const imageMemoryContext = "【本段对话含有图片：1 张可选】 image-123";
   const prompt = formatQqMainModelInstructions({ imageMemoryContext });
   assert.match(prompt, /5 分钟或最近 20 条原始消息/);
-  assert.match(prompt, /image-123/);
+  // The directory carries untrusted captions and is sent with the turn's
+  // context, never copied into the developer instructions.
+  assert.doesNotMatch(prompt, /image-123/);
+  assert.match(prompt, /本轮上下文里附上可选图片目录/);
   assert.match(prompt, /qq_context\.images 读取所选原图再作答/);
   assert.match(prompt, /新目录优先于旧目录/);
   assert.doesNotMatch(formatQqMainModelInstructions({ toolsEnabled: false, imageMemoryContext }), /image-123|qq_context\.images/);
@@ -196,4 +199,37 @@ test("the tool guide points at sticker search instead of listing the library", (
   assert.match(guide, /共 300 张/);
   assert.match(guide, /当前1\.捏你【动图】/);
   assert.match(guide, /selector=当前N/);
+});
+
+test("drawing guidance follows the engine's image-generation capability", () => {
+  const drawing = formatQqMainModelInstructions({ canGenerateImages: true });
+  assert.match(drawing, /画图就用原生生图画出来/);
+  const noDrawing = formatQqMainModelInstructions({ canGenerateImages: false });
+  assert.doesNotMatch(noDrawing, /原生生图/);
+  assert.match(noDrawing, /没有生图能力，被要求画图时如实说画不了/);
+});
+
+test("humanlike chat rules leave room for structured task deliverables", () => {
+  const prompt = formatQqMainModelInstructions();
+  const rules = prompt.slice(prompt.indexOf("【活人感】"));
+  assert.match(rules, /^【活人感】下面这些主要约束闲聊、情绪和社交回应/);
+  assert.match(rules, /以交付完整正确为先，可以按需分点、用代码块或写长/);
+  assert.ok(prompt.indexOf("【活人感】") < prompt.indexOf("不复述对方的话，不总结，不列点"));
+});
+
+test("an approved follow-up batch is framed as continuing the Bot's own conversation", () => {
+  const followUp = formatQqApprovedProactivePrompt({ kind: "ordinary", conversationFollowUp: true });
+  assert.match(followUp, /接着和刚才的人聊/);
+  assert.match(followUp, /你刚回复过这位群友/);
+  assert.match(followUp, /不要重新打招呼/);
+  assert.match(followUp, /最终静默权/);
+  const ordinary = formatQqApprovedProactivePrompt({ kind: "ordinary" });
+  assert.doesNotMatch(ordinary, /你刚回复过这位群友/);
+  assert.match(ordinary, /已批准的群聊主动接话/);
+});
+
+test("the tool guide does not promise native tools the engine may not offer", () => {
+  const guide = formatQqMainToolGuide({});
+  assert.doesNotMatch(guide, /Shell 和计划直接可用/);
+  assert.match(guide, /以本轮实际提供的为准/);
 });

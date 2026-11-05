@@ -158,7 +158,6 @@ export function normalizeQqBotRoutine(value) {
 export const QQ_LIFE_ACTIVITY_KINDS = Object.freeze(["none", "video", "browse", "learn", "qzone", "post", "draw"]);
 const MAX_EXPERIENCES = 40;
 const EXPERIENCE_DAYS = 4;
-const CONTEXT_HOURS = 14;
 
 export function normalizeQqLifeActivityKind(value) {
   const kind = String(value || "").trim().toLowerCase();

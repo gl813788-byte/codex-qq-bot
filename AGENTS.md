@@ -8,7 +8,7 @@ This repository runs a local Hub between QQ/OneBot and a local agent CLI (Codex 
 
 ## Read before changing
 
-- Start with `README_CN.md` or `README.md`.
+- Start with `README.md` (Simplified Chinese, the default) or `README_EN.md` (English).
 - Use `docs/ARCHITECTURE_CN.md` or `docs/ARCHITECTURE.md` for source boundaries.
 - Use `docs/CONFIGURATION_CN.md` or `docs/CONFIGURATION.md` before changing settings or environment variables.
 - Use `docs/OPERATIONS_CN.md` or `docs/OPERATIONS.md` for deployment and process behavior.

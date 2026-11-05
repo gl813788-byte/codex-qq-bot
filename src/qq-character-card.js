@@ -394,7 +394,7 @@ function normalizeMultiline(value) {
 }
 
 function stripBom(value) {
-  return String(value || "").replace(/^﻿/, "");
+  return String(value || "").replace(/^\uFEFF/, "");
 }
 
 function baseName(fileName) {

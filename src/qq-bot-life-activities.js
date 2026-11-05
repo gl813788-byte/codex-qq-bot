@@ -118,7 +118,7 @@ export function formatQqLifeExperienceContext(lifeState, { now = Date.now(), sco
     .slice(-3);
   if (!recent.length) return "";
   return [
-    "【你今天真实做过的事】（工具真实记录的经历，可以在合适时自然提起或分享，不用刻意；别人没问也不必汇报）：",
+    "【你最近真实做过的事】（工具真实记录的经历，可以在合适时自然提起或分享，不用刻意；别人没问也不必汇报）：",
     ...recent.map((entry) => `- ${formatAge(now - Date.parse(entry.at))}：${entry.summary}${entry.sharedScopes.includes(scopeId) ? "（已经在这里聊过）" : ""}`)
   ].join("\n");
 }
@@ -156,6 +156,3 @@ function stableFraction(value) {
   return (hash >>> 0) / 4294967296;
 }
 
-function compact(value, max) {
-  return [...String(value ?? "").replace(/\s+/g, " ").trim()].slice(0, max).join("");
-}
