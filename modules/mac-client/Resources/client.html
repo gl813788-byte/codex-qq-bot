@@ -95,72 +95,72 @@
         <main class="content" id="mainContent">
           <!-- Overview -->
           <section class="view active" id="view-overview" data-view-panel="overview">
-            <div id="statusBanner" class="status-banner pending" aria-live="polite">
-              <span class="status-banner-icon" aria-hidden="true"></span>
-              <div class="status-banner-copy"><strong id="statusTitle" data-i18n="connecting">正在连接</strong><p id="statusBody"></p></div>
-              <div class="status-banner-actions">
-                <button class="button small ghost" type="button" data-go-view="channels" data-i18n="manageChannels">管理通道</button>
-                <button id="openHubApi" class="button small ghost" type="button" data-i18n="openApi">查看 API</button>
-              </div>
-            </div>
-
-            <div id="overviewStats" class="stat-row" aria-label="运行摘要" data-i18n-aria-label="runtimeSummary"></div>
-
-            <div class="grid overview-main">
-              <section class="card">
-                <header class="card-head">
-                  <div><h2 data-i18n="serviceHealth">服务状态</h2><p data-i18n="serviceHealthHint">Hub 与各个依赖的实时健康度</p></div>
-                  <button id="refreshHealth" class="button small ghost" type="button" data-i18n="checkNow">立即检查</button>
-                </header>
-                <div id="serviceList" class="service-list"></div>
-              </section>
-
-              <section id="engineCard" class="card engine-panel" data-engine="">
-                <header class="card-head">
-                  <div class="engine-title"><span class="engine-glyph large" aria-hidden="true"></span><div><h2 id="engineTitle">—</h2><p id="engineRuntime" class="mono">—</p></div></div>
-                  <span id="engineState" class="badge">—</span>
-                </header>
-                <dl id="engineFacts" class="fact-grid"></dl>
-                <div id="engineLastRun" class="last-run"></div>
-                <div id="quotaSection" class="quota-section">
-                  <div class="subhead"><h3 data-i18n="usageWindow">Codex 用量</h3><span id="quotaUpdated" class="muted small-text">—</span></div>
-                  <div id="quotaOverview" class="quota-list"></div>
+            <section class="overview-hero" aria-label="运行摘要" data-i18n-aria-label="runtimeSummary">
+              <div id="statusBanner" class="status-banner pending" aria-live="polite">
+                <span class="status-banner-icon" aria-hidden="true"></span>
+                <div class="status-banner-copy"><strong id="statusTitle" data-i18n="connecting">正在连接</strong><p id="statusBody"></p></div>
+                <div class="status-banner-actions">
+                  <button class="button small ghost" type="button" data-go-view="channels" data-i18n="manageChannels">管理通道</button>
+                  <button id="openHubApi" class="button small ghost" type="button" data-i18n="openApi">查看 API</button>
                 </div>
-              </section>
-            </div>
-
-            <div class="grid overview-lower">
-              <div class="behavior-column">
-              <section class="card">
-                <header class="card-head">
-                  <div><h2 data-i18n="overviewPersona">Bot 此刻</h2><p data-i18n="overviewPersonaHint">心情、作息与最亲近的人</p></div>
-                  <button class="button small ghost" type="button" data-go-view="persona" data-i18n="openPersona">打开人格</button>
-                </header>
-                <div id="overviewPersona" class="overview-persona"></div>
-              </section>
-              <section class="card">
-                <header class="card-head">
-                  <div><h2 data-i18n="latencyTitle">接口响应</h2><p id="pulseSampleLabel" data-i18n="waitingSamples">等待首个样本</p></div>
-                  <strong id="pulseLiveStatus" class="mono pulse-value">—</strong>
-                </header>
-                <div id="pulseChart" class="pulse-chart">
-                  <svg viewBox="0 0 560 140" preserveAspectRatio="none" aria-hidden="true">
-                    <path class="pulse-grid" d="M0 35H560M0 70H560M0 105H560" />
-                    <path id="pulseArea" class="pulse-area" d="" />
-                    <path id="pulseLine" class="pulse-line" d="" />
-                    <circle id="pulsePoint" class="pulse-point" cx="0" cy="0" r="3.5" hidden />
-                  </svg>
-                  <div class="pulse-axis"><span id="pulseAxisStart">—</span><span id="pulseAxisMiddle">—</span><span id="pulseAxisEnd" data-i18n="now">现在</span></div>
-                </div>
-              </section>
               </div>
-              <section class="card">
-                <header class="card-head">
-                  <div><h2 data-i18n="recentActivity">最近活动</h2><p data-i18n="recentActivityHint">最近的 QQ 消息与回复</p></div>
-                  <button class="button small ghost" type="button" data-go-view="activity" data-i18n="openLogs">查看日志</button>
-                </header>
-                <div id="recentTimeline" class="timeline"></div>
-              </section>
+              <div id="overviewStats" class="stat-row hero-stats"></div>
+            </section>
+
+            <div class="overview-columns">
+              <div class="overview-col">
+                <section class="card ov-services">
+                  <header class="card-head">
+                    <div><h2 data-i18n="serviceHealth">服务状态</h2><p data-i18n="serviceHealthHint">Hub 与各个依赖的实时健康度</p></div>
+                    <button id="refreshHealth" class="button small ghost" type="button" data-i18n="checkNow">立即检查</button>
+                  </header>
+                  <div id="serviceList" class="service-list"></div>
+                </section>
+                <section class="card ov-recent">
+                  <header class="card-head">
+                    <div><h2 data-i18n="recentActivity">最近活动</h2><p data-i18n="recentActivityHint">最近的 QQ 消息与回复</p></div>
+                    <button class="button small ghost" type="button" data-go-view="activity" data-i18n="openLogs">查看日志</button>
+                  </header>
+                  <div id="recentTimeline" class="timeline"></div>
+                </section>
+              </div>
+              <div class="overview-col">
+                <section id="engineCard" class="card engine-panel ov-engine" data-engine="">
+                  <header class="card-head">
+                    <div class="engine-title"><span class="engine-glyph large" aria-hidden="true"></span><div><h2 id="engineTitle">—</h2><p id="engineRuntime" class="mono">—</p></div></div>
+                    <span id="engineState" class="badge">—</span>
+                  </header>
+                  <dl id="engineFacts" class="fact-grid"></dl>
+                  <div id="engineLastRun" class="last-run"></div>
+                  <div id="quotaSection" class="quota-section">
+                    <div class="subhead"><h3 data-i18n="usageWindow">Codex 用量</h3><span id="quotaUpdated" class="muted small-text">—</span></div>
+                    <div id="quotaOverview" class="quota-list"></div>
+                  </div>
+                </section>
+                <section class="card ov-persona">
+                  <header class="card-head">
+                    <div><h2 data-i18n="overviewPersona">Bot 此刻</h2><p data-i18n="overviewPersonaHint">心情、作息与最亲近的人</p></div>
+                    <button class="button small ghost" type="button" data-go-view="persona" data-i18n="openPersona">打开人格</button>
+                  </header>
+                  <div id="overviewPersona" class="overview-persona"></div>
+                </section>
+                <section class="card ov-latency">
+                  <header class="card-head">
+                    <div><h2 data-i18n="latencyTitle">接口响应</h2><p id="pulseSampleLabel" data-i18n="waitingSamples">等待首个样本</p></div>
+                    <strong id="pulseLiveStatus" class="mono pulse-value">—</strong>
+                  </header>
+                  <div id="pulseChart" class="pulse-chart">
+                    <svg viewBox="0 0 560 140" preserveAspectRatio="none" aria-hidden="true">
+                      <defs><linearGradient id="pulseGradient" x1="0" y1="0" x2="0" y2="1"><stop class="pulse-stop-top" offset="0" /><stop class="pulse-stop-bottom" offset="1" /></linearGradient></defs>
+                      <path class="pulse-grid" d="M0 35H560M0 70H560M0 105H560" />
+                      <path id="pulseArea" class="pulse-area" d="" />
+                      <path id="pulseLine" class="pulse-line" d="" />
+                      <circle id="pulsePoint" class="pulse-point" cx="0" cy="0" r="3.5" hidden />
+                    </svg>
+                    <div class="pulse-axis"><span id="pulseAxisStart">—</span><span id="pulseAxisMiddle">—</span><span id="pulseAxisEnd" data-i18n="now">现在</span></div>
+                  </div>
+                </section>
+              </div>
             </div>
           </section>
 
@@ -614,7 +614,7 @@
                   <button id="openRawState" class="button small ghost" type="button" data-i18n="rawState">原始状态</button>
                 </div>
               </section>
-              <section class="card setting-row">
+              <section class="card setting-row span-all">
                 <div class="setting-copy"><h2 data-i18n="lanAccess">局域网访问</h2><p id="lanAccessHint" data-i18n="lanAccessHint">只显示其他设备可达的物理局域网地址。</p><code id="lanAccessUrls" class="code-line">仅本机可访问</code></div>
                 <div class="setting-controls">
                   <span class="switch"><input id="lanAccessToggle" type="checkbox" aria-label="局域网访问" data-i18n-aria-label="lanAccess" /><span aria-hidden="true"></span></span>
