@@ -2,21 +2,65 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { plugin_init, withNativeTimeout } from "../modules/napcat-social-bridge/index.mjs";
 
-test("NapCat bridge removes proactive friend routes and exposes incoming request capabilities", async () => {
+test("NapCat bridge exposes incoming request and outgoing friend capabilities", async () => {
   const routes = new Map();
   await plugin_init(createContext(routes));
 
-  assert.equal(routes.has("POST /add-friend"), false);
-  assert.equal(routes.has("POST /inspect-friend"), false);
+  assert.equal(routes.has("POST /add-friend"), true);
+  assert.equal(routes.has("POST /inspect-friend"), true);
   assert.equal(routes.has("POST /pending-requests"), true);
   assert.equal(routes.has("POST /handle-request"), true);
 
   const response = responseRecorder();
   routes.get("GET /health")(localRequest(), response);
-  assert.equal(response.body.version, 19);
+  assert.equal(response.body.version, 20);
   assert.ok(response.body.capabilities.includes("incoming-friend-request-handle"));
   assert.ok(response.body.capabilities.includes("incoming-group-request-handle"));
-  assert.equal(response.body.capabilities.some((item) => /friend.*submit/i.test(item)), false);
+  assert.ok(response.body.capabilities.includes("outgoing-friend-request-submit"));
+});
+
+test("NapCat bridge submits one outgoing friend request and refuses unanswered verification", async () => {
+  const routes = new Map();
+  const submissions = [];
+  let setting = 0;
+  await plugin_init(createContext(routes, {
+    friendApi: {
+      async getBuddyReq() { return { buddyReqs: [] }; },
+      async getDoubtFriendRequest() { return []; },
+      async isBuddy() { return false; }
+    },
+    buddyService: {
+      async getTargetBuddySetting() { return { addFriendSetting: setting, question: setting === 2 ? ["暗号？"] : [] }; },
+      async reqToAddFriends(request) {
+        submissions.push(request);
+        return { result: 0 };
+      }
+    },
+    userApi: {
+      async getUinByUidV2() { return "123456"; },
+      async getUidByUinV2() { return "uid:123456"; }
+    }
+  }));
+
+  const inspected = responseRecorder();
+  await routes.get("POST /inspect-friend")(localRequest({ target_id: "123456" }), inspected);
+  assert.equal(inspected.body.status, "ready");
+  assert.equal(submissions.length, 0);
+
+  const added = responseRecorder();
+  await routes.get("POST /add-friend")(localRequest({ target_id: "123456", message: "群里聊过" }), added);
+  assert.equal(added.statusCode, 200);
+  assert.equal(added.body.status, "submitted");
+  assert.equal(submissions.length, 1);
+  assert.equal(submissions[0].buddyUin, 123456);
+
+  setting = 2;
+  const blocked = responseRecorder();
+  await routes.get("POST /add-friend")(localRequest({ target_id: "123456" }), blocked);
+  assert.equal(blocked.statusCode, 409);
+  assert.equal(blocked.body.error, "verification_required");
+  assert.deepEqual(blocked.body.questions, ["暗号？"]);
+  assert.equal(submissions.length, 1);
 });
 
 test("NapCat bridge lists and truly approves an incoming friend request through the native service", async () => {
@@ -427,3 +471,17 @@ function responseRecorder() {
     }
   };
 }
+
+test("NapCat bridge refuses requests relayed by a reverse proxy or tunnel", async () => {
+  const routes = new Map();
+  await plugin_init(createContext(routes));
+  for (const headers of [{ "cf-connecting-ip": "203.0.113.7" }, { "x-forwarded-for": "203.0.113.7" }, { forwarded: "for=203.0.113.7" }]) {
+    const response = responseRecorder();
+    await routes.get("POST /add-friend")({ ...localRequest({ target_id: "123456" }), headers }, response);
+    assert.equal(response.statusCode, 403);
+    assert.equal(response.body.error, "loopback_only");
+  }
+  const local = responseRecorder();
+  routes.get("GET /health")({ ...localRequest(), headers: { host: "127.0.0.1:6099" } }, local);
+  assert.equal(local.body.ok, true);
+});

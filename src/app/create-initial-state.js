@@ -3,6 +3,7 @@ import { createEmptyQqKnowledgeBase } from "../qq-knowledge-base.js";
 import { createEmptyQqPeriodicRuntime } from "../qq-periodic-runtime.js";
 import { createEmptyQqSelfPersona } from "../qq-self-persona.js";
 import { createEmptyQqBotLifeState } from "../qq-bot-life-state.js";
+import { createEmptyQqHumanActionStats } from "../qq-human-action-stats.js";
 import { createEmptyQqPersonality } from "../qq-bot-personality.js";
 import {
   createEmptyQqCodexSessionStore,
@@ -102,6 +103,7 @@ export function createInitialState({
       },
       selfPersona: createEmptyQqSelfPersona(),
       botLife: createEmptyQqBotLifeState(),
+      humanActionStats: createEmptyQqHumanActionStats(),
       personality: createEmptyQqPersonality(),
       periodicRuntime: createEmptyQqPeriodicRuntime(),
       conversationMemory: createEmptyQqConversationMemory()

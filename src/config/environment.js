@@ -285,6 +285,73 @@ export function createEnvironmentConfig(env = process.env) {
     customInterestModelBaseUrl: env.CODEX_REMOTE_CONTACT_QQ_PROACTIVE_JUDGE_BASE_URL || "",
     tavilyApiKey: env.TAVILY_API_KEY || env.CODEX_REMOTE_CONTACT_TAVILY_API_KEY || "",
 
+    // Optional local media understanding (`ncc media install`). An empty
+    // directory means <project>/runtime/media-tools.
+    mediaToolsDir: String(env.CODEX_REMOTE_CONTACT_MEDIA_TOOLS_DIR || "").trim(),
+    mediaMaxVideoSeconds: boundedInteger(env.CODEX_REMOTE_CONTACT_MEDIA_MAX_VIDEO_SECONDS, {
+      defaultValue: 1200,
+      min: 30,
+      max: 7200
+    }),
+    mediaMaxDownloadBytes: boundedInteger(env.CODEX_REMOTE_CONTACT_MEDIA_MAX_DOWNLOAD_MB, {
+      defaultValue: 200,
+      min: 10,
+      max: 2048
+    }) * 1024 * 1024,
+    mediaAsrLanguage: enumValue(env.CODEX_REMOTE_CONTACT_MEDIA_ASR_LANGUAGE, ["auto", "zh", "en", "ja", "ko", "yue"], "auto"),
+    mediaAsrThreads: boundedInteger(env.CODEX_REMOTE_CONTACT_MEDIA_ASR_THREADS, { defaultValue: 2, min: 1, max: 4 }),
+    mediaJobTimeoutMs: boundedInteger(env.CODEX_REMOTE_CONTACT_MEDIA_JOB_TIMEOUT_MS, {
+      defaultValue: 300_000,
+      min: 30_000,
+      max: 30 * 60_000
+    }),
+    mediaCookiesFile: String(env.CODEX_REMOTE_CONTACT_MEDIA_COOKIES_FILE || "").trim(),
+    // Phones kill the whole session on a memory spike: heavy optional work
+    // starts only while this much physical memory is available (0 disables).
+    mediaMinAvailableBytes: boundedInteger(env.CODEX_REMOTE_CONTACT_MEDIA_MIN_AVAILABLE_MB, {
+      defaultValue: 1200,
+      min: 0,
+      max: 64 * 1024
+    }) * 1024 * 1024,
+    subagentMinAvailableBytes: boundedInteger(env.CODEX_REMOTE_CONTACT_SUBAGENT_MIN_AVAILABLE_MB, {
+      defaultValue: 1000,
+      min: 0,
+      max: 64 * 1024
+    }) * 1024 * 1024,
+    mediaVoiceAutoTranscribe: env.CODEX_REMOTE_CONTACT_MEDIA_VOICE_AUTO !== "0",
+    mediaVoiceAutoMaxSeconds: boundedInteger(env.CODEX_REMOTE_CONTACT_MEDIA_VOICE_AUTO_MAX_SECONDS, {
+      defaultValue: 90,
+      min: 5,
+      max: 600
+    }),
+
+    // Hub-managed background sub-agents (long tasks and routine activities)
+    // run in their own small slot pool, never in the reply limiter.
+    subagentMaxConcurrency: boundedInteger(env.CODEX_REMOTE_CONTACT_SUBAGENT_MAX_CONCURRENCY, {
+      defaultValue: 1,
+      min: 0,
+      max: 4
+    }),
+    subagentMaxQueued: boundedInteger(env.CODEX_REMOTE_CONTACT_SUBAGENT_MAX_QUEUED, {
+      defaultValue: 2,
+      min: 0,
+      max: 8
+    }),
+    subagentTimeoutMs: boundedInteger(env.CODEX_REMOTE_CONTACT_SUBAGENT_TIMEOUT_MS, {
+      defaultValue: 20 * 60_000,
+      min: 60_000,
+      max: 2 * 60 * 60_000
+    }),
+    // The Bot really does the online parts of its daily routine through
+    // background sub-agents, and may post/comment on Qzone by itself within
+    // daily caps (privileged requests are not capped).
+    lifeActivitiesEnabled: env.CODEX_REMOTE_CONTACT_LIFE_ACTIVITIES !== "0",
+    lifeActivityDailyLimit: boundedInteger(env.CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_DAILY_LIMIT, { defaultValue: 5, min: 0, max: 24 }),
+    lifeActivityMinGapMinutes: boundedInteger(env.CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_MIN_GAP_MINUTES, { defaultValue: 60, min: 10, max: 720 }),
+    lifeQzonePostsPerDay: boundedInteger(env.CODEX_REMOTE_CONTACT_LIFE_QZONE_POSTS_PER_DAY, { defaultValue: 1, min: 0, max: 10 }),
+    lifeQzoneCommentsPerDay: boundedInteger(env.CODEX_REMOTE_CONTACT_LIFE_QZONE_COMMENTS_PER_DAY, { defaultValue: 3, min: 0, max: 30 }),
+    socialFriendRequestsPerDay: boundedInteger(env.CODEX_REMOTE_CONTACT_SOCIAL_FRIEND_REQUESTS_PER_DAY, { defaultValue: 3, min: 0, max: 10 }),
+
     sqliteTimeoutMs,
     sqliteMaxOutputBytes,
 

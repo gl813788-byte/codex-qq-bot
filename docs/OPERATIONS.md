@@ -121,6 +121,20 @@ The Hub authorizes only the original verified sender of the turn: owners may exe
 
 Commands run in Bash without shell profiles or inherited Hub/provider credentials. The deadline defaults to 30 seconds and is capped at 120 seconds, with a 64 KiB output limit; cancellation or timeout terminates the command's process group. Each call id executes once, with no automatic retry after failure. Exit code 0 still requires checking the actual task result. Use the machine's existing session manager for a requested persistent interactive program and verify startup; starting in the background does not mean a window appeared on the user's screen. Logs contain actor, tool, and outcome metadata, not command text, reasons, or output. Attachments must still enter the current output directory.
 
+### Media components, sub-agents and memory protection
+
+Watching videos and hearing voice clips need optional components; both NCC controllers show and install them:
+
+```bash
+npm run ncc -- media            # ffmpeg, dsh-video-storyboard, sherpa-onnx, models and yt-dlp
+npm run ncc -- media install    # installs into runtime/media-tools (models are SHA-256 pinned)
+npm run ncc -- media uninstall  # removes only the media directory this project created
+```
+
+Installation downloads and extracts about 200 MB of models, a heavy step: the script refuses to continue while available memory is below 1500 MB (`CODEX_REMOTE_CONTACT_MEDIA_INSTALL_MIN_MB`). On a phone, stop the Bot first (`ncc stop-hub` / `ncc stop-napcat`); the Hub detects new components within a minute without a restart. At run time every media job, sub-agent and routine activity checks available memory before starting and refuses or waits when it is short; the log operations are `media.tool`, `media.voice`, `agent.subagent` and `memory.life_activity`, and `npm run ncc -- logs --category agent` shows sub-agent state changes.
+
+Proactive friend-add needs NapCat social bridge v20 (`outgoing-friend-request-submit` in the `/health` capabilities). After updating `modules/napcat-social-bridge/`, redeploy it through NapCat's plugin flow and restart NapCat; the restart may require a new QR login, so do it while idle and with the owner's agreement. With an older bridge, `/加好友` answers that it is unsupported instead of reporting success. Bridge routes accept only direct loopback calls and refuse any request carrying forwarding headers such as `X-Forwarded-For` or `CF-Connecting-IP`; for a remote QR login, never tunnel the whole port 6099 — forward only the WebUI paths and close the tunnel right after login.
+
 ## Manual AI task center
 
 QQ `/AI任务` and both NCC surfaces read the same task catalog and execute through a loopback-only management API:

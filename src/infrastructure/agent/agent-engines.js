@@ -17,6 +17,8 @@ const engines = Object.freeze({
     // from the Codex catalog.
     reportsQuota: true,
     modelCatalog: true,
+    // Native image generation, saved under ~/.codex/generated_images/<thread>.
+    imageGeneration: true,
     selectModel: ({ ai } = {}) => ai?.model || null,
     selectReasoningEffort: ({ ai } = {}) => ai?.reasoningEffort || null
   }),
@@ -27,6 +29,7 @@ const engines = Object.freeze({
     runtime: "claude-code-stream-json",
     reportsQuota: false,
     modelCatalog: false,
+    imageGeneration: false,
     selectModel: ({ claudeModel } = {}) => claudeModel || null,
     selectReasoningEffort: ({ ai, claudeReasoningEffort } = {}) => claudeReasoningEffort || ai?.reasoningEffort || null
   })
@@ -54,7 +57,8 @@ export function describeAgentEngine(id, settings = {}) {
     model: engine.selectModel(settings),
     reasoningEffort: engine.selectReasoningEffort(settings),
     reportsQuota: engine.reportsQuota,
-    modelCatalog: engine.modelCatalog
+    modelCatalog: engine.modelCatalog,
+    imageGeneration: engine.imageGeneration
   };
 }
 

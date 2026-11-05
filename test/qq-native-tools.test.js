@@ -29,7 +29,7 @@ test("native image recall remains bound to the original conversation and preserv
   assert.deepEqual(await dispatch(call), result);
   assert.equal(inspections, 1);
   const spec = buildQqNativeToolSpecs().find((item) => item.name === "qq_context").tools.find((item) => item.name === "images");
-  assert.deepEqual(spec.inputSchema.properties.action.enum, ["list", "inspect"]);
+  assert.deepEqual(spec.inputSchema.properties.action.enum, ["list", "inspect", "use"]);
   assert.deepEqual(spec.inputSchema.properties.mode.enum, ["original", "compressed"]);
   assert.deepEqual(buildQqNativeToolSpecs({ toolsEnabled: false }), []);
 });
@@ -52,7 +52,7 @@ test("native QQ tools expose owner runtime controls only to verified owners", ()
   assert.deepEqual(sessionSchema.required, ["action"]);
   const socialSchema = owner.find((entry) => entry.name === "qq_social").tools[0].inputSchema;
   assert.deepEqual(socialSchema.required, ["action"]);
-  assert.equal(socialSchema.properties.action.enum.includes("add_friend"), false);
+  assert.equal(socialSchema.properties.action.enum.includes("add_friend"), true);
   assert.equal(socialSchema.properties.action.enum.includes("join_group"), true);
 
   const withRobots = buildQqNativeToolSpecs({ canRecordRobotProfiles: true });
@@ -192,7 +192,8 @@ test("native tool arguments map to existing validated Hub commands", () => {
   assert.equal(mapQqNativeToolToCommand("qq_runtime", "configure", { command: "思考强度 high" }, { event: { isBotAdmin: true } }), "/思考强度 high");
   assert.equal(mapQqNativeToolToCommand("qq_social", "act", { action: "like", target: "发送者", value: "2" }), "/点赞 发送者 2");
   assert.equal(mapQqNativeToolToCommand("qq_social", "act", { action: "requests", target: "#abc123", value: "同意" }), "/申请 同意 #abc123");
-  assert.equal(mapQqNativeToolToCommand("qq_social", "act", { action: "add_friend", target: "123456", value: "" }), "");
+  assert.equal(mapQqNativeToolToCommand("qq_social", "act", { action: "add_friend", target: "123456", value: "群里聊过" }), "/加好友 123456 群里聊过");
+  assert.equal(mapQqNativeToolToCommand("qq_social", "act", { action: "add_friend", target: "发送者", value: "" }), "");
 });
 
 test("native dispatcher binds the original event and deduplicates writes by call id", async () => {

@@ -31,6 +31,15 @@ environment + runtime paths
 | `src/app/qq-codex-runtime-settings.js` | Native Codex turn-setting command policy | changing reasoning summary/personality/service-tier validation or persistence actions |
 | `src/app/qq-file-agent-turn.js` | Owner/administrator/public file-Agent capability policy | changing file-task roots, sandboxing, administrator destructive-operation refusal, or task instructions |
 | `src/app/qq-host-command.js` | Host permission requests per command | original sender authorization, isolated command environment, deadlines and results, shared by both engines |
+| `src/qq-media/` + `src/app/qq-media-tool.js` + `src/app/qq-media-services.js` | Watching videos, hearing sound, browsing Bilibili | Media candidates and selectors, the video-platform allowlist, optional-component detection, the single-slot media queue and memory check, yt-dlp/storyboard/transcription child arguments, the read-only Bilibili client (WBI signing), QQ video and voice retrieval, and `qq_media` visual results |
+| `scripts/media/` | Optional media installation and the transcription child | `ncc media` install checks and the SenseVoice/VAD/CED worker input/output contract |
+| `src/app/qq-voice-transcription.js` | Automatic voice transcription | How many clips are heard before routing, deadlines, `[语音]` marker replacement |
+| `src/qq-human-action-stats.js` | Human action rates | Reaction, poke, recall, share and other counters, half-life and summaries; the action plan lives in `src/qq-human-behavior.js` |
+| `src/qq-subagents.js` + `src/app/qq-subagent-turn.js` + `src/app/qq-subagent-tool.js` | Background sub-agents | Slots and queueing, mid-run messages and follow-ups, cancellation, visibility, the sub-agent tool subset, prompts and report prompt, `qq_agent.manage` |
+| `src/qq-bot-life-activities.js` | The routine in action | Due-activity selection, daily runs and social caps, activity task prompts, real experience records and context |
+| `src/qq-bot-drawings.js` + `src/app/qq-drawings-tool.js` | The Bot's drawing library | Drawing index and conversation visibility, content-addressed storage and pruning, the drawing half of `qq_context.images` (the picture tool itself is `src/app/qq-image-memory-tool.js`) |
+| `src/app/qq-card-tools.js` | Cards and special messages | Music-card search, dice, rock-paper-scissors, contact shares and the per-turn cap |
+| `src/host-memory.js` | Available-memory checks | MemAvailable reading, memory gates and command weight classes |
 | `src/channels/http/hub-http-server.js` | HTTP request dispatch and safe error boundary | changing API/asset routing or OneBot webhook limiting |
 | `src/channels/qq/` | Single QQ and OneBot message transport boundary | parsing or validating incoming QQ events |
 | `src/config/` | Environment normalization and runtime defaults | adding an environment variable or changing a deployment default |

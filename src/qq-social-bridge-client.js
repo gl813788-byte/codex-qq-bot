@@ -60,7 +60,9 @@ export function createQqSocialBridgeClient({
     request,
     listPendingRequests: ({ count = 100 } = {}) => request("pending-requests", { count }),
     handleRequest: (payload) => request("handle-request", payload),
-    joinGroup: (payload) => request("join-group", payload)
+    joinGroup: (payload) => request("join-group", payload),
+    inspectFriend: (payload) => request("inspect-friend", payload),
+    addFriend: (payload) => request("add-friend", payload)
   };
 }
 

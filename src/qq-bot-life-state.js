@@ -1,3 +1,5 @@
+import { normalizeQqBotDrawings } from "./qq-bot-drawings.js";
+
 // The Bot's own continuing state between turns: a short mood that follows it
 // across conversations, the first-person inner thought it formed in each
 // conversation (the structured-output equivalent of DeepSeek's in-character
@@ -19,7 +21,7 @@ const MAX_ROUTINE_SEGMENTS = 12;
 export const QQ_BOT_ROUTINE_DAY_START_HOUR = 5;
 
 export function createEmptyQqBotLifeState() {
-  return { version: QQ_BOT_LIFE_STATE_VERSION, mood: null, thoughts: [], routine: null };
+  return { version: QQ_BOT_LIFE_STATE_VERSION, mood: null, thoughts: [], routine: null, experiences: [], activity: null, drawings: [] };
 }
 
 export function normalizeQqBotLifeState(value = {}) {
@@ -31,6 +33,9 @@ export function normalizeQqBotLifeState(value = {}) {
     .filter(Boolean)
     .slice(-MAX_THOUGHTS);
   state.routine = normalizeQqBotRoutine(raw.routine);
+  state.experiences = normalizeQqLifeExperiences(raw.experiences);
+  state.activity = raw.activity && typeof raw.activity === "object" ? normalizeQqLifeActivityLedger(raw.activity) : null;
+  state.drawings = normalizeQqBotDrawings(raw.drawings);
   return state;
 }
 
@@ -140,12 +145,62 @@ export function normalizeQqBotRoutine(value) {
       const end = normalizeClock(segment?.end);
       const activity = compact(segment?.activity, 40);
       if (!start || !end || !activity || start === end) return null;
-      return { start, end, activity, state: compact(segment?.state, 20) };
+      const plan = compact(segment?.plan, 60);
+      const kind = plan ? normalizeQqLifeActivityKind(segment?.kind) : "none";
+      return { start, end, activity, state: compact(segment?.state, 20), ...(plan && kind !== "none" ? { plan, kind } : {}) };
     })
     .filter(Boolean)
     .slice(0, MAX_ROUTINE_SEGMENTS);
   if (!segments.length) return null;
   return { date, generatedAt: String(value.generatedAt || "") || null, segments };
+}
+
+export const QQ_LIFE_ACTIVITY_KINDS = Object.freeze(["none", "video", "browse", "learn", "qzone", "post", "draw"]);
+const MAX_EXPERIENCES = 40;
+const EXPERIENCE_DAYS = 4;
+const CONTEXT_HOURS = 14;
+
+export function normalizeQqLifeActivityKind(value) {
+  const kind = String(value || "").trim().toLowerCase();
+  return QQ_LIFE_ACTIVITY_KINDS.includes(kind) ? kind : "none";
+}
+
+export function normalizeQqLifeExperiences(value, { now = Date.now() } = {}) {
+  const cutoff = now - EXPERIENCE_DAYS * 86_400_000;
+  return (Array.isArray(value) ? value : [])
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const at = String(entry.at || "");
+      const time = Date.parse(at);
+      const summary = compact(entry.summary, 80);
+      if (!Number.isFinite(time) || time < cutoff || !summary) return null;
+      return {
+        id: compact(entry.id, 24) || `exp-${time.toString(36)}`,
+        at,
+        kind: normalizeQqLifeActivityKind(entry.kind),
+        activity: compact(entry.activity, 40),
+        summary,
+        detail: compact(entry.detail, 900),
+        sharedScopes: (Array.isArray(entry.sharedScopes) ? entry.sharedScopes : []).map(String).filter(Boolean).slice(-12)
+      };
+    })
+    .filter(Boolean)
+    .slice(-MAX_EXPERIENCES);
+}
+
+export function normalizeQqLifeActivityLedger(value, { now = Date.now(), timeZone = "Asia/Shanghai" } = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  const day = getQqBotRoutineDay(now, timeZone);
+  const sameDay = raw.date === day;
+  return {
+    date: day,
+    runs: sameDay ? Math.max(0, Math.floor(Number(raw.runs) || 0)) : 0,
+    lastAt: String(raw.lastAt || "") || null,
+    doneSegments: sameDay && Array.isArray(raw.doneSegments) ? raw.doneSegments.map(String).filter((item) => /^\d{2}:\d{2}$/.test(item)).slice(-16) : [],
+    qzonePosts: sameDay ? Math.max(0, Math.floor(Number(raw.qzonePosts) || 0)) : 0,
+    qzoneComments: sameDay ? Math.max(0, Math.floor(Number(raw.qzoneComments) || 0)) : 0,
+    friendRequests: sameDay ? Math.max(0, Math.floor(Number(raw.friendRequests) || 0)) : 0
+  };
 }
 
 export function getQqBotLocalHour(now = Date.now(), timeZone = "Asia/Shanghai") {

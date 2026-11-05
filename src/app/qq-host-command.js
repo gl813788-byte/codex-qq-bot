@@ -1,3 +1,4 @@
+import { classifyHostCommandMemoryNeed, formatMegabytes } from "../host-memory.js";
 import { isAbsolute } from "node:path";
 import { runProcess } from "../process-runner.js";
 import { baseAgentRuntimeEnvKeys, pickAgentChildEnv } from "../infrastructure/agent/agent-child-env.js";
@@ -10,7 +11,10 @@ export async function executeQqHostCommand(args, {
   projectDir,
   signal,
   baseEnv = process.env,
-  execute = runProcess
+  execute = runProcess,
+  // Optional async () => available physical memory in bytes; on phones a
+  // memory spike kills the whole session, so short memory blocks the command.
+  readAvailableMemory = null
 } = {}) {
   if (event?.isOwner !== true || !event.senderId) {
     return { ok: false, error: event?.isBotAdmin
@@ -32,6 +36,16 @@ export async function executeQqHostCommand(args, {
   const requestedTimeout = Number(args?.timeoutMs ?? 30_000);
   if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) {
     return { ok: false, error: "timeoutMs 必须是正数。" };
+  }
+  if (typeof readAvailableMemory === "function") {
+    const need = classifyHostCommandMemoryNeed(command);
+    const available = await readAvailableMemory().catch(() => 0);
+    if (available > 0 && available < need.minimumBytes) {
+      return {
+        ok: false,
+        error: `内存保护：本机可用内存 ${formatMegabytes(available)}，这条${need.kind === "parallel-test" ? "并行测试" : need.kind === "heavy" ? "重负载" : ""}命令至少需要 ${formatMegabytes(need.minimumBytes)}，已在执行前阻止（内存突增会让手机杀掉整个会话）。如实告诉主人，等内存释放或换更轻的做法（例如 node --test --test-concurrency=1 只跑单个文件）。`
+      };
+    }
   }
   // Do not inherit Hub/provider credentials or execute interactive shell profiles.
   const allowedKeys = new Set(baseAgentRuntimeEnvKeys.filter((key) => key !== "NODE_OPTIONS"));
