@@ -40,7 +40,7 @@ export function collectQqImageMemoryCandidates(entries = [], { event = {}, scope
       candidates.push({
         selector: `image-${createHash("sha256").update(`${scopeId}\0${key}`).digest("hex").slice(0, 20)}`,
         image,
-        origin: source.origin || "前文消息",
+        origin: image.forwardLabel ? `${source.origin || "前文消息"}里的聊天记录第 ${image.forwardLabel}` : source.origin || "前文消息",
         sender: String(source.senderLabel || source.senderName || source.sender || "群友").slice(0, 80),
         messageId: String(source.messageId || "").slice(0, 120),
         at: source.at || null,
@@ -152,6 +152,8 @@ function snapshotQqContextImage(image) {
     url,
     fileSize: normalizeFileSize(image.fileSize),
     summary: String(image.summary || raw.summary || "").slice(0, maxSummaryLength),
+    // Pictures expanded from a forwarded chat record keep which line sent them.
+    ...(image.forwardLabel ? { forwardLabel: String(image.forwardLabel).slice(0, 80) } : {}),
     ...(Object.keys(raw).length > 0 ? { raw } : {})
   };
 }

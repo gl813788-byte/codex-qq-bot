@@ -53,7 +53,13 @@ On this configured machine:
   stack was up; then check only the changed files one at a time, and run the
   full serial suite while the stack is stopped (ask first otherwise). The
   limit is sudden memory spikes, not process ownership: starting services
-  (`ncc all`, `ncc hub`, `ncc napcat`) from an agent session is fine.
+  (`ncc all`, `ncc hub`, `ncc napcat`) from an agent session is fine. Local
+  media work (ASR/storyboard/yt-dlp runs, model download and extraction) is a
+  spike too and has killed the session: never run it while the stack is up.
+  On this machine a Claude Code PreToolUse hook
+  (`~/.claude/hooks/memory-guard.sh`) refuses Bash commands when MemAvailable
+  is below 500 MB, heavy commands below 1500 MB and parallel test runs below
+  3500 MB; check `ncc status` after any heavy step.
 - Interactive Codex CLI: `~/.codex/config.toml` sets
   `features.daemon_auto_start = false`. Its shared app-server daemon socket
   path exceeds the Unix socket limit under PRoot, and PRoot's remap is private
@@ -114,6 +120,13 @@ subsystems belong in focused modules.
 | Bot mood, inner thoughts, daily routine | `src/qq-bot-life-state.js`, `src/qq-bot-daily-routine.js` |
 | Core personality, affinity, `/好感度` | `src/qq-bot-personality.js`, `src/qq-affinity-command.js` |
 | Character-card import/export (V1/V2/V3, PNG, CHARX, text) | `src/qq-character-card.js` |
+| Videos, voice, Bilibili (`qq_media`) and the optional media components | `src/qq-media/`, `src/app/qq-media-tool.js`, `src/app/qq-media-services.js`, `scripts/media/` |
+| Voice messages heard before routing | `src/app/qq-voice-transcription.js` |
+| Human action rates and the per-turn action plan | `src/qq-human-action-stats.js`, `src/qq-human-behavior.js` |
+| Background sub-agents (`qq_agent`) | `src/qq-subagents.js`, `src/app/qq-subagent-turn.js`, `src/app/qq-subagent-tool.js` |
+| Routine activities and real experiences | `src/qq-bot-life-activities.js` |
+| Cards, dice, rock-paper-scissors, contact shares | `src/app/qq-card-tools.js` |
+| Available-memory gates | `src/host-memory.js` |
 | The Bot's own scoped language habits | `src/qq-bot-language-habits.js` |
 | Subscription (Codex/Claude) interest judgments | `src/infrastructure/agent/subscription-model-task.js` via `runQqAgentBackgroundTask` |
 | Dashboard advanced-settings validation | `src/dashboard-bot-settings.js`, `src/dashboard-admin-settings.js` |
@@ -235,6 +248,44 @@ refactor with a behavior change.
   safe-fetch policy, into the task output directory; keep the signature/size
   checks and the inspect-before-send guidance. Sending still goes through
   validated structured attachments.
+- `qq_media` (video/audio/bilibili) is bound to the original conversation.
+  Sources are turn selectors (`video-N`/`audio-N` from the message, quote and
+  forwarded records), `bili-N` results from this turn, or Bilibili/Douyin/
+  Kuaishou/YouTube links that appeared in recent messages; never arbitrary
+  hosts (yt-dlp must not reach loopback). One media job runs at a time (two
+  queued), every child has a deadline and output cap, and a job is refused
+  below `CODEX_REMOTE_CONTACT_MEDIA_MIN_AVAILABLE_MB`. Storyboard sheets are
+  revalidated images inside the task workspace; manifests hide local paths.
+  Missing components make the tool say "not installed", never pretend.
+- Voice messages that trigger the Bot are transcribed before routing (two
+  clips, 90 s, one deadline); only a heard voice lifts the old "voice ignored"
+  gate. NapCat `get_record` converts SILK; transcripts are untrusted material.
+- `qq_agent.manage` sub-agents run on a separate turn runner and limiter, are
+  never a scope's active generation (no fusion into them), cannot spawn
+  sub-agents, post in QQ, change settings or use host commands, and are
+  visible only to the opening scope plus owner/administrators. The finished
+  report becomes one non-proactive report turn in the original scope after it
+  is idle, with copied attachments; jobs wait for
+  `CODEX_REMOTE_CONTACT_SUBAGENT_MIN_AVAILABLE_MB` and live in memory only.
+- Routine segments may carry `kind` + `plan`; while the Bot is idle and
+  memory allows, one life sub-agent per segment really does it (daily runs and
+  gap bounded) and records a first-person experience shown in later context.
+  The Bot's own Qzone posts/comments and ordinary friend requests are capped
+  per day in `data/qq-bot-life.json`; owner/administrator requests are not.
+  `/发动态 … | 图片=输出` attaches only pictures from this turn's output
+  directory (including this thread's newly generated images), revalidated.
+- Drawings: with an engine whose `imageGeneration` capability is true,
+  routines may contain `kind=draw`; the life sub-agent draws and the Hub
+  stores that turn's generated pictures in `data/qq-bot-drawings/` (index in
+  `data/qq-bot-life.json`, 30 max, unreferenced files pruned). Chat drawings
+  are saved scoped to their conversation; `qq_context.images` serves both
+  conversation images (`image-…`) and drawings (`d-…`, only those visible in
+  the original conversation; background turns reach drawings only), and its
+  `use` action copies either into the turn's output directory.
+- The per-turn action plan (react, reaction-only, poke back, watch, listen,
+  favorite) follows measured human rates from `data/qq-human-actions.json`
+  (anonymous, per scope, the Bot's own actions excluded) or defaults; it is a
+  suggestion, and actions still count only after tool success.
 - `qq_sticker.manage` searches the merged sticker catalog on demand (the
   prompt carries only its size) and returns stable `#ref`s derived from the
   label store's identity; `inspect` returns real visual input in the same tool
@@ -326,7 +377,9 @@ refactor with a behavior change.
   `memory.avatar_refresh`, `memory.avatar_features`,
   `memory.knowledge_image`, `memory.image_prune`, `memory.bot_state`,
   `memory.bot_routine`, `memory.relationship`, `memory.language_habit`,
-  `memory.persona_self_edit` and `interest.model_test`.
+  `memory.persona_self_edit`, `interest.model_test`, `media.tool`,
+  `media.voice`, `agent.subagent`, `memory.life_activity`,
+  `social.qzone_self`, `social.card`, `friend.add` and `memory.bot_drawing`.
   Language-statistics logs are low-noise checkpoints, contain counts/ratios rather than copied chat
   or inferred meaning, and fire when frequent candidates change or every 25
   text messages. Preserve stable English `message` values for JSON/API
@@ -520,6 +573,7 @@ Common machine-controller intent:
 | Start Hub only | `ncc hub` |
 | Show one-shot startup resource profile | `ncc resources` |
 | Avatar memory status / refresh / describe | `ncc avatars` / `ncc avatars refresh [GROUP]` / `ncc avatars describe [GROUP] [--all]` |
+| Media components status / install | `ncc media` / `ncc media install` (heavy: stop the Bot first on a phone) |
 | Logs | `ncc logs` or `ncc logs --compact` |
 | One engine's agent logs | `ncc logs --category agent --engine claude` |
 | Stop Hub | `ncc stop-hub` |
@@ -560,8 +614,16 @@ directly in separate screen sessions, while exact PID/PGID state supports bounde
 cleanup. Verify that QQ, Xvfb, and any turn-scoped Codex or Claude children are
 gone after a diagnostic stop.
 
-Proactive friend-add is intentionally unavailable: the Bot tool schema and the
-NapCat plugin must not expose `add_friend`, `/add-friend`, or `/inspect-friend`.
+Proactive friend-add uses social bridge v20 routes `/inspect-friend` and
+`/add-friend` (`/加好友`, `qq_social.act add_friend`). Ordinary turns may only
+add someone who appeared in the conversation, within
+`CODEX_REMOTE_CONTACT_SOCIAL_FRIEND_REQUESTS_PER_DAY`; the friend list is
+checked first, one native request is submitted, and the reply says a request
+was sent, never that a friendship exists. Deploying the bridge needs a NapCat
+restart (possibly a QR login): ask the owner first. Bridge routes are
+unauthenticated loopback endpoints that also refuse forwarded requests; never
+expose port 6099 through a tunnel or proxy (a remote WebUI login must forward
+only WebUI paths and close right after).
 Incoming friend requests, group invitations, and group membership requests use
 social bridge v19 or newer. `/health` must report the four
 `incoming-*-request-*` capabilities. `/申请 同步` reads the bridge's pending

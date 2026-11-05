@@ -46,17 +46,34 @@ test("parses text, image-only and mixed QQ Zone publish commands", () => {
   assert.deepEqual(parseQqZonePublishCommand("/发动态 今天天气很好"), {
     content: "今天天气很好",
     useCurrentImages: false,
+    useOutputImages: false,
     invalidImageSelector: ""
   });
   assert.deepEqual(parseQqZonePublishCommand("发动态 图片=当前"), {
     content: "",
     useCurrentImages: true,
+    useOutputImages: false,
     invalidImageSelector: ""
   });
   assert.deepEqual(parseQqZonePublishCommand("发动态 今天天气很好 | 图片=引用"), {
     content: "今天天气很好",
     useCurrentImages: true,
+    useOutputImages: false,
     invalidImageSelector: ""
   });
   assert.equal(parseQqZonePublishCommand("发动态 图片=/etc/passwd").invalidImageSelector, "/etc/passwd");
+});
+
+test("Qzone posts can attach the Bot's own pictures from this turn", async () => {
+  const { parseQqZonePublishCommand } = await import("../src/qq-social-command.js");
+  const { mapQqNativeToolToCommand } = await import("../src/infrastructure/codex/qq-native-tools.js");
+  assert.deepEqual(parseQqZonePublishCommand("发动态 画好啦 | 图片=输出"), {
+    content: "画好啦",
+    useCurrentImages: false,
+    useOutputImages: true,
+    invalidImageSelector: ""
+  });
+  assert.equal(parseQqZonePublishCommand("发动态 x | 图片=/etc/passwd").invalidImageSelector, "/etc/passwd");
+  assert.equal(mapQqNativeToolToCommand("qq_social", "act", { action: "qzone_publish", target: "输出", value: "趴着的猫" }), "/发动态 趴着的猫 | 图片=输出");
+  assert.equal(mapQqNativeToolToCommand("qq_social", "act", { action: "qzone_publish", target: "", value: "今天好困" }), "/发动态 今天好困");
 });

@@ -12,7 +12,8 @@ export async function fetchWithUrlPolicy(input, options = {}, {
   mode = "strict",
   maxRedirects = 4,
   resolveHostname = defaultResolveHostname,
-  fetchImpl = fetch
+  fetchImpl = fetch,
+  onRedirect = null
 } = {}) {
   let currentUrl = new URL(String(input || ""));
   const allowedOrigins = new Set(allowedPrivateOrigins.map(normalizeOrigin).filter(Boolean));
@@ -31,6 +32,9 @@ export async function fetchWithUrlPolicy(input, options = {}, {
     if (!location) return response;
     await response.body?.cancel?.().catch?.(() => undefined);
     currentUrl = new URL(location, currentUrl);
+    // Observers learn each hop (e.g. a short link's target); every hop is
+    // still checked by the policy before it is fetched.
+    if (typeof onRedirect === "function") onRedirect(currentUrl.href);
   }
   throw createUrlPolicyError("URL_REDIRECT_LIMIT", "Too many redirects");
 }

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { access, copyFile, mkdir, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -68,7 +68,7 @@ import {
 } from "./qq-file-image-task-intent.js";
 import { resolveAllowedQqMarkerPath, resolveQqMarkerPath } from "./qq-output-policy.js";
 import { resolveQqReplyFileAttachments } from "./qq-reply-files.js";
-import { parseQqAgentOutputWithAttachmentImport } from "./infrastructure/codex/qq-agent-attachments.js";
+import { importRecentCodexGeneratedImages, parseQqAgentOutputWithAttachmentImport } from "./infrastructure/codex/qq-agent-attachments.js";
 import { createQqZoneClient } from "./qq-qzone.js";
 import {
   CLAUDE_INTEREST_MODEL_SUGGESTIONS,
@@ -307,12 +307,15 @@ import {
 import {
   analyzeQqHumanChatStyle,
   applyQqHumanReplyGuard,
+  buildQqHumanActionPlan,
   buildQqHumanBehaviorPlan,
+  formatQqHumanActionContext,
   formatQqHumanBehaviorContext,
   getQqAdaptiveStickerChance,
   getQqAdaptiveBubbleDelayMs,
   getQqTypingDelayMs,
-  isQqSilentReply
+  isQqSilentReply,
+  isQqStickerStyleMessage
 } from "./qq-human-behavior.js";
 import {
   backfillQqAdaptiveInterruptionLearning,
@@ -427,7 +430,8 @@ import { detectClaudeConnection, isExecutableOnPath } from "./infrastructure/cla
 import {
   AGENT_LOG_CATEGORY,
   describeAgentEngine,
-  formatAgentEngineSummary
+  formatAgentEngineSummary,
+  getAgentEngine
 } from "./infrastructure/agent/agent-engines.js";
 import { createAgentCliVersionProbe } from "./infrastructure/agent/agent-cli-version.js";
 import {
@@ -478,7 +482,52 @@ import {
 } from "./unified-memory/qq-person-memory.js";
 import { createWebSearch, formatWebSearchProviderName } from "./web-search.js";
 import { isSupportedImageContentType, readResponseJson, writeResponseBodyToFile } from "./bounded-stream.js";
-import { runJsonProcess } from "./process-runner.js";
+import { createQqMediaRuntime } from "./qq-media/media-runtime.js";
+import { collectQqMediaCandidates, formatQqMediaCandidates, isQqWatchableVideoUrl } from "./qq-media/media-candidates.js";
+import { createQqMediaServices } from "./app/qq-media-services.js";
+import { hasQqHeardVoice, transcribeQqEventVoices } from "./app/qq-voice-transcription.js";
+import { createQqSubagentManager } from "./qq-subagents.js";
+import { executeQqSubagentTool } from "./app/qq-subagent-tool.js";
+import { createNeteaseMusicSearch } from "./app/qq-card-tools.js";
+import {
+  buildQqSubagentTurn,
+  filterQqSubagentToolSpecs,
+  formatQqSubagentReportPrompt,
+  parseQqSubagentOutput,
+  qqSubagentOutputSchema
+} from "./app/qq-subagent-turn.js";
+import {
+  buildQqLifeActivityTask,
+  consumeQqLifeSocialAllowance,
+  formatQqLifeExperienceContext,
+  formatQqLifeExperienceDetail,
+  markQqLifeActivityStarted,
+  recordQqLifeExperience,
+  selectQqLifeActivityDue
+} from "./qq-bot-life-activities.js";
+import { runOutsideAgentToolCall } from "./infrastructure/agent/agent-tool-context.js";
+import {
+  formatQqBotDrawingsContext,
+  markQqBotDrawingPosted,
+  parseQqBotDrawingIdFromPath,
+  pruneQqBotDrawingFiles,
+  recordQqBotDrawing,
+  storeQqBotDrawingFile
+} from "./qq-bot-drawings.js";
+import { createHostMemoryGate, formatMegabytes, readAvailableMemoryBytes } from "./host-memory.js";
+import {
+  classifyQqHumanMessageActions,
+  normalizeQqHumanActionStats,
+  recordQqHumanAction,
+  summarizeQqHumanActionRates
+} from "./qq-human-action-stats.js";
+import {
+  executeQqMediaAudioTool,
+  executeQqMediaBilibiliTool,
+  executeQqMediaVideoTool,
+  getQqMediaTurnState
+} from "./app/qq-media-tool.js";
+import { runJsonProcess, runProcess } from "./process-runner.js";
 import { createDashboardAssetHandler } from "./dashboard-assets.js";
 import { applyDashboardBotSettings, readDashboardBotSettings, readDashboardInterestSettings } from "./dashboard-bot-settings.js";
 import {
@@ -555,6 +604,8 @@ const {
   qqPersonasPath,
   qqSelfPersonaPath,
   qqBotLifePath,
+  qqHumanActionsPath,
+  qqBotDrawingsDir,
   qqPersonalityPath,
   interestAgentWorkspaceDir,
   qqConversationMemoryPath,
@@ -644,6 +695,26 @@ const {
   qqBubbleMaxChars,
   qqBubbleMaxCount,
   tavilyApiKey,
+  mediaToolsDir,
+  mediaMaxVideoSeconds,
+  mediaMaxDownloadBytes,
+  mediaAsrLanguage,
+  mediaAsrThreads,
+  mediaJobTimeoutMs,
+  mediaCookiesFile,
+  mediaMinAvailableBytes,
+  subagentMinAvailableBytes,
+  mediaVoiceAutoTranscribe,
+  mediaVoiceAutoMaxSeconds,
+  subagentMaxConcurrency,
+  subagentMaxQueued,
+  subagentTimeoutMs,
+  lifeActivitiesEnabled,
+  lifeActivityDailyLimit,
+  lifeActivityMinGapMinutes,
+  lifeQzonePostsPerDay,
+  lifeQzoneCommentsPerDay,
+  socialFriendRequestsPerDay,
   sqliteTimeoutMs,
   sqliteMaxOutputBytes,
   hubPort,
@@ -917,6 +988,31 @@ const qqAvatarRefreshQueue = createQqAvatarRefreshQueue({
 let qqConversationMemoryLoadedSafely = false;
 const qqInterestVisionCache = createQqInterestVisionCapabilityCache();
 const qqZone = createQqZoneClient({ callOneBotAction });
+// Optional local media understanding (videos, voice, sound); missing
+// components make the tools answer "not installed" instead of failing.
+const qqMediaRuntime = createQqMediaRuntime({
+  toolsDir: mediaToolsDir || join(projectDir, "runtime", "media-tools"),
+  workerScript: join(projectDir, "scripts", "media", "qq-media-worker.mjs"),
+  cookiesFile: mediaCookiesFile,
+  maxVideoSeconds: mediaMaxVideoSeconds,
+  maxDownloadBytes: mediaMaxDownloadBytes,
+  asrLanguage: mediaAsrLanguage,
+  asrThreads: mediaAsrThreads,
+  jobTimeoutMs: mediaJobTimeoutMs,
+  checkMemory: createHostMemoryGate({ minAvailableBytes: mediaMinAvailableBytes }),
+  runProcess
+});
+const checkQqSubagentMemory = createHostMemoryGate({ minAvailableBytes: subagentMinAvailableBytes });
+const qqMediaServices = createQqMediaServices({
+  fetchWithUrlPolicy,
+  safeFetchMode,
+  readResponseJson,
+  writeResponseBodyToFile,
+  callOneBotAction: (endpoint, payload) => callOneBotAction(endpoint, payload),
+  maxVideoBytes: mediaMaxDownloadBytes,
+  userAgent: userAgentName,
+  mergeSignals: (...signals) => mergeAbortSignals(...signals)
+});
 const qqSocialBridge = createQqSocialBridgeClient({
   baseUrl: qqSocialExtensionBase,
   timeoutMs: oneBotRequestTimeoutMs
@@ -2607,6 +2703,66 @@ async function saveQqBotLife() {
   return qqBotLifeWriter.schedule();
 }
 
+// Anonymous per-scope counts of what people do besides typing; low-stakes,
+// so writes are coalesced for half a minute.
+let qqHumanActionsLoadedSafely = true;
+
+async function loadQqHumanActionStats() {
+  try {
+    state.qq.humanActionStats = normalizeQqHumanActionStats(JSON.parse(await readFile(qqHumanActionsPath, "utf8")));
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      qqHumanActionsLoadedSafely = false;
+      logger.warn("Unable to load QQ human action statistics", { error }, "learning");
+    }
+  }
+}
+
+const qqHumanActionsWriter = createCoalescingWriter(async () => {
+  if (!qqHumanActionsLoadedSafely) return;
+  await serializeFileOperation(qqHumanActionsPath, async () => {
+    await writeJsonAtomically(qqHumanActionsPath, { ...state.qq.humanActionStats, updatedAt: new Date().toISOString() });
+  });
+}, { delayMs: 30_000 });
+
+function observeQqHumanAction(scopeId, kinds, { emojiIds = [] } = {}) {
+  let changed = false;
+  for (const kind of [kinds].flat()) {
+    const result = recordQqHumanAction(state.qq.humanActionStats, { scopeId, kind, emojiIds: kind === "reactions" ? emojiIds : [] });
+    state.qq.humanActionStats = result.stats;
+    changed ||= result.changed;
+  }
+  if (changed) qqHumanActionsWriter.schedule().catch(() => undefined);
+}
+
+function observeQqHumanMessageActions(event) {
+  if (!event || event.qqColdProactive || event.qqPrivateProactive || isQqPokeEvent(event)) return;
+  if (event.isSelf || String(event.senderId || "") === String(event.selfId || state.maintenance?.oneBot?.selfId || "")) return;
+  const scopeId = getQqMemoryScopeId(event);
+  if (!scopeId) return;
+  observeQqHumanAction(scopeId, classifyQqHumanMessageActions(event, { isSticker: (value) => isQqStickerStyleMessage(value) }));
+}
+
+// Reactions, pokes and recalls arrive as notices from people in allowed
+// groups; the Bot's own actions are never counted as human habits.
+function observeQqHumanNotice(payload = {}) {
+  const groupId = normalizeQqIdentifier(payload.group_id);
+  if (!groupId || !state.qq.allowedGroups.includes(groupId)) return false;
+  const selfId = String(payload.self_id || state.maintenance?.oneBot?.selfId || "");
+  const actorId = String(payload.operator_id || payload.user_id || "");
+  if (!actorId || actorId === selfId) return false;
+  if (payload.notice_type === "group_msg_emoji_like" && payload.is_add !== false) {
+    const emojiIds = (Array.isArray(payload.likes) ? payload.likes : []).map((like) => String(like?.emoji_id || "")).filter(Boolean).slice(0, 3);
+    observeQqHumanAction(groupId, "reactions", { emojiIds });
+    return true;
+  }
+  if (payload.notice_type === "group_recall" && String(payload.operator_id || "") === String(payload.user_id || "")) {
+    observeQqHumanAction(groupId, "recalls");
+    return true;
+  }
+  return false;
+}
+
 const qqPersonalityWriter = createCoalescingWriter(async () => {
   if (!qqPersonalityLoadedSafely) return;
   await serializeFileOperation(qqPersonalityPath, async () => {
@@ -2931,7 +3087,8 @@ async function refreshQqBotRoutine() {
     }).slice(0, 2400),
     assistantName: state.qq.selfPersona.account.nickname || state.qq.selfPersona.persona.name || assistantName,
     now,
-    previousRoutine: state.qq.botLife.routine
+    previousRoutine: state.qq.botLife.routine,
+    canDraw: qqAgentCanDraw && lifeActivitiesEnabled
   }), {
     cwd: codexTmpDir,
     taskType: CODEX_TASK_TYPES.QQ_SELF_PERSONA,
@@ -4912,6 +5069,11 @@ function wakeQqPeriodicScheduler(reason) {
 
 async function runQqPeriodicChecks({ reason = "interval" } = {}) {
   if (shuttingDown) return;
+  await maybeStartQqLifeActivity().catch((error) => logger.warn("QQ bot life activity could not start", {
+    operation: "memory.life_activity",
+    outcome: "failed",
+    error
+  }, "learning"));
   await runQqTimedAdaptiveStyleReviews();
   maybeScheduleQqSelfPersonaRefresh();
   await maybeScheduleQqKnowledgeDeletionReview();
@@ -6180,7 +6342,35 @@ function logQqProactiveInterestDecision(event, decision = {}) {
   logger[level]("QQ proactive interest decision", details, "interest", qqLogContext(event));
 }
 
+// Voice messages are handled once local speech recognition heard them.
+async function attachQqVoiceTranscripts(event) {
+  if (!mediaVoiceAutoTranscribe || !event) return event;
+  const hasVoice = (event.contentContext?.media?.audios || []).length > 0
+    || (event.replyContext?.contentContext?.media?.audios || []).length > 0;
+  if (!hasVoice) return event;
+  const allowed = isQqPrivateEvent(event) || (event.groupId && state.qq.allowedGroups.includes(event.groupId));
+  if (!allowed || isBannedQqSender(event)) return event;
+  const startedAt = Date.now();
+  const { event: heard, transcripts } = await transcribeQqEventVoices(event, {
+    runtime: qqMediaRuntime,
+    fetchVoice: qqMediaServices.fetchVoice,
+    workRoot: join(qqTaskWorkspacesDir, "voice"),
+    maxSeconds: mediaVoiceAutoMaxSeconds
+  }).catch(() => ({ event, transcripts: [] }));
+  if (transcripts.length) {
+    logger.info("QQ voice message heard", {
+      operation: "media.voice",
+      outcome: transcripts.every((item) => item.ok) ? "transcribed" : "partial",
+      clipCount: transcripts.length,
+      heardCount: transcripts.filter((item) => item.ok).length,
+      durationMs: Date.now() - startedAt
+    }, "qq", qqLogContext(event));
+  }
+  return heard;
+}
+
 function hasUnhandledQqAudio(event) {
+  if (hasQqHeardVoice(event)) return false;
   return Boolean(event.hasAudioSegment)
     || /\[CQ:(?:record|voice|audio),/i.test(String(event.text || ""))
     || /\[CQ:(?:record|voice|audio),/i.test(String(event.replyContext?.text || ""));
@@ -7699,11 +7889,98 @@ function formatQqBotInternalToolContext(event) {
     memoryPeople: event.qqMemoryPeople || [],
     robotProfileCandidates: event.qqRobotProfileCandidates || [],
     canSearchImages: canQqSearchWebImages(),
-    stickerLibraryHint: event.qqStickerLibraryHint || ""
+    stickerLibraryHint: event.qqStickerLibraryHint || "",
+    mediaSummary: formatQqMediaCandidates(getQqMediaCandidatesForEvent(event), {
+      available: { video: Boolean(event.qqMediaToolStatus?.video), audio: Boolean(event.qqMediaToolStatus?.audio) }
+    })
   });
 }
 
+function getQqMediaCandidatesForEvent(event) {
+  if (!event || typeof event !== "object") return { videos: [], audios: [] };
+  event.qqMediaCandidates ||= collectQqMediaCandidates(event);
+  return event.qqMediaCandidates;
+}
+
+// A public video link may be opened by URL only when it already appeared in
+// this conversation's recent messages.
+function isQqUrlInRecentConversation(event, url) {
+  const target = String(url || "").trim();
+  if (!target || !isQqWatchableVideoUrl(target)) return false;
+  const scopeId = getQqMemoryScopeId(event);
+  const entries = scopeId ? (state.qq.memory.recentMessages[scopeId] || []).slice(-80) : [];
+  return entries.some((entry) => String(entry?.text || "").includes(target)
+    || (Array.isArray(entry?.contentContext?.links) && entry.contentContext.links.includes(target)));
+}
+
+async function executeQqMediaNativeTool(call, event, replyScope) {
+  const background = event?.qqBackgroundTurn || null;
+  const activeReply = Boolean(replyScope && replyScope === getActiveQqReplyScopeForEvent(event));
+  if (!activeReply && !background) return { ok: false, error: "本轮任务已结束，不能处理媒体。" };
+  const assertActive = () => {
+    if (activeReply) assertQqReplyScopeActive(replyScope);
+    else background.assertActive?.();
+  };
+  const args = call.arguments || {};
+  const deps = {
+    runtime: qqMediaRuntime,
+    bilibili: qqMediaServices.bilibili,
+    fetchQqVideo: qqMediaServices.fetchQqVideo,
+    fetchVoice: qqMediaServices.fetchVoice,
+    fetchSubtitle: qqMediaServices.fetchSubtitle,
+    candidates: getQqMediaCandidatesForEvent(event),
+    state: getQqMediaTurnState(event),
+    taskWorkspace: event.qqTaskWorkspace,
+    signal: activeReply ? replyScope.signal : background.signal,
+    isUrlInConversation: (url) => isQqUrlInRecentConversation(event, url),
+    assertActive
+  };
+  const startedAt = Date.now();
+  const result = call.tool === "video"
+    ? await executeQqMediaVideoTool(args, deps)
+    : call.tool === "audio"
+      ? await executeQqMediaAudioTool(args, deps)
+      : call.tool === "bilibili"
+        ? await executeQqMediaBilibiliTool(args, deps)
+        : { ok: false, error: "Unsupported qq_media tool." };
+  logger.info("QQ media tool finished", {
+    operation: "media.tool",
+    tool: call.tool,
+    toolAction: String(args.action || "") || null,
+    outcome: result?.ok === false ? "failed" : "completed",
+    imageCount: Array.isArray(result?.contentItems) ? result.contentItems.filter((item) => item.type === "inputImage").length : 0,
+    background: Boolean(background && !activeReply),
+    durationMs: Date.now() - startedAt
+  }, "qq", qqLogContext(event));
+  return result;
+}
+
 async function executeQqStructuredNativeTool(call, event, context = {}) {
+  if (call?.namespace === "qq_agent" && call?.tool === "manage") {
+    const rootEvent = context.rootEvent || event;
+    if (rootEvent.qqBackgroundTurn) return { ok: false, error: "后台任务里不能再开子代理。" };
+    const scopeId = getQqMemoryScopeId(rootEvent);
+    return executeQqSubagentTool(call.arguments || {}, {
+      manager: qqSubagentManager,
+      scopeId,
+      privileged: hasQqPrivilegedAccess(rootEvent),
+      requester: {
+        userId: rootEvent.senderId,
+        name: rootEvent.senderName || rootEvent.senderLabel,
+        isOwner: Boolean(rootEvent.isOwner),
+        isBotAdmin: Boolean(rootEvent.isBotAdmin)
+      },
+      origin: { scopeId, groupId: rootEvent.groupId || null, messageId: String(rootEvent.raw?.message_id ?? "") },
+      background: [
+        rootEvent.replyContext?.text ? `被引用的消息：${String(rootEvent.replyContext.text).slice(0, 1500)}` : "",
+        `当前消息：${String(rootEvent.text || "").slice(0, 2000)}`
+      ].filter(Boolean).join("\n"),
+      allowSpawn: !rootEvent.qqColdProactive && !rootEvent.qqPrivateProactive && !rootEvent.qqSubagentReport
+    });
+  }
+  if (call?.namespace === "qq_media") {
+    return executeQqMediaNativeTool(call, context.rootEvent || event, context.replyScope);
+  }
   if (call?.namespace === "qq_sticker" && call?.tool === "manage") {
     return executeQqStickerNativeTool(call, context.rootEvent || event, context.replyScope);
   }
@@ -7717,7 +7994,10 @@ async function executeQqStructuredNativeTool(call, event, context = {}) {
     const rootEvent = context.rootEvent || event;
     return {
       ok: true,
-      reply: formatQqBotLifeDetail(state.qq.botLife, { scopeId: getQqMemoryScopeId(rootEvent) })
+      reply: [
+        formatQqBotLifeDetail(state.qq.botLife, { scopeId: getQqMemoryScopeId(rootEvent) }),
+        formatQqLifeExperienceDetail(state.qq.botLife)
+      ].join("\n")
     };
   }
   if (call?.namespace === "qq_self" && call?.tool === "language_habit") {
@@ -7738,17 +8018,29 @@ async function executeQqStructuredNativeTool(call, event, context = {}) {
   if (call?.namespace === "qq_context" && call?.tool === "images") {
     const rootEvent = context.rootEvent || event;
     const replyScope = context.replyScope;
-    if (!replyScope || replyScope !== getActiveQqReplyScopeForEvent(rootEvent)) {
+    const background = rootEvent.qqBackgroundTurn || null;
+    const activeReply = Boolean(replyScope && replyScope === getActiveQqReplyScopeForEvent(rootEvent));
+    if (!activeReply && !background) {
       return { ok: false, error: "本轮任务已结束，不能读取图片。" };
     }
+    // Background turns (routine activities) only reach the Bot's own drawings.
     return executeQqImageMemoryTool(call.arguments, {
-      candidates: getQqImageMemoryCandidates(rootEvent),
+      candidates: activeReply ? getQqImageMemoryCandidates(rootEvent) : [],
+      conversation: activeReply,
+      drawings: {
+        entries: state.qq.botLife.drawings,
+        scopeId: activeReply ? getQqMemoryScopeId(rootEvent) : "life",
+        directory: qqBotDrawingsDir
+      },
       taskWorkspace: rootEvent.qqTaskWorkspace,
       prepareImage: (image, options) => prepareSingleQqModelImage(image, { ...options, fetchOneBotImage }),
       maxBytes: qqImageMaxBytes,
       compressedMaxEdge: qqCompressedImageMaxEdge,
-      signal: replyScope.signal,
-      assertActive: () => assertQqReplyScopeActive(replyScope)
+      signal: activeReply ? replyScope.signal : background.signal,
+      assertActive: () => {
+        if (activeReply) assertQqReplyScopeActive(replyScope);
+        else background.assertActive?.();
+      }
     });
   }
   if (call?.namespace === "qq_runtime" && call?.tool === "host_command") {
@@ -7760,7 +8052,8 @@ async function executeQqStructuredNativeTool(call, event, context = {}) {
     return executeQqHostCommand(call.arguments, {
       event: rootEvent,
       projectDir,
-      signal: replyScope.signal
+      signal: replyScope.signal,
+      readAvailableMemory: readAvailableMemoryBytes
     });
   }
   if (call?.namespace === "qq_context" && call?.tool === "download_file") {
@@ -7871,13 +8164,47 @@ async function executeQqStickerNativeTool(call, event, replyScope) {
 
 async function executeQqMessageNativeTool(call, event, replyScope) {
   if (!isQqToolReplyScopeActive(event, replyScope)) return { ok: false, error: "本轮任务已结束，不能操作消息。" };
-  return executeQqMessageTool(call.arguments || {}, {
+  const result = await executeQqMessageTool(call.arguments || {}, {
     event,
     scopeId: getQqMemoryScopeId(event),
     ledger: qqSentMessageLedger,
     callOneBotAction,
+    cards: {
+      sendSegments: (segments, options) => sendQqSpecialSegments(event, segments, options),
+      searchMusic: qqMusicSearch,
+      allowedContactIds: new Set([...collectQqLookupUserIds(event), String(state.maintenance.oneBot.selfId || "")].filter(Boolean))
+    },
     assertActive: () => assertQqReplyScopeActive(replyScope)
   });
+  const action = String(call.arguments?.action || "");
+  if (["music", "dice", "rps", "contact"].includes(action)) {
+    logger.info("QQ special message sent", {
+      operation: "social.card",
+      kind: action,
+      outcome: result?.ok === false ? "failed" : "sent"
+    }, "qq", qqLogContext(event));
+  }
+  return result;
+}
+
+const qqMusicSearch = createNeteaseMusicSearch({ fetchJson: (url, options) => qqMediaServices.fetchJson(url, options) });
+
+// A card, dice or contact share in the original conversation; confirmed
+// sends enter the recall ledger and the conversation memory like a bubble.
+async function sendQqSpecialSegments(event, segments, { label = "" } = {}) {
+  const payload = event.groupId
+    ? { group_id: Number(event.groupId), message: segments }
+    : { user_id: Number(event.senderId), message: segments };
+  const result = await callOneBotAction(event.groupId ? "send_group_msg" : "send_private_msg", payload);
+  if (result.ok) {
+    rememberQqSentMessage(event, result, label);
+    const scopeId = getQqMemoryScopeId(event);
+    if (scopeId && state.qq.memory.enabled) {
+      rememberQqConversationAssistantMessage(scopeId, label, { event });
+      await saveQqMemory();
+    }
+  }
+  return result;
 }
 
 // Profiles are limited to people who appeared in the original conversation.
@@ -8369,7 +8696,7 @@ function isQqBotHistoryCommand(command) {
 }
 
 function isQqBotSocialCommand(command) {
-  return /^\/?(?:点赞|申请|好友申请|群申请|主动加群|动态|识别动态|发动态|评论动态)(?:\s+.*)?$/i.test(command);
+  return /^\/?(?:点赞|申请|好友申请|群申请|主动加群|加好友|动态|识别动态|发动态|评论动态)(?:\s+.*)?$/i.test(command);
 }
 
 async function executeQqBotSocialCommand(command, event) {
@@ -8377,6 +8704,7 @@ async function executeQqBotSocialCommand(command, event) {
   if (/^点赞(?:\s|$)/i.test(body)) return executeQqLikeCommand(body, event);
   if (/^(申请|好友申请|群申请)(?:\s|$)/i.test(body)) return executeQqRequestCommand(body, event);
   if (/^主动加群(?:\s|$)/i.test(body)) return executeQqJoinGroupCommand(body, event);
+  if (/^加好友(?:\s|$)/i.test(body)) return executeQqAddFriendCommand(body, event);
   if (/^(动态|识别动态|发动态|评论动态)(?:\s|$)/i.test(body)) return executeQqZoneCommand(body, event);
   return { ok: false, command, reply: "未识别的 QQ 社交工具命令。" };
 }
@@ -8551,6 +8879,80 @@ function formatQqRequestActionFailure(approve, result) {
   return formatOneBotActionFailure(approve ? "同意申请" : "拒绝申请", result);
 }
 
+// One outgoing friend request through the NapCat bridge. Ordinary turns may
+// only add someone who appeared in this conversation and stay within the
+// daily cap; a submitted request is reported as sent, never as a friendship.
+async function executeQqAddFriendCommand(command, event) {
+  const match = String(command || "").match(/^加好友\s+([1-9][0-9]{4,12})(?:\s+([\s\S]*))?$/i);
+  if (!match) return { ok: false, command, reply: "用法：/加好友 QQ号 [验证消息] [答案=验证问题答案]。" };
+  const targetId = match[1];
+  const rest = String(match[2] || "").trim();
+  const answer = (rest.match(/(?:^|\s)答案[=＝](\S[^\n]*)$/)?.[1] || "").trim().slice(0, 120);
+  const message = rest.replace(/(?:^|\s)答案[=＝]\S[^\n]*$/, "").trim().slice(0, 120);
+  const privileged = hasQqPrivilegedAccess(event);
+  if (targetId === String(event.selfId || state.maintenance.oneBot.selfId || "")) return { ok: false, command, reply: "不能加自己为好友。" };
+  if (!privileged && !collectQqLookupUserIds(event).has(targetId)) {
+    return { ok: false, command, reply: "只能加这段对话里出现过的人。" };
+  }
+  if (state.qq.bannedUserIds.includes(targetId)) return { ok: false, command, reply: "这个人在封禁名单里。" };
+  if (!qqSocialBridge.configured) {
+    return { ok: false, command, reply: "没有配置 NapCat 社交扩展桥，发不了好友申请；不会伪报成功。" };
+  }
+  const friends = await callOneBotAction("get_friend_list", {}).catch(() => null);
+  const friendList = Array.isArray(friends?.body?.data) ? friends.body.data : [];
+  if (friendList.some((friend) => String(friend?.user_id || "") === targetId)) {
+    return { ok: true, command, reply: `${targetId} 已经是好友了。` };
+  }
+  if (!privileged) {
+    const allowance = consumeQqLifeSocialAllowance(state.qq.botLife, "friend_request", {
+      limits: { friend_request: socialFriendRequestsPerDay }
+    });
+    if (!allowance.ok) return { ok: false, command, reply: `今天主动加好友的次数用完了（${allowance.used}/${allowance.limit}）。` };
+    state.qq.botLife = allowance.life;
+    await saveQqBotLife();
+  }
+  const startedAt = Date.now();
+  const bridgeResult = await qqSocialBridge.addFriend({ target_id: targetId, message, answer });
+  const result = bridgeResult.body || {};
+  const details = buildQqOperationLogDetails(event, {
+    operation: "friend.add",
+    outcome: bridgeResult.ok ? "success" : bridgeResult.timedOut ? "timeout" : "failed",
+    targetType: "friend",
+    kind: "friend",
+    targetId,
+    endpoint: "add-friend",
+    durationMs: Math.max(0, Date.now() - startedAt),
+    httpStatus: bridgeResult.status,
+    status: result.status ?? null,
+    errorCode: bridgeResult.ok ? null : String(result.error || bridgeResult.error || "native_request_failed"),
+    verificationMode: result.verification_mode ?? null,
+    privileged
+  });
+  if (bridgeResult.ok) logger.success("QQ active social request completed", details, "qq", qqLogContext(event));
+  else logger.warn("QQ active social request failed", details, "qq", qqLogContext(event));
+  if (bridgeResult.ok) {
+    return {
+      ok: true,
+      command,
+      reply: result.status === "already_friend"
+        ? `${targetId} 已经是好友了。`
+        : `已向 ${targetId} 发出好友申请${result.verification_mode ? `（对方设置：${result.verification_mode}）` : ""}；对方同意后才算加上，现在不要说已经是好友。`
+    };
+  }
+  if (bridgeResult.unavailable) return { ok: false, command, reply: "当前 NapCat 扩展桥不支持主动加好友（需要 v20 或更新）。" };
+  if (result.error === "verification_required") {
+    return { ok: false, command, reply: `对方需要回答验证问题${Array.isArray(result.questions) && result.questions.length ? `：${result.questions.join("；")}` : ""}。知道答案就用“答案=...”再试，不知道就别加了。` };
+  }
+  if (result.error === "friend_requests_disabled") return { ok: false, command, reply: "对方设置了不允许任何人加好友。" };
+  return {
+    ok: false,
+    command,
+    reply: bridgeResult.timedOut
+      ? "好友申请桥没有及时返回，结果不确定；不要重复发送，也不要说已经发出。"
+      : `好友申请没有发出：${result.error || bridgeResult.error || "未知原因"}。`
+  };
+}
+
 async function executeQqJoinGroupCommand(command, event) {
   if (!hasQqPrivilegedAccess(event)) return { ok: false, command, reply: "主动加群只允许主人或 Bot 管理员触发。" };
   const parsed = parseQqActiveJoinGroupCommand(command);
@@ -8714,28 +9116,59 @@ function normalizeQqRequestTime(value) {
   return Math.floor(number);
 }
 
+// The Bot's own posts and comments are capped per day; the verified owner
+// and administrators are not. Returns a refusal text, or "" when allowed.
+async function consumeQqZoneSelfAllowance(event, kind) {
+  if (hasQqPrivilegedAccess(event)) return "";
+  const allowance = consumeQqLifeSocialAllowance(state.qq.botLife, kind, {
+    limits: { qzone_post: lifeQzonePostsPerDay, qzone_comment: lifeQzoneCommentsPerDay }
+  });
+  if (!allowance.ok) {
+    return `今天自己${kind === "qzone_post" ? "发说说" : "评论空间"}的次数已经用完（${allowance.used}/${allowance.limit}），明天再说。`;
+  }
+  state.qq.botLife = allowance.life;
+  await saveQqBotLife();
+  logger.info("QQ self-initiated Qzone write allowed", {
+    operation: "social.qzone_self",
+    kind,
+    used: allowance.used,
+    limit: allowance.limit
+  }, "qq", qqLogContext(event));
+  return "";
+}
+
 async function executeQqZoneCommand(command, event) {
   const body = String(command).trim();
   const publishCommand = parseQqZonePublishCommand(body);
   const commentMatch = body.match(/^评论动态\s+([1-9][0-9]{4,12})\s+(\S+)\s+([\s\S]+)$/i);
-  if ((publishCommand || commentMatch) && !hasQqPrivilegedAccess(event)) {
-    return { ok: false, command, reply: "发表或评论 QQ 空间动态只允许主人或 Bot 管理员触发。" };
-  }
   try {
     if (publishCommand) {
       if (publishCommand.invalidImageSelector) {
-        return { ok: false, command, reply: "图片只能取自当前消息或引用消息，请使用：/发动态 图片=当前，或 /发动态 文字 | 图片=当前。" };
+        return { ok: false, command, reply: "图片只能取自当前/引用消息（图片=当前）或你这一轮自己画的、下载的图（图片=输出）。" };
       }
-      const imagePaths = publishCommand.useCurrentImages
-        ? await prepareQqZonePublishImages(event)
-        : [];
-      if (publishCommand.useCurrentImages && imagePaths.length === 0) {
+      const imagePaths = [
+        ...(publishCommand.useCurrentImages ? await prepareQqZonePublishImages(event) : []),
+        ...(publishCommand.useOutputImages ? await prepareQqZoneOwnImages(event) : [])
+      ].slice(0, 9);
+      if (publishCommand.useCurrentImages && !publishCommand.useOutputImages && imagePaths.length === 0) {
         return { ok: false, command, reply: "当前消息和引用消息中没有可用于动态的图片。" };
+      }
+      if (publishCommand.useOutputImages && imagePaths.length === 0) {
+        return { ok: false, command, reply: "这一轮还没有你自己做好的图片：先用原生生图画一张，或用 qq_search.images 下载一张（会存进本轮输出目录），再发；没发出去，别说已经发了。" };
       }
       if (!publishCommand.content && imagePaths.length === 0) {
         return { ok: false, command, reply: "用法：/发动态 文字、/发动态 图片=当前，或 /发动态 文字 | 图片=当前。" };
       }
+      const capped = await consumeQqZoneSelfAllowance(event, "qzone_post");
+      if (capped) return { ok: false, command, reply: capped };
       const result = await qqZone.publish({ content: publishCommand.content, imagePaths });
+      const postedDrawingIds = imagePaths.map(parseQqBotDrawingIdFromPath).filter(Boolean);
+      if (postedDrawingIds.length) {
+        let drawings = state.qq.botLife.drawings;
+        for (const id of postedDrawingIds) drawings = markQqBotDrawingPosted(drawings, id);
+        state.qq.botLife = { ...state.qq.botLife, drawings };
+        await saveQqBotLife();
+      }
       const imageNote = result.imageCount ? `（${result.imageCount} 张图片）` : "";
       logger.success("QQ Zone mood published", {
         tid: result.tid || null,
@@ -8745,6 +9178,8 @@ async function executeQqZoneCommand(command, event) {
       return { ok: true, command, reply: `QQ 空间动态已发表${imageNote}${result.tid ? `，tid：${result.tid}` : ""}。` };
     }
     if (commentMatch) {
+      const capped = await consumeQqZoneSelfAllowance(event, "qzone_comment");
+      if (capped) return { ok: false, command, reply: capped };
       await qqZone.comment({ uin: commentMatch[1], tid: commentMatch[2], content: commentMatch[3] });
       return { ok: true, command, reply: `已评论 ${commentMatch[1]} 的动态 ${commentMatch[2]}。` };
     }
@@ -8761,6 +9196,49 @@ async function executeQqZoneCommand(command, event) {
   } catch (error) {
     return { ok: false, command, reply: `QQ 空间操作失败：${error.message}` };
   }
+}
+
+// The Bot's own pictures for a post: drawn by the native image tool in this
+// turn (imported from the thread's generated-images folder) or already in the
+// turn's output directory; every file is revalidated as a real image there.
+async function prepareQqZoneOwnImages(event) {
+  const outputDir = event?.qqTaskWorkspace?.outputDir;
+  if (!outputDir) return [];
+  const generation = getActiveQqGenerationForEvent(event);
+  await importRecentCodexGeneratedImages({
+    threadId: generation?.threadId || event.qqCodexSessionThreadId || "",
+    generatedImagesDir: codexGeneratedImagesDir,
+    outputDir,
+    generatedAfterMs: Number(event.qqReplyTurnStartedAt || 0),
+    maxImageBytes: qqImageMaxBytes,
+    limit: 4
+  }).catch(() => []);
+  let root;
+  try {
+    root = await realpath(outputDir);
+  } catch {
+    return [];
+  }
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  const candidates = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const path = join(root, entry.name);
+    const info = await stat(path).catch(() => null);
+    if (info?.isFile()) candidates.push({ path, mtimeMs: info.mtimeMs });
+  }
+  candidates.sort((left, right) => right.mtimeMs - left.mtimeMs);
+  const accepted = [];
+  for (const { path } of candidates) {
+    if (accepted.length >= 9) break;
+    try {
+      const { realPath } = await readValidatedQqImageFile(path, root, qqImageMaxBytes);
+      accepted.push(realPath);
+    } catch {
+      // not an image, too large, or outside the output directory
+    }
+  }
+  return accepted;
 }
 
 async function prepareQqZonePublishImages(event) {
@@ -10304,11 +10782,28 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       recentRefs: qqRecentStickerRefsByScope.get(scopeId) || []
     }))
     : "";
+  event.qqMediaToolStatus = await qqMediaRuntime.status().catch(() => null);
+  const mediaCandidates = getQqMediaCandidatesForEvent(event);
+  const heardCurrentVoices = (event.qqVoiceTranscripts || []).filter((item) => item.ok).length;
+  const humanActionPlan = state.qq.enhancer.enabled && !event.qqPrivateProactive
+    ? buildQqHumanActionPlan(event, humanBehaviorPlan, {
+      actionRates: summarizeQqHumanActionRates(state.qq.humanActionStats, scopeId),
+      media: {
+        videos: mediaCandidates.videos.length,
+        audios: mediaCandidates.audios.length,
+        unheardAudios: Math.max(0, mediaCandidates.audios.length - heardCurrentVoices)
+      },
+      mediaAvailable: { video: Boolean(event.qqMediaToolStatus?.video), audio: Boolean(event.qqMediaToolStatus?.audio) },
+      stickerCandidates: extractQqReplyStickerCandidates(event).length,
+      expression: getQqPersonalityExpressionBias(state.qq.personality)
+    })
+    : null;
   const humanBehaviorContext = [
     formatQqHumanBehaviorContext(humanChatStyle, humanBehaviorPlan, {
       proactive: Boolean(event.proactiveDecision),
       stickerSuggestions
     }),
+    humanActionPlan ? formatQqHumanActionContext(humanActionPlan) : "",
     adaptiveSignals ? formatQqAdaptiveLearningContext(adaptiveSignals) : ""
   ].filter(Boolean).join("\n\n");
   event.qqHumanBehavior = {
@@ -10317,6 +10812,9 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     preferMultiBubble: humanBehaviorPlan.preferMultiBubble,
     preferSticker: humanBehaviorPlan.preferSticker,
     stickerChance: humanBehaviorPlan.stickerChance,
+    plannedActions: humanActionPlan?.actions || [],
+    reactChance: humanActionPlan?.reactChance ?? null,
+    actionStatsMeasured: Boolean(humanActionPlan?.measured),
     humanStickerMessageRatio: humanChatStyle.stickerMessageRatio,
     styleSampleSize: humanChatStyle.textSampleSize,
     styleMedianChars: humanChatStyle.medianTextChars,
@@ -10362,7 +10860,11 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   const webContext = "";
   // The library is searched on demand through qq_sticker; only its size is in the prompt.
   event.qqStickerLibraryHint = state.qq.enhancer.enabled ? formatQqStickerLibraryHint(stickerCatalog) : "";
-  const botLifeContext = formatQqBotLifeContext(state.qq.botLife, { scopeId });
+  const botLifeContext = [
+    formatQqBotLifeContext(state.qq.botLife, { scopeId }),
+    formatQqLifeExperienceContext(state.qq.botLife, { scopeId }),
+    formatQqBotDrawingsContext(state.qq.botLife.drawings, { scopeId })
+  ].filter(Boolean).join("\n");
   const personalityCoreContext = formatQqPersonalityCoreContext(state.qq.personality, {
     assistantName: state.qq.selfPersona.account?.nickname || assistantName
   });
@@ -10389,6 +10891,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   const nativeToolSpecs = buildQqNativeToolSpecs({
     isOwner: hasQqPrivilegedAccess(event),
     toolsEnabled: !event.qqPrivateProactive,
+    canUseSubagents: subagentMaxConcurrency > 0 && !event.qqColdProactive && !event.qqSubagentReport,
     hasStickerCandidates: replyStickerCandidates.length > 0 || stickerCatalog.length > 0,
     hasMemoryPeople: event.qqMemoryPeople.length > 0,
     canRecordRobotProfiles: event.qqRobotProfileCandidates.length > 0,
@@ -10414,7 +10917,9 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   });
   const developerInstructions = await buildAssistantInstructions(event);
   let semanticMemoryContextDelivered = false;
-  const proactiveExecutionContext = event.qqColdProactive
+  const proactiveExecutionContext = event.qqSubagentReport
+    ? formatQqSubagentReportPrompt(event.qqSubagentReport, { attachmentPaths: event.qqSubagentAttachmentPaths || [] })
+    : event.qqColdProactive
     ? (event.proactiveDecision?.promptHint || formatQqColdProactivePrompt({
       mode: event.proactiveDecision?.coldTopicStart?.mode
     }))
@@ -10430,6 +10935,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   const runReplyPrompt = async (prompt, resumePrompt = prompt) => {
     assertQqReplyScopeActive(replyScope);
     const turnStartedAt = Date.now();
+    event.qqReplyTurnStartedAt ||= turnStartedAt;
     const currentImagePaths = [...new Set([
       ...imagePaths,
       ...(event.imagePaths || []),
@@ -10489,6 +10995,9 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       maxImageBytes: qqImageMaxBytes
     });
     logQqGeneratedAttachmentImport(parsed, event, result);
+    if (parsed.importedImageCount > 0) {
+      trackBackgroundTask(rememberQqChatDrawings(parsed, event, taskWorkspace.outputDir), () => null);
+    }
     event.qqAgentStructuredOutput = parsed.structured;
     // The last completed attempt (after any fusion) is the turn's inner state.
     event.qqAgentInnerState = extractQqAgentInnerState(parsed.value);
@@ -11151,6 +11660,9 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
       recoverUnlistedGeneratedImage: isImageGeneration
     });
     logQqGeneratedAttachmentImport(parsed, event, result);
+    if (parsed.importedImageCount > 0) {
+      trackBackgroundTask(rememberQqChatDrawings(parsed, event, taskWorkspace.outputDir), () => null);
+    }
     event.qqAgentStructuredOutput = parsed.structured;
     const normalized = await normalizeQqImageGenerationReply(parsed.output, {
       event,
@@ -12263,7 +12775,10 @@ async function processQqReplyEvent(event, options = {}) {
     }
     try {
       await rememberQqGroupMessage(event);
-      if (source === "onebot") noteQqImageRequest(event);
+      if (source === "onebot") {
+        noteQqImageRequest(event);
+        observeQqHumanMessageActions(event);
+      }
     } finally {
       timings.rememberDurationMs = Date.now() - rememberStartedAt;
     }
@@ -13379,6 +13894,445 @@ const runSteerableQqCodexTurn = createQqCodexTurnRunner({
   observeQuotaNotification: (message) => codexProtocolQuota.observeNotification(message)
 });
 
+// Background sub-agents (long tasks someone asked for, and the online parts
+// of the Bot's own routine) run on a separate runner with its own small
+// limiter, so a twenty-minute job never holds a QQ reply slot. They are not
+// a scope's active generation: new messages never fuse into them, and each
+// job's own AbortController is its stop signal.
+const qqSubagentLimiter = createConcurrencyLimiter(Math.max(1, subagentMaxConcurrency), { maxPending: 8 });
+const qqBackgroundTurnsByGenerationId = new Map();
+const runQqBackgroundAgentTurn = createQqCodexTurnRunner({
+  limiter: qqSubagentLimiter,
+  state,
+  codexPath: codexCliPath,
+  engine: agentEngine,
+  claudePath: claudeCliPath,
+  claudeModel,
+  claudeReasoningEffort,
+  toolTransport: agentToolTransport,
+  leanContext: agentLeanContext,
+  activeChildren: activeCodexChildren,
+  stoppedGenerationIds: new Set(),
+  getReplyScope: (event) => event?.qqBackgroundTurn || null,
+  createStoppedError: () => Object.assign(new Error("子代理已取消"), { code: "SUBAGENT_CANCELLED" }),
+  trackGeneration: (child, options = {}) => {
+    const id = crypto.randomUUID();
+    if (options.qqEvent?.qqBackgroundTurn) qqBackgroundTurnsByGenerationId.set(id, options.qqEvent.qqBackgroundTurn);
+    return id;
+  },
+  attachSteering: (id, controls) => {
+    qqBackgroundTurnsByGenerationId.get(id)?.onControls?.(controls);
+    return null;
+  },
+  clearGeneration: (id) => {
+    qqBackgroundTurnsByGenerationId.get(id)?.onControls?.(null);
+    qqBackgroundTurnsByGenerationId.delete(id);
+  },
+  logContext: qqLogContext,
+  logger,
+  logModelOutput: logAgentModelOutput,
+  trackBackgroundTask,
+  refreshQuota: refreshCodexQuotaSnapshotAfterRun,
+  observeQuotaNotification: (message) => codexProtocolQuota.observeNotification(message)
+});
+
+const qqSubagentManager = createQqSubagentManager({
+  maxConcurrent: subagentMaxConcurrency,
+  maxQueued: subagentMaxQueued,
+  maxHistory: 30,
+  runTask: (job, controls) => runQqSubagentJob(job, controls),
+  onFinished: (job) => handleQqSubagentFinished(job).catch((error) => logger.warn("QQ sub-agent report failed", {
+    operation: "agent.subagent",
+    jobId: job.id,
+    kind: job.kind,
+    error
+  }, "agent")),
+  onStateChange: (job, change) => logger.info("QQ sub-agent state changed", {
+    operation: "agent.subagent",
+    jobId: job.id,
+    kind: job.kind,
+    status: job.status,
+    change,
+    runs: job.runs,
+    scopeId: job.kind === "life" ? null : job.scopeId || null
+  }, "agent"),
+  // Spawned from inside a tool call, a job must not inherit the nested-turn guard.
+  runDetached: (operation) => runOutsideAgentToolCall(() => {
+    void operation();
+  })
+});
+
+function isQqSubagentCommandAllowed(command, kind) {
+  const value = String(command || "").trim();
+  if (/^\/(?:知识库|联网)(?:\s|$)/.test(value)) return true;
+  if (kind === "task") return /^\/聊天记录(?:\s|$)/.test(value);
+  return /^\/(?:动态|发动态|评论动态)(?:\s|$)/.test(value);
+}
+
+// Another agent process only starts while the phone has room for it; a job
+// waits up to ten minutes for memory instead of risking the whole session.
+async function waitForQqSubagentMemory(signal) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const memory = await checkQqSubagentMemory();
+    if (memory.ok) return memory;
+    if (attempt === 0) {
+      logger.warn("QQ sub-agent waiting for memory", {
+        operation: "agent.subagent",
+        availableMemory: formatMegabytes(memory.availableBytes),
+        minimumMemory: formatMegabytes(memory.minimumBytes)
+      }, "agent");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 30_000).unref?.());
+    if (signal?.aborted) throw Object.assign(new Error("子代理已取消"), { code: "SUBAGENT_CANCELLED" });
+  }
+  throw Object.assign(new Error("手机可用内存一直不够，子代理没有启动"), { code: "SUBAGENT_LOW_MEMORY" });
+}
+
+async function runQqSubagentJob(job, { signal, followUps = [], threadId = null, onControls, onProgress } = {}) {
+  await waitForQqSubagentMemory(signal);
+  await ensureCodexReplyWorkspace();
+  const taskWorkspace = await createQqTaskWorkspace(job.kind === "life" ? "qq-life" : "qq-subagent", `${job.id}-${job.runs}`);
+  const origin = job.context?.origin || {};
+  const stoppedError = () => Object.assign(new Error("子代理已取消"), { code: "SUBAGENT_CANCELLED" });
+  const background = {
+    signal,
+    get cancelled() {
+      return signal.aborted;
+    },
+    assertActive() {
+      if (signal.aborted) throw stoppedError();
+    },
+    onControls: (controls) => {
+      if (controls?.threadId) event.qqCodexSessionThreadId = controls.threadId;
+      onControls?.(controls);
+    }
+  };
+  const event = {
+    type: origin.groupId ? "group_message" : "private_message",
+    groupId: origin.groupId || undefined,
+    senderId: job.requester.userId || state.maintenance.oneBot.selfId || "0",
+    senderName: job.requester.name || assistantName,
+    senderLabel: job.requester.name || assistantName,
+    selfId: state.maintenance.oneBot.selfId,
+    isOwner: job.kind === "task" && job.requester.isOwner,
+    isBotAdmin: job.kind === "task" && job.requester.isBotAdmin,
+    text: job.task,
+    atTargets: [],
+    images: [],
+    qqBackgroundTurn: background,
+    qqSubagentJob: { id: job.id, kind: job.kind },
+    qqLifeActivity: job.kind === "life" ? job.context?.life || {} : null,
+    qqTaskWorkspace: taskWorkspace,
+    raw: { message_id: `subagent-${job.id}-${job.runs}`, time: Math.floor(Date.now() / 1000) }
+  };
+  ensureQqTraceId(event);
+  const specs = filterQqSubagentToolSpecs(buildQqNativeToolSpecs({
+    toolsEnabled: true,
+    canSearchImages: canQqSearchWebImages()
+  }), { kind: job.kind });
+  const dispatcher = createQqNativeToolDispatcher({
+    executeCommand: async (command, toolEvent) => {
+      if (!isQqSubagentCommandAllowed(command, job.kind)) {
+        return { ok: false, reply: "后台子代理不能做这个动作。" };
+      }
+      return executeQqBotInternalCommand(command, toolEvent);
+    },
+    executeStructured: (call, toolEvent, context) => executeQqStructuredNativeTool(call, toolEvent, { ...context, replyScope: null }),
+    event,
+    maxCalls: 48,
+    onToolEvent: logQqNativeToolEvent
+  });
+  const turnInput = {
+    job,
+    assistantName: state.qq.selfPersona.account?.nickname || assistantName,
+    taskWorkspace,
+    followUps,
+    currentDate: formatQqPromptDate()
+  };
+  const fresh = buildQqSubagentTurn({ ...turnInput, resumed: false });
+  const resumed = buildQqSubagentTurn({ ...turnInput, resumed: true });
+  const turnStartedAt = Date.now();
+  event.qqReplyTurnStartedAt = turnStartedAt;
+  try {
+    const result = await runQqBackgroundAgentTurn(fresh.prompt, {
+      cwd: taskWorkspace.root,
+      taskType: CODEX_TASK_TYPES.QQ_FILE_TASK,
+      timeout: subagentTimeoutMs,
+      replacementIdleTimeoutMs: Math.min(subagentTimeoutMs, 10 * 60_000),
+      env: { ...process.env, CODEX_REMOTE_CONTACT_QQ_MODE: "1" },
+      qqEvent: event,
+      threadId,
+      ephemeral: false,
+      resumePrompt: resumed.prompt,
+      baseInstructions: qqAgentBaseInstructions,
+      developerInstructions: fresh.developerInstructions,
+      dynamicTools: specs,
+      outputSchema: qqSubagentOutputSchema,
+      webSearchMode: state.qq.webLookup.enabled ? "live" : "disabled",
+      sandbox: "workspace-write",
+      sandboxPolicy: {
+        type: "workspaceWrite",
+        writableRoots: [taskWorkspace.root],
+        networkAccess: false,
+        excludeTmpdirEnvVar: true,
+        excludeSlashTmp: true
+      },
+      runtimeWorkspaceRoots: [taskWorkspace.root],
+      onDynamicToolCall: dispatcher,
+      onProgress: (progress) => {
+        const text = typeof progress === "string" ? progress : progress?.text || progress?.message || "";
+        if (text) onProgress?.(text);
+      }
+    });
+    const parsed = parseQqSubagentOutput(result.finalResponse);
+    let drawingIds = [];
+    if (job.kind === "life" && qqAgentCanDraw) {
+      // A routine drawing is whatever the activity really generated.
+      const drawn = await importRecentCodexGeneratedImages({
+        threadId: result.threadId || threadId || "",
+        generatedImagesDir: codexGeneratedImagesDir,
+        outputDir: taskWorkspace.outputDir,
+        generatedAfterMs: turnStartedAt,
+        maxImageBytes: qqImageMaxBytes,
+        limit: 2
+      }).catch(() => []);
+      const segment = job.context?.life?.segment || {};
+      drawingIds = await rememberQqBotDrawings(drawn, {
+        sourceRoot: taskWorkspace.outputDir,
+        title: segment.kind === "draw" ? segment.plan : parsed.summary,
+        description: parsed.summary || parsed.report.slice(0, 200),
+        source: "routine"
+      });
+    }
+    const attachments = job.kind === "life" ? [] : await collectQqSubagentAttachments(parsed.attachments, taskWorkspace.outputDir);
+    return {
+      ok: true,
+      threadId: result.threadId || threadId,
+      result: { ...parsed, attachments, drawingIds },
+      workspace: taskWorkspace
+    };
+  } finally {
+    if (job.kind === "life") await rm(taskWorkspace.root, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+async function collectQqSubagentAttachments(paths = [], outputDir) {
+  const accepted = [];
+  let root;
+  try {
+    root = await realpath(outputDir);
+  } catch {
+    return accepted;
+  }
+  for (const candidate of paths) {
+    try {
+      const real = await realpath(String(candidate));
+      if (!real.startsWith(`${root}/`)) continue;
+      const info = await stat(real);
+      if (info.isFile() && info.size > 0 && info.size <= qqFileMaxBytes) accepted.push(real);
+    } catch {
+      // missing or foreign paths are dropped
+    }
+  }
+  return accepted.slice(0, 8);
+}
+
+const qqAgentCanDraw = Boolean(getAgentEngine(agentEngine).imageGeneration);
+
+// Stores the Bot's own pictures (validated inside sourceRoot) in its drawing
+// library; returns the stored ids. Unreferenced files are pruned afterwards.
+async function rememberQqBotDrawings(paths = [], { sourceRoot, title = "", description = "", source = "routine", scopeId = null } = {}) {
+  const ids = [];
+  for (const path of paths.slice(0, 4)) {
+    try {
+      const stored = await storeQqBotDrawingFile(path, { directory: qqBotDrawingsDir, sourceRoot, maxBytes: qqImageMaxBytes });
+      state.qq.botLife = {
+        ...state.qq.botLife,
+        drawings: recordQqBotDrawing(state.qq.botLife.drawings, {
+          id: stored.id,
+          file: stored.file,
+          at: new Date().toISOString(),
+          title,
+          description,
+          source,
+          scopeId
+        })
+      };
+      ids.push(stored.id);
+    } catch {
+      // not a valid image inside the source root
+    }
+  }
+  if (ids.length) {
+    await saveQqBotLife();
+    await pruneQqBotDrawingFiles(state.qq.botLife.drawings, { directory: qqBotDrawingsDir }).catch(() => 0);
+    logger.info("QQ bot drawing saved", {
+      operation: "memory.bot_drawing",
+      outcome: "saved",
+      source,
+      drawingCount: ids.length
+    }, "learning");
+  }
+  return ids;
+}
+
+// Pictures the Bot drew while replying (imported from native generation)
+// stay in its library, visible only in the conversation that asked.
+async function rememberQqChatDrawings(parsed, event, outputDir) {
+  const paths = (Array.isArray(parsed?.value?.attachments) ? parsed.value.attachments : [])
+    .filter((attachment) => attachment?.kind === "image" && /codex-generated-/.test(basename(String(attachment.path || ""))))
+    .map((attachment) => String(attachment.path));
+  if (!paths.length || !outputDir) return [];
+  const text = String(parsed?.value?.text || "").replace(/\s+/g, " ").trim();
+  return rememberQqBotDrawings(paths, {
+    sourceRoot: outputDir,
+    title: text.slice(0, 20) || "聊天时画的",
+    description: text.slice(0, 200),
+    source: "chat",
+    scopeId: getQqMemoryScopeId(event)
+  });
+}
+
+async function handleQqSubagentFinished(job) {
+  if (job.kind === "life") {
+    await recordQqLifeActivityResult(job);
+    return;
+  }
+  if (shuttingDown) return;
+  const origin = job.context?.origin || {};
+  const scopeId = origin.scopeId || job.scopeId;
+  if (!scopeId) return;
+  // Report once the conversation is idle, so the report never fuses into an
+  // unrelated reply that is still generating.
+  for (let attempt = 0; attempt < 36; attempt += 1) {
+    if (!state.qq.activeGenerations[scopeId] && !qqReplyScheduler.get(scopeId)) break;
+    await new Promise((resolve) => setTimeout(resolve, 5_000).unref?.());
+  }
+  const taskWorkspace = await createQqTaskWorkspace("qq-agent", `report-${job.id}-${job.runs}`);
+  const attachmentPaths = [];
+  for (const [index, source] of (job.result?.attachments || []).entries()) {
+    const target = join(taskWorkspace.outputDir, `${index + 1}-${basename(source)}`);
+    try {
+      await copyFile(source, target);
+      attachmentPaths.push(target);
+    } catch {
+      // a vanished file is simply not offered
+    }
+  }
+  const messageId = /^\d+$/.test(String(origin.messageId || "")) ? String(origin.messageId) : `subagent-report-${job.id}-${job.runs}`;
+  const event = {
+    type: origin.groupId ? "group_message" : "private_message",
+    groupId: origin.groupId || undefined,
+    senderId: job.requester.userId,
+    senderName: job.requester.name || `QQ ${job.requester.userId}`,
+    senderLabel: job.requester.name || `QQ ${job.requester.userId}`,
+    selfId: state.maintenance.oneBot.selfId,
+    isOwner: false,
+    isBotAdmin: false,
+    text: `[后台子代理 ${job.id} 的结果回来了]`,
+    atTargets: [],
+    images: [],
+    qqSubagentReport: job,
+    qqSubagentAttachmentPaths: attachmentPaths,
+    qqTaskWorkspace: taskWorkspace,
+    raw: { message_id: messageId, time: Math.floor(Date.now() / 1000) }
+  };
+  ensureQqTraceId(event);
+  await processQqReplyEvent(event, {
+    source: "subagent",
+    alreadyRemembered: true,
+    decisionOverride: { ok: true, reason: "Sub-agent report", subagentReport: true }
+  });
+}
+
+async function recordQqLifeActivityResult(job) {
+  const segment = job.context?.life?.segment || {};
+  const summary = job.status === "done" ? String(job.result?.summary || "").trim() : "";
+  if (summary) {
+    const drawingIds = Array.isArray(job.result?.drawingIds) ? job.result.drawingIds : [];
+    state.qq.botLife = recordQqLifeExperience(state.qq.botLife, {
+      kind: segment.kind,
+      activity: segment.activity,
+      summary: drawingIds.length ? `${summary}（画作 ${drawingIds.join("、")}）` : summary,
+      detail: String(job.result?.report || "").slice(0, 900)
+    });
+    await saveQqBotLife();
+  }
+  logger.info("QQ bot life activity finished", {
+    operation: "memory.life_activity",
+    outcome: summary ? "recorded" : job.status,
+    jobId: job.id,
+    activityKind: segment.kind || null,
+    segmentStart: segment.start || null
+  }, "learning");
+}
+
+let qqLifeActivityStarting = false;
+
+async function maybeStartQqLifeActivity() {
+  if (!lifeActivitiesEnabled || !qqDailyRoutine || qqLifeActivityStarting || shuttingDown) return;
+  if (subagentMaxConcurrency <= 0 || !state.channels.qq || !state.maintenance.oneBot?.ok) return;
+  const due = selectQqLifeActivityDue(state.qq.botLife, {
+    enabled: true,
+    dailyLimit: lifeActivityDailyLimit,
+    minGapMinutes: lifeActivityMinGapMinutes,
+    canDraw: qqAgentCanDraw
+  });
+  if (!due) return;
+  // A person does their own thing when nobody is waiting on them, and the
+  // phone has room for one more agent process.
+  if (Object.keys(state.qq.activeGenerations || {}).length > 0) return;
+  const jobs = qqSubagentManager.stats();
+  if (jobs.running + jobs.queued > 0) return;
+  if (!(await checkQqSubagentMemory()).ok) return;
+  qqLifeActivityStarting = true;
+  try {
+    const task = buildQqLifeActivityTask({
+      segment: due.segment,
+      interests: formatQqSelfPersonaContext(state.qq.selfPersona, { interestOnly: true }).slice(0, 600),
+      friends: collectQqLifeQzoneFriends(),
+      experiences: state.qq.botLife.experiences.slice(-3),
+      limits: {
+        postsLeft: Math.max(0, lifeQzonePostsPerDay - due.ledger.qzonePosts),
+        commentsLeft: Math.max(0, lifeQzoneCommentsPerDay - due.ledger.qzoneComments)
+      }
+    });
+    state.qq.botLife = markQqLifeActivityStarted(state.qq.botLife, due.segment);
+    await saveQqBotLife();
+    const spawned = qqSubagentManager.spawn({
+      title: due.segment.plan,
+      task,
+      kind: "life",
+      scopeId: "life",
+      requester: { name: state.qq.selfPersona.account?.nickname || assistantName },
+      context: { life: { segment: due.segment } }
+    });
+    logger.info("QQ bot life activity started", {
+      operation: "memory.life_activity",
+      outcome: spawned.ok ? "started" : "refused",
+      jobId: spawned.id || null,
+      activityKind: due.segment.kind,
+      segmentStart: due.segment.start,
+      reason: spawned.ok ? null : spawned.code || null
+    }, "learning");
+  } finally {
+    qqLifeActivityStarting = false;
+  }
+}
+
+// Recent private contacts are friends the Bot actually talks to.
+function collectQqLifeQzoneFriends() {
+  return Object.entries(state.qq.memory.recentMessages || {})
+    .filter(([scopeId, entries]) => scopeId.startsWith("private:") && Array.isArray(entries) && entries.length)
+    .map(([scopeId, entries]) => {
+      const human = [...entries].reverse().find((entry) => !entry?.isAssistant && entry?.senderId !== "assistant");
+      return { userId: scopeId.slice("private:".length), name: human?.senderLabel || human?.senderName || "", at: Date.parse(entries.at(-1)?.at || "") || 0 };
+    })
+    .filter((friend) => /^\d{5,12}$/.test(friend.userId) && !state.qq.bannedUserIds.includes(friend.userId))
+    .sort((left, right) => right.at - left.at)
+    .slice(0, 4);
+}
+
 // Subscription interest judgments get their own small slot pool so a burst
 // of background checks never waits on, or delays, a QQ reply turn.
 const qqSubscriptionInterestRunner = createSubscriptionModelTaskRunner({
@@ -14290,6 +15244,10 @@ async function attachQqRichMessageContext(event) {
       ])].slice(0, 16),
       forward: {
         text: forwardText,
+        media: {
+          videos: contexts.flatMap((context) => context.media?.videos || []).slice(0, 6),
+          audios: contexts.flatMap((context) => context.media?.audios || []).slice(0, 6)
+        },
         nodeCount: contexts.reduce((sum, context) => sum + Number(context.nodeCount || 0), 0),
         maxDepth: Math.max(0, ...contexts.map((context) => Number(context.maxDepth || 0))),
         truncated: contexts.some((context) => context.truncated),
@@ -14330,6 +15288,7 @@ async function fetchOneBotForwardContent(forwardId, {
 
   const lines = [];
   const images = [];
+  const media = { videos: [], audios: [] };
   let nodeCount = 0;
   let deepest = depth;
   const availableNodes = Math.min(60, Math.max(0, Number(budget.remainingNodes || 0)));
@@ -14365,21 +15324,27 @@ async function fetchOneBotForwardContent(forwardId, {
       }));
       nestedTexts.push(indentQqForwardText(nested.text));
       images.push(...(nested.images || []));
+      media.videos.push(...(nested.media?.videos || []));
+      media.audios.push(...(nested.media?.audios || []));
       nodeCount += Number(nested.nodeCount || 0);
       deepest = Math.max(deepest, Number(nested.maxDepth || depth + 1));
       truncated ||= Boolean(nested.truncated);
     }
     const nodeImages = extractOneBotImageInputs({ message: segments });
+    media.videos.push(...(content.media?.videos || []));
+    media.audios.push(...(content.media?.audios || []));
     const bodyText = [content.displayText, ...nestedTexts].filter(Boolean).join("\n").trim();
     const imageNote = nodeImages.length > 0 ? `[图片 ${nodeImages.length} 张]` : "";
     const body = [bodyText, imageNote].filter(Boolean).join(" ") || "[空消息]";
     lines.push(`${index + 1}. ${senderName}：${body}`);
-    images.push(...nodeImages);
+    const nodeLabel = `${depth > 0 ? `${depth + 1} 层嵌套的` : ""}${index + 1} 条（${String(senderName).slice(0, 30)}）`;
+    images.push(...nodeImages.map((image) => ({ ...image, forwardLabel: image.forwardLabel || nodeLabel })));
   }
 
   return {
     text: lines.join("\n").trim().slice(0, 12000),
     images: dedupeQqImages(images).slice(0, 8),
+    media: { videos: media.videos.slice(0, 6), audios: media.audios.slice(0, 6) },
     nodeCount,
     maxDepth: deepest,
     truncated
@@ -15788,6 +16753,10 @@ async function handleApi(req, res) {
         return sendJson(res, 200, { status: "ok", duplicate: true, traceId: event.traceId });
       }
       await rememberQqHumanPokeActivity(event);
+      if (event.groupId && state.qq.allowedGroups.includes(event.groupId)
+        && String(event.senderId || "") !== String(payload.self_id || "")) {
+        observeQqHumanAction(event.groupId, "pokes");
+      }
       if (!isOneBotPokeToSelf(payload)) {
         logger.debug("OneBot poke observed for learning but ignored for reply because it did not target the bot", {
           senderId: event.senderId,
@@ -15806,6 +16775,8 @@ async function handleApi(req, res) {
       return sendJson(res, 200, { status: "ok", traceId: event.traceId });
     }
     if (payload.post_type !== "message" || !["group", "private"].includes(payload.message_type)) {
+      const observed = payload.post_type === "notice" ? observeQqHumanNotice(payload) : false;
+      if (observed) return sendJson(res, 200, { ignored: true, learned: true, reason: "Human action observed for behavior statistics" });
       logger.debug("OneBot event ignored", {
         postType: payload.post_type || null,
         messageType: payload.message_type || null,
@@ -15844,6 +16815,9 @@ async function handleApi(req, res) {
       logger.debug("Duplicate OneBot message ignored", { dedupeKey, groupId: event.groupId || null, senderId: event.senderId || null }, "onebot", qqLogContext(event));
       return sendJson(res, 200, { status: "ok", duplicate: true, traceId: event.traceId });
     }
+
+    const heard = await attachQqVoiceTranscripts(event);
+    if (heard !== event) Object.assign(event, heard);
 
     await qqStickerInventory.remember(extractQqReplyStickerCandidates(event)).catch((error) => {
       logger.debug("Unable to remember downloaded QQ sticker metadata", { error }, "qq", qqLogContext(event));
@@ -15911,6 +16885,7 @@ if (!qqKnowledgeBaseLoad.blocked && (qqKnowledgeBaseLoad.created || qqKnowledgeB
 await loadQqPersonas();
 await loadQqSelfPersona();
 await loadQqBotLife();
+await loadQqHumanActionStats();
 await loadQqPersonality();
 state.qq.selfPersona = syncQqSelfPersonaActivity(state.qq.selfPersona, state.qq.memory.recentMessages);
 await saveQqSelfPersona();
@@ -16016,6 +16991,8 @@ function shutdown(signal) {
     const shutdownError = new Error("Hub is shutting down");
     shutdownError.code = "HUB_SHUTTING_DOWN";
     codexRunLimiter.close(shutdownError);
+    qqSubagentManager.abortAll();
+    qqSubagentLimiter.close(shutdownError);
     oneBotWebhookLimiter.close(shutdownError);
     qqReplyScheduler.close(shutdownError);
     qqReplySteering.close();
@@ -16061,6 +17038,7 @@ function shutdown(signal) {
       qqPersonasWriter.close(),
       qqSelfPersonaWriter.close(),
       qqBotLifeWriter.close(),
+      qqHumanActionsWriter.close(),
       qqConversationMemoryWriter.close(),
       qqCodexSessionsWriter.close(),
       qqKnowledgeBaseWriter.close()

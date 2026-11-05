@@ -45,6 +45,7 @@ export function parseQqZonePublishCommand(command) {
     .filter(Boolean);
   const content = [];
   let useCurrentImages = false;
+  let useOutputImages = false;
   let invalidImageSelector = "";
   for (const segment of segments) {
     const image = segment.match(/^图片\s*[:=：]\s*(.+)$/i);
@@ -54,11 +55,14 @@ export function parseQqZonePublishCommand(command) {
     }
     const selector = String(image[1] || "").trim();
     if (/^(?:当前|本条|当前消息|引用|引用消息)$/i.test(selector)) useCurrentImages = true;
+    // The Bot's own pictures from this turn: drawn, downloaded or written to output.
+    else if (/^(?:输出|生成|我的|自己的|本轮)$/i.test(selector)) useOutputImages = true;
     else invalidImageSelector = selector;
   }
   return {
     content: content.join(" | ").trim().slice(0, 2000),
     useCurrentImages,
+    useOutputImages,
     invalidImageSelector
   };
 }

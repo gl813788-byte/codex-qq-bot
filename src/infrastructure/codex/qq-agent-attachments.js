@@ -283,3 +283,36 @@ function unchanged(value) {
     recoveredUnlistedImageCount: 0
   };
 }
+
+// Pictures the current thread generated during this turn, copied into the
+// turn's output directory, newest first. Used when a tool (e.g. a Qzone post)
+// needs the Bot's own drawing before the final answer imports attachments.
+export async function importRecentCodexGeneratedImages({
+  threadId = "",
+  generatedImagesDir = "",
+  outputDir = "",
+  generatedAfterMs = 0,
+  maxImageBytes = DEFAULT_MAX_IMAGE_BYTES,
+  limit = 4
+} = {}) {
+  const context = await buildImportContext({ threadId, generatedImagesDir, outputDir, generatedAfterMs, maxImageBytes });
+  if (!context.realThreadRoot || !context.threadRoot) return [];
+  const entries = await readdir(context.realThreadRoot, { withFileTypes: true }).catch(() => []);
+  const candidates = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const candidate = join(context.threadRoot, entry.name);
+    const info = await stat(candidate).catch(() => null);
+    if (!info?.isFile() || info.size <= 0 || info.size > context.maxImageBytes) continue;
+    if (context.generatedAfterMs > 0 && info.mtimeMs < context.generatedAfterMs - 2000) continue;
+    candidates.push({ candidate, mtimeMs: info.mtimeMs });
+  }
+  candidates.sort((left, right) => right.mtimeMs - left.mtimeMs || right.candidate.localeCompare(left.candidate));
+  const imported = [];
+  for (const [index, { candidate }] of candidates.entries()) {
+    if (imported.length >= Math.max(1, limit)) break;
+    const result = await importGeneratedImageAttachment({ path: candidate }, index, context);
+    if (result.path) imported.push(result.path);
+  }
+  return imported;
+}

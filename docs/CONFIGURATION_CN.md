@@ -28,6 +28,9 @@
 | `config/local.env` | 仓库 `ncc start` 使用的本地环境变量与密钥 | 否；权限建议 `600` |
 | `src/config/environment.js` | 环境变量名称、默认值、范围和归一化的权威实现 | 是 |
 | `runtime/logs/hub.jsonl` | 结构化运行日志，不是配置 | 否 |
+| `data/qq-human-actions.json` | 各会话群友互动频率的匿名统计（贴表情、拍一拍、撤回、分享等） | 否 |
+| `runtime/media-tools/` | 可选媒体组件（分镜、语音识别模型、yt-dlp） | 否 |
+| `data/qq-bot-drawings/` | Bot 自己画的画（按内容哈希存放，索引在 `data/qq-bot-life.json`） | 否 |
 
 首次配置：
 
@@ -261,6 +264,33 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 模型自行判断回复是闲聊还是需要交付结果的实质任务。闲聊继续跟随群节奏；解题、证明、计算、代码、写作、翻译、总结及其短续答不套固定字数，按正确完成任务所需篇幅作答。投递层不再把正常模型回复硬裁到 900 字，闲聊字数建议也不会删掉回复中的任何句子；任何超过单条安全上限的气泡都会优先按段落和句子边界自动拆成多条有序 QQ 消息，只有无自然边界的连续长文本才硬切。超过本次最大气泡数时，最后一条会明确标注截断，而不会让 OneBot 用一条超限消息冒险发送。
 
 自我人格刷新阈值使用 `CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_*`；账号贴纸使用 `CODEX_REMOTE_CONTACT_QQ_ACCOUNT_STICKER_*`。所有精确名称、范围和默认值以 `src/config/environment.js` 为准。
+
+### 媒体、子代理与作息活动
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `CODEX_REMOTE_CONTACT_MEDIA_TOOLS_DIR` | `runtime/media-tools` | 可选媒体组件目录（`npm run ncc -- media install` 安装到这里） |
+| `CODEX_REMOTE_CONTACT_MEDIA_MAX_VIDEO_SECONDS` | `1200` | 单次看视频的时长预算；下载时允许到它的 3 倍，范围 30–7200 |
+| `CODEX_REMOTE_CONTACT_MEDIA_MAX_DOWNLOAD_MB` | `200` | 视频下载上限（MB），范围 10–2048 |
+| `CODEX_REMOTE_CONTACT_MEDIA_ASR_LANGUAGE` | `auto` | SenseVoice 语言：`auto`、`zh`、`en`、`ja`、`ko`、`yue` |
+| `CODEX_REMOTE_CONTACT_MEDIA_ASR_THREADS` | `2` | 语音识别线程数，范围 1–4 |
+| `CODEX_REMOTE_CONTACT_MEDIA_JOB_TIMEOUT_MS` | `300000` | 单个媒体子进程（下载/转写/分镜）的超时，范围 30000–1800000 |
+| `CODEX_REMOTE_CONTACT_MEDIA_COOKIES_FILE` | 空 | 可选的 yt-dlp cookies.txt（登录后 B站可取更高清晰度）；不会写入日志 |
+| `CODEX_REMOTE_CONTACT_MEDIA_VOICE_AUTO` | `1` | 触发 Bot 的语音消息在路由前自动转写；`0` 关闭（语音消息恢复为忽略） |
+| `CODEX_REMOTE_CONTACT_MEDIA_VOICE_AUTO_MAX_SECONDS` | `90` | 自动转写的单段最长秒数，范围 5–600 |
+| `CODEX_REMOTE_CONTACT_MEDIA_MIN_AVAILABLE_MB` | `1200` | 媒体任务启动前要求的最少可用物理内存（MB）；`0` 关闭检查 |
+| `CODEX_REMOTE_CONTACT_SUBAGENT_MAX_CONCURRENCY` | `1` | 后台子代理同时运行数，`0` 关闭子代理和作息活动，最大 4 |
+| `CODEX_REMOTE_CONTACT_SUBAGENT_MAX_QUEUED` | `2` | 子代理排队数，满了直接拒绝，范围 0–8 |
+| `CODEX_REMOTE_CONTACT_SUBAGENT_TIMEOUT_MS` | `1200000` | 单轮子代理的整轮超时，范围 60000–7200000 |
+| `CODEX_REMOTE_CONTACT_SUBAGENT_MIN_AVAILABLE_MB` | `1000` | 子代理/作息活动启动前要求的最少可用内存（MB）；子代理最多等 10 分钟 |
+| `CODEX_REMOTE_CONTACT_LIFE_ACTIVITIES` | `1` | 按作息真的去做线上活动；`0` 关闭 |
+| `CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_DAILY_LIMIT` | `5` | 每天最多几次作息活动，范围 0–24 |
+| `CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_MIN_GAP_MINUTES` | `60` | 两次作息活动的最小间隔分钟，范围 10–720 |
+| `CODEX_REMOTE_CONTACT_LIFE_QZONE_POSTS_PER_DAY` | `1` | Bot 自主发说说的每日上限（主人/管理员要求不计入） |
+| `CODEX_REMOTE_CONTACT_LIFE_QZONE_COMMENTS_PER_DAY` | `3` | Bot 自主评论空间的每日上限 |
+| `CODEX_REMOTE_CONTACT_SOCIAL_FRIEND_REQUESTS_PER_DAY` | `3` | 普通对话里主动加好友的每日上限 |
+
+手机上内存突增会让系统杀掉整个会话，所以媒体任务、子代理和作息活动在启动前都检查 `/proc/meminfo` 的 MemAvailable；本机命令申请（`qq_runtime.host_command`）也按命令轻重检查（普通 500 MB、安装/解压/媒体类 1500 MB、并行测试 3500 MB），不够时在执行前拒绝。
 
 ### 联网搜索与 judge 服务
 

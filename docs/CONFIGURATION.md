@@ -28,6 +28,9 @@ process environment
 | `config/local.env` | Environment and secrets used by repository `ncc start` | No; mode `600` recommended |
 | `src/config/environment.js` | Authoritative environment names, defaults, bounds and normalization | Yes |
 | `runtime/logs/hub.jsonl` | Structured runtime evidence, not configuration | No |
+| `data/qq-human-actions.json` | Anonymous per-conversation rates of human actions (reactions, pokes, recalls, shares and more) | No |
+| `runtime/media-tools/` | Optional media components (storyboard, speech models, yt-dlp) | No |
+| `data/qq-bot-drawings/` | The Bot's own drawings, content-addressed (indexed in `data/qq-bot-life.json`) | No |
 
 First-time setup:
 
@@ -259,6 +262,33 @@ Use the same token on both sides. Without one, the webhook trusts only requests 
 The main model decides from the full context whether a turn is casual chat or a substantive deliverable. Casual replies still follow the learned group rhythm; problem solving, proofs, calculations, code, writing, translation, summaries, and short continuations of those tasks have no fixed response length and should be as long as correct completion requires. Delivery no longer hard-cuts normal model output at 900 characters, and the casual length hint never removes sentences from a reply. Any bubble above the per-message safety limit is split into ordered QQ messages at paragraph or sentence boundaries, with hard cuts used only for unbroken text. If the configured per-reply bubble ceiling is exceeded, the last sent bubble explicitly reports truncation instead of risking one oversized OneBot send.
 
 Self-persona thresholds use `CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_*`; account sticker settings use `CODEX_REMOTE_CONTACT_QQ_ACCOUNT_STICKER_*`. Consult `src/config/environment.js` for every exact name, default and bound.
+
+### Media, sub-agents and routine activities
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CODEX_REMOTE_CONTACT_MEDIA_TOOLS_DIR` | `runtime/media-tools` | Directory of the optional media components (installed by `npm run ncc -- media install`) |
+| `CODEX_REMOTE_CONTACT_MEDIA_MAX_VIDEO_SECONDS` | `1200` | Watch budget per call; downloads may be up to three times longer; range 30–7200 |
+| `CODEX_REMOTE_CONTACT_MEDIA_MAX_DOWNLOAD_MB` | `200` | Video download cap in MB, range 10–2048 |
+| `CODEX_REMOTE_CONTACT_MEDIA_ASR_LANGUAGE` | `auto` | SenseVoice language: `auto`, `zh`, `en`, `ja`, `ko`, `yue` |
+| `CODEX_REMOTE_CONTACT_MEDIA_ASR_THREADS` | `2` | Speech-recognition threads, range 1–4 |
+| `CODEX_REMOTE_CONTACT_MEDIA_JOB_TIMEOUT_MS` | `300000` | Timeout of one media child process (download/transcribe/storyboard), range 30000–1800000 |
+| `CODEX_REMOTE_CONTACT_MEDIA_COOKIES_FILE` | empty | Optional yt-dlp cookies.txt (signed-in Bilibili gives higher resolutions); never logged |
+| `CODEX_REMOTE_CONTACT_MEDIA_VOICE_AUTO` | `1` | Transcribe voice messages that trigger the Bot before routing; `0` disables (voice is ignored again) |
+| `CODEX_REMOTE_CONTACT_MEDIA_VOICE_AUTO_MAX_SECONDS` | `90` | Longest clip transcribed automatically, range 5–600 |
+| `CODEX_REMOTE_CONTACT_MEDIA_MIN_AVAILABLE_MB` | `1200` | Minimum available physical memory (MB) before a media job starts; `0` disables the check |
+| `CODEX_REMOTE_CONTACT_SUBAGENT_MAX_CONCURRENCY` | `1` | Background sub-agents running at once; `0` disables sub-agents and routine activities; max 4 |
+| `CODEX_REMOTE_CONTACT_SUBAGENT_MAX_QUEUED` | `2` | Queued sub-agents before refusal, range 0–8 |
+| `CODEX_REMOTE_CONTACT_SUBAGENT_TIMEOUT_MS` | `1200000` | Whole-turn deadline of one sub-agent run, range 60000–7200000 |
+| `CODEX_REMOTE_CONTACT_SUBAGENT_MIN_AVAILABLE_MB` | `1000` | Minimum available memory (MB) before a sub-agent or routine activity starts; a sub-agent waits up to ten minutes |
+| `CODEX_REMOTE_CONTACT_LIFE_ACTIVITIES` | `1` | Really carry out the online parts of the daily routine; `0` disables |
+| `CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_DAILY_LIMIT` | `5` | Routine activities per day, range 0–24 |
+| `CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_MIN_GAP_MINUTES` | `60` | Minimum minutes between routine activities, range 10–720 |
+| `CODEX_REMOTE_CONTACT_LIFE_QZONE_POSTS_PER_DAY` | `1` | Daily cap of the Bot's own Qzone posts (owner/administrator requests are not counted) |
+| `CODEX_REMOTE_CONTACT_LIFE_QZONE_COMMENTS_PER_DAY` | `3` | Daily cap of the Bot's own Qzone comments |
+| `CODEX_REMOTE_CONTACT_SOCIAL_FRIEND_REQUESTS_PER_DAY` | `3` | Daily cap of friend requests from ordinary conversations |
+
+A memory spike makes a phone kill the whole session, so media jobs, sub-agents and routine activities check MemAvailable in `/proc/meminfo` before starting; owner host commands (`qq_runtime.host_command`) are checked by weight too (500 MB for ordinary commands, 1500 MB for installs, extraction and media work, 3500 MB for parallel test runs) and refused before execution when memory is short.
 
 ### Web lookup and judge provider
 

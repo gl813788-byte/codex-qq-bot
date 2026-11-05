@@ -230,6 +230,16 @@ const commands = [
     configurable: false
   },
   {
+    key: "activeFriendAdd",
+    category: "group",
+    menuLine: "/加好友",
+    description: "让 Bot 向这段对话里出现过的人发好友申请",
+    usage: [["/加好友 QQ号 [验证消息] [答案=…]", "对方同意后才算加上"]],
+    aliases: ["加好友"],
+    defaultPublic: false,
+    configurable: false
+  },
+  {
     key: "status",
     category: "operations",
     menuLine: "/状态",

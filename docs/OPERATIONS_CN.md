@@ -125,6 +125,20 @@ Hub 只按本轮原始、已验证的发送者授权：主人获准执行；Bot 
 
 命令在不加载 shell profile 的 Bash 中运行，环境不继承 Hub/provider 凭据；默认 30 秒、最多 120 秒、输出上限 64 KiB，取消或超时会终止本次命令的进程组。同一调用编号只执行一次，失败不自动重试；退出码 0 仍需结合实际状态判断任务是否完成。需要长期交互会话时复用本机已有会话管理器并检查启动结果，后台启动不代表界面已经出现在用户屏幕上。日志只记录操作者、工具和结果元数据，不记录命令、提权理由或输出。附件仍必须进入本轮 output 目录。
 
+### 媒体组件、子代理与内存保护
+
+看视频和听语音依赖可选组件，两套 NCC 都能查看和安装：
+
+```bash
+npm run ncc -- media            # 查看 ffmpeg、dsh-video-storyboard、sherpa-onnx、模型和 yt-dlp
+npm run ncc -- media install    # 安装到 runtime/media-tools（模型按 SHA-256 校验）
+npm run ncc -- media uninstall  # 只删除本项目创建的媒体组件目录
+```
+
+安装会下载约 200 MB 模型并解压，属于重负载步骤：可用内存低于 1500 MB（`CODEX_REMOTE_CONTACT_MEDIA_INSTALL_MIN_MB`）时脚本会拒绝继续。手机上建议先 `ncc stop-hub` / `ncc stop-napcat` 再安装；装好后 Hub 一分钟内自动识别，不需要重启。运行时每个媒体任务、子代理和作息活动启动前都检查可用内存，不够就拒绝或推迟，日志分别是 `media.tool`、`media.voice`、`agent.subagent` 和 `memory.life_activity`；可以用 `npm run ncc -- logs --category agent` 查看子代理状态变化。
+
+主动加好友需要 NapCat 社交桥 v20（`/health` 的 capabilities 里有 `outgoing-friend-request-submit`）。更新 `modules/napcat-social-bridge/` 后需要按 NapCat 插件流程重新部署并重启 NapCat；重启可能要求重新扫码登录，应在空闲时由主人确认后进行。桥版本过旧时 `/加好友` 会明确回答“不支持”，不会伪报成功。社交桥接口只接受本机直连，带 `X-Forwarded-For`、`CF-Connecting-IP` 等转发头的请求一律拒绝；需要远程扫码时不要把 6099 端口整体用隧道暴露出去，应只转发 WebUI 路径并在登录后立即关闭。
+
 ## AI 手动任务中心
 
 QQ 菜单中的 `/AI任务` 和两套 NCC 都读取同一个任务目录，并通过本机回环管理 API 执行：

@@ -26,12 +26,14 @@ test("active agent description reports what the selected engine really runs", ()
     model: "opus",
     reasoningEffort: "low",
     reportsQuota: false,
-    modelCatalog: false
+    modelCatalog: false,
+    imageGeneration: false
   });
   const codex = describeAgentEngine("codex", settings);
   assert.equal(codex.model, "gpt-5.6-sol");
   assert.equal(codex.reportsQuota, true);
   assert.equal(codex.modelCatalog, true);
+  assert.equal(codex.imageGeneration, true);
   assert.equal(getAgentEngine("unknown").id, "codex");
   assert.equal(formatAgentEngineSummary(describeAgentEngine("claude", settings)), "Claude Code · opus / low");
 });

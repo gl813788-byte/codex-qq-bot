@@ -274,3 +274,32 @@ test("unlisted-image recovery rejects stale, silent, and thread-directory escape
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+test("recent generated pictures of this thread are imported for tools before the final answer", async () => {
+  const { mkdtemp, mkdir: makeDir, writeFile: write, utimes, readdir: list, rm: remove } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join: joinPath } = await import("node:path");
+  const { importRecentCodexGeneratedImages } = await import("../src/infrastructure/codex/qq-agent-attachments.js");
+  const root = await mkdtemp(joinPath(tmpdir(), "qq-generated-"));
+  try {
+    const png = Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000000", "hex");
+    await makeDir(joinPath(root, "generated", "thread-a"), { recursive: true });
+    await makeDir(joinPath(root, "generated", "thread-b"), { recursive: true });
+    await write(joinPath(root, "generated", "thread-a", "cat.png"), png);
+    await write(joinPath(root, "generated", "thread-a", "old.png"), png);
+    const old = new Date(Date.now() - 3_600_000);
+    await utimes(joinPath(root, "generated", "thread-a", "old.png"), old, old);
+    await write(joinPath(root, "generated", "thread-b", "other.png"), png);
+    const imported = await importRecentCodexGeneratedImages({
+      threadId: "thread-a",
+      generatedImagesDir: joinPath(root, "generated"),
+      outputDir: joinPath(root, "output"),
+      generatedAfterMs: Date.now() - 60_000
+    });
+    assert.equal(imported.length, 1);
+    assert.match(imported[0], /output\/codex-generated-1-.*\.png$/);
+    assert.equal((await list(joinPath(root, "output"))).length, 1);
+  } finally {
+    await remove(root, { recursive: true, force: true });
+  }
+});

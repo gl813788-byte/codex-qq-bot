@@ -276,6 +276,105 @@ export function buildQqHumanBehaviorPlan(event = {}, intent = {}, style = {}, { 
   };
 }
 
+// Defaults when a conversation has too few observations to measure: rough
+// per-message rates of an ordinary Chinese QQ group.
+const DEFAULT_HUMAN_ACTION_RATES = Object.freeze({ reactions: 0.03, pokes: 0.01, recalls: 0.01 });
+const reactionModes = new Set(["casual", "social_emotion", "visual_reaction", "shared_content", "opinion", "ping", "casual_answer", "social_request", "quoted_continuation"]);
+const reactionOnlyModes = new Set(["casual", "social_emotion", "visual_reaction", "ping", "shared_content"]);
+
+// Non-typing actions for this turn, sized by how often people here actually
+// do them (summarizeQqHumanActionRates) and rolled per message so the Bot
+// reacts, pokes back or opens a shared video at a human-like rate instead of
+// only ever replying. Suggestions only; tools still decide what happened.
+export function buildQqHumanActionPlan(event = {}, plan = {}, {
+  actionRates = null,
+  media = { videos: 0, audios: 0, unheardAudios: 0 },
+  mediaAvailable = { video: false, audio: false },
+  stickerCandidates = 0,
+  expression = null
+} = {}) {
+  const privateChat = !event.groupId;
+  const mode = String(plan.mode || "casual");
+  const measured = actionRates && actionRates.confidence && actionRates.confidence !== "none";
+  const rate = (key) => {
+    const value = Number(actionRates?.rates?.[key]);
+    return measured && Number.isFinite(value) ? value : DEFAULT_HUMAN_ACTION_RATES[key] ?? 0;
+  };
+  const key = `${event.groupId || "private"}:${event.senderId || ""}:${event.raw?.message_id || ""}:${event.text || ""}`;
+  const bias = normalizeExpressionBias(expression);
+  const actions = [];
+  const hasMessageId = event.raw?.message_id != null && !event.qqColdProactive && !event.qqPrivateProactive;
+  const directed = Boolean(event.type === "group_at" || String(event.type || "").endsWith("_poke")
+    || event.hasSelfAtSegment || event.isReplyToSelf || privateChat);
+
+  let reactChance = 0;
+  let reactionOnlyChance = 0;
+  if (!privateChat && hasMessageId && reactionModes.has(mode) && !event.queuedAggregate) {
+    reactChance = clamp(rate("reactions") * 5 * bias.emojiScale, 0.06, 0.4);
+    if (["answer", "context_answer", "task"].includes(mode)) reactChance *= 0.5;
+    reactionOnlyChance = reactionOnlyModes.has(mode) ? reactChance * 0.35 : 0;
+  }
+  const reactionRoll = stableFraction(`react:${key}`);
+  if (reactionRoll < reactionOnlyChance) actions.push("reaction_only");
+  else if (reactionRoll < reactChance) actions.push("react");
+
+  let pokeBackChance = 0;
+  if (String(event.type || "").endsWith("_poke")) {
+    pokeBackChance = clamp(0.4 + rate("pokes") * 8, 0.35, 0.7);
+    if (stableFraction(`poke:${key}`) < pokeBackChance) actions.push("poke_back");
+  }
+
+  let watchChance = 0;
+  if (media.videos > 0 && mediaAvailable.video) {
+    watchChance = directed || mode === "shared_content" ? 0.85 : 0.5;
+    if (stableFraction(`watch:${key}`) < watchChance) actions.push("watch_video");
+  }
+  if (media.unheardAudios > 0 && mediaAvailable.audio) actions.push("listen_audio");
+
+  let favoriteChance = 0;
+  if (stickerCandidates > 0) {
+    favoriteChance = 0.15;
+    if (stableFraction(`favorite:${key}`) < favoriteChance) actions.push("save_sticker");
+  }
+  return {
+    actions,
+    reactChance: round3(reactChance),
+    reactionOnlyChance: round3(reactionOnlyChance),
+    pokeBackChance: round3(pokeBackChance),
+    watchChance: round3(watchChance),
+    favoriteChance: round3(favoriteChance),
+    measured: Boolean(measured),
+    sample: Number(actionRates?.sample || 0),
+    humanReactionRate: rate("reactions"),
+    topEmojis: Array.isArray(actionRates?.topEmojis) ? actionRates.topEmojis.slice(0, 4) : []
+  };
+}
+
+export function formatQqHumanActionContext(actionPlan = {}) {
+  const actions = Array.isArray(actionPlan.actions) ? actionPlan.actions : [];
+  const per100 = Math.round(Number(actionPlan.humanReactionRate || 0) * 1000) / 10;
+  const emojiHint = actionPlan.topEmojis?.length ? `（这里常贴的：${actionPlan.topEmojis.join(" ")}）` : "";
+  const lines = [
+    `行为规划（${actionPlan.measured ? `按这里的人实际的互动频率，样本约 ${Math.round(actionPlan.sample)} 条` : "这里样本还少，按普通群聊的习惯"}；你不只会打字，真人也会顺手做点别的）：`
+  ];
+  if (actions.includes("reaction_only")) {
+    lines.push(`- 这轮像真人那样只给这条消息贴个表情回应就够了${emojiHint}：用 qq_message.act(action=react)，成功后 status 设为 silent、不再打字；真有话想说才改成文字。`);
+  } else if (actions.includes("react")) {
+    lines.push(`- 顺手给这条消息贴个表情回应（qq_message.act react）再回复${emojiHint}；这里的人大约每 100 条消息贴 ${per100} 次。`);
+  }
+  if (actions.includes("poke_back")) lines.push("- 别人拍了你：像人一样拍回去（qq_social.act poke），可以拍完不说话，也可以再接一句。");
+  if (actions.includes("watch_video")) lines.push("- 有人发了视频：先像人一样点开看（qq_media.video watch），看完再聊你的真实观感；不看就别装看过。");
+  if (actions.includes("listen_audio")) lines.push("- 有语音还没听：用 qq_media.audio listen 听一下再回。");
+  if (actions.includes("save_sticker")) lines.push("- 对方发的表情包如果你觉得好玩，可以 inspect 看看、label 标注，喜欢就收藏（favorite）。");
+  if (lines.length === 1) lines.push("- 这轮没有特别要做的动作；照常回应，或者觉得没必要回就 status=silent。");
+  lines.push("- 动作只在工具返回成功后才算做了；不用每轮都做动作，也别为了显得忙乱用工具。");
+  return lines.join("\n");
+}
+
+function round3(value) {
+  return Math.round(Number(value || 0) * 1000) / 1000;
+}
+
 function normalizeExpressionBias(value) {
   const scale = (input, fallback = 1) => {
     const number = Number(input);
