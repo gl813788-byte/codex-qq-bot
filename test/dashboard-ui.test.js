@@ -62,3 +62,17 @@ test("dashboard keeps code and styles external so the strict CSP holds", () => {
     assert.equal(body.trim(), "", "inline script bodies are not allowed");
   }
 });
+
+test("dashboard shows raw QQ CQ codes as short readable tags", () => {
+  const start = javascript.indexOf("function displayQqText");
+  const end = javascript.indexOf("\nfunction ", start + 1);
+  assert.notEqual(start, -1, "client.js must define displayQqText");
+  const { zh } = extractTranslations(javascript);
+  const displayQqText = vm.runInNewContext(`${javascript.slice(start, end)}; displayQqText`, { t: (key) => zh[key] ?? key }, { timeout: 100 });
+  assert.equal(displayQqText("[CQ:image,file=a.jpg,sub_type=0,url=https://multimedia.nt.qq.com.cn/download?a=1&amp;b=2]"), zh.cqImage);
+  assert.equal(displayQqText("[CQ:image,file=b.jpg,sub_type=1,summary=&#91;动画表情&#93;]"), zh.cqSticker);
+  assert.equal(displayQqText("[CQ:reply,id=9][CQ:at,qq=12345,name=小明] 你好[CQ:face,id=14]"), `@小明 你好${zh.cqFace}`);
+  assert.equal(displayQqText("[CQ:record,file=x.amr] 听听"), `${zh.cqVoice} 听听`);
+  assert.equal(displayQqText("[CQ:unknown_kind,x=1]"), zh.cqOther);
+  assert.equal(displayQqText("plain text [not a code]"), "plain text [not a code]");
+});

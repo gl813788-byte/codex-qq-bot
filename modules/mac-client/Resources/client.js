@@ -57,7 +57,7 @@ const translations = {
     privateInterest: "私聊主动兴趣", privateInterestHint: "按互动频率与间隔估算概率，连续未回复会自动退避。", privateContact: "联系人 {value}", privatePhase: "阶段 {value}", privateProbability: "候选概率 {value}%", privateFrequency: "互动频率 {value}", noPrivateInterest: "还没有可展示的私聊学习状态。", noPrivateInterestDecisions: "还没有触发过私聊主动判断。",
     outcomeSent: "已发送", outcomeSilent: "保持沉默", outcomeFailed: "失败", outcomeCancelled: "因新消息取消",
     memoryType: "记忆类型", unified: "统一记忆", searchMemory: "搜索记忆", refresh: "刷新", noMemory: "没有符合条件的记忆。", entriesCount: "{count} 条", clear: "清空", clearMemoryTitle: "清空记忆", clearMemoryMessage: "会永久清理“{value}”中的记忆，确定继续吗？", allRelatedMemory: "{value} 的全部相关记忆", memoryCleared: "记忆已清空",
-    unifiedEntries: "统一摘要", handoffs: "交接", ideas: "点子", projects: "项目", todos: "待办", notes: "记录", recentState: "近期状态", latestHandoff: "最近交接", noState: "暂无近期状态", updated: "更新于 {time}",
+    unifiedEntries: "统一摘要", handoffs: "交接", ideas: "点子", projects: "项目", todos: "待办", notes: "记录", cqImage: "[图片]", cqSticker: "[表情包]", cqFace: "[表情]", cqVoice: "[语音]", cqVideo: "[视频]", cqFile: "[文件]", cqForward: "[聊天记录]", cqCard: "[卡片]", cqPoke: "[戳一戳]", cqOther: "[消息]", memoryPersonProfile: "人物画像", memoryPersonSession: "会话印象", recentState: "近期状态", latestHandoff: "最近交接", noState: "暂无近期状态", updated: "更新于 {time}",
     autoSkillMemory: "Skill 回看后写入", autoSkillHint: "桌面 Skill 调用记忆后自动沉淀", manualHandoff: "允许手动交接", manualHandoffHint: "允许 /交接 指令写入摘要",
     shortTermMemory: "短期记忆", recentMessages: "最近消息", roleUser: "用户", roleAssistant: "助手", publicMemory: "公共长期记忆", personas: "群友画像", conversationImpressions: "对话印象", impressionBrief: "印象简述", impressionDetail: "印象详述", thoughtBrief: "感想简述", thoughtDetail: "感想详述", recentTopic: "近期话题", recentInteraction: "近期互动",
     memoryPeople: "人物", peopleTotal: "人物", peopleWithAvatar: "已获取头像", peopleDescribed: "头像已描述", peoplePending: "待描述头像", noPeople: "还没有人物印象或头像记录。", showMorePeople: "显示更多（还有 {count} 位）",
@@ -133,7 +133,7 @@ const translations = {
     privateInterest: "Private proactive interest", privateInterestHint: "Estimates probability from interaction frequency and gaps, backing off after unanswered messages.", privateContact: "Contact {value}", privatePhase: "Phase {value}", privateProbability: "Probability {value}%", privateFrequency: "Frequency {value}", noPrivateInterest: "No private-chat learning yet.", noPrivateInterestDecisions: "No private proactive decision has run yet.",
     outcomeSent: "Sent", outcomeSilent: "Stayed silent", outcomeFailed: "Failed", outcomeCancelled: "Cancelled by new activity",
     memoryType: "Memory type", unified: "Unified", searchMemory: "Search memory", refresh: "Refresh", noMemory: "No matching memory.", entriesCount: "{count} entries", clear: "Clear", clearMemoryTitle: "Clear memory", clearMemoryMessage: "This permanently removes memory from “{value}”. Continue?", allRelatedMemory: "All memory related to {value}", memoryCleared: "Memory cleared",
-    unifiedEntries: "Unified summaries", handoffs: "Handoffs", ideas: "Ideas", projects: "Projects", todos: "Todos", notes: "Notes", recentState: "Recent state", latestHandoff: "Latest handoff", noState: "No recent state", updated: "Updated {time}",
+    unifiedEntries: "Unified summaries", handoffs: "Handoffs", ideas: "Ideas", projects: "Projects", todos: "Todos", notes: "Notes", cqImage: "[Image]", cqSticker: "[Sticker]", cqFace: "[Emoji]", cqVoice: "[Voice]", cqVideo: "[Video]", cqFile: "[File]", cqForward: "[Chat history]", cqCard: "[Card]", cqPoke: "[Poke]", cqOther: "[Message]", memoryPersonProfile: "Person profile", memoryPersonSession: "Session impression", recentState: "Recent state", latestHandoff: "Latest handoff", noState: "No recent state", updated: "Updated {time}",
     autoSkillMemory: "Write after Skill recall", autoSkillHint: "Persist useful context after a desktop Skill recall", manualHandoff: "Allow manual handoff", manualHandoffHint: "Allow /handoff to write a summary",
     shortTermMemory: "Short-term memory", recentMessages: "Recent messages", roleUser: "User", roleAssistant: "Assistant", publicMemory: "Public long-term memory", personas: "Personas", conversationImpressions: "Conversation impressions", impressionBrief: "Impression brief", impressionDetail: "Impression detail", thoughtBrief: "Thought brief", thoughtDetail: "Thought detail", recentTopic: "Recent topic", recentInteraction: "Recent interaction",
     memoryPeople: "People", peopleTotal: "People", peopleWithAvatar: "Avatars fetched", peopleDescribed: "Avatars described", peoplePending: "Awaiting description", noPeople: "No person impressions or avatars yet.", showMorePeople: "Show more ({count} left)",
@@ -1038,6 +1038,23 @@ function renderRuntimePulse() {
   $("#pulseAxisEnd").textContent = formatClock(latest.at);
 }
 
+// QQ text arrives with raw CQ codes; show them as short readable tags.
+function displayQqText(text) {
+  const decode = (value) => String(value || "").replace(/&#91;/g, "[").replace(/&#93;/g, "]").replace(/&#44;/g, ",").replace(/&amp;/g, "&");
+  const tags = { image: "cqImage", mface: "cqSticker", face: "cqFace", record: "cqVoice", video: "cqVideo", file: "cqFile", forward: "cqForward", node: "cqForward", json: "cqCard", xml: "cqCard", poke: "cqPoke" };
+  return String(text || "").replace(/\[CQ:([a-z_]+)((?:,[^\]]*)?)\]/gi, (_, type, rest) => {
+    const fields = Object.fromEntries(String(rest || "").slice(1).split(",").filter(Boolean).map((pair) => {
+      const index = pair.indexOf("=");
+      return index < 0 ? [pair, ""] : [pair.slice(0, index), decode(pair.slice(index + 1))];
+    }));
+    const kind = type.toLowerCase();
+    if (kind === "reply") return "";
+    if (kind === "at") return fields.qq === "all" ? "@all " : `@${fields.name || fields.qq || ""} `;
+    if (kind === "image" && (fields.sub_type === "1" || /^\[.+\]$/.test(fields.summary || ""))) return t("cqSticker");
+    return t(tags[kind] || "cqOther");
+  }).replace(/\s{2,}/g, " ").trim();
+}
+
 function renderRecentTimeline() {
   if (!app.state) return;
   const rows = (app.state.qq?.events || [])
@@ -1050,7 +1067,7 @@ function renderRecentTimeline() {
     const scope = event.groupId ? t("groupLabel", { value: event.groupId }) : t("privateChat");
     return `<article class="timeline-item">
       <span class="timeline-avatar">${escapeHtml(initial(sender))}</span>
-      <div class="timeline-copy"><strong>${escapeHtml(sender)} <span class="muted small-text">· ${escapeHtml(scope)}</span></strong><p>${escapeHtml(event.text || "—")}</p>${record.reply ? `<p class="timeline-reply">↳ ${escapeHtml(record.reply)}</p>` : ""}</div>
+      <div class="timeline-copy"><strong>${escapeHtml(sender)} <span class="muted small-text">· ${escapeHtml(scope)}</span></strong><p>${escapeHtml(displayQqText(event.text) || "—")}</p>${record.reply ? `<p class="timeline-reply">${escapeHtml(displayQqText(record.reply))}</p>` : ""}</div>
       <time>${escapeHtml(formatRelative(record.receivedAt))}</time>
     </article>`;
   }).join("") : emptyState(t("noRecentActivity")));
@@ -1098,7 +1115,7 @@ function renderEvents() {
       <span class="event-scope">${escapeHtml(event.groupId ? t("groupLabel", { value: event.groupId }) : t("privateChat"))}</span>
       <strong>${escapeHtml(event.senderLabel || event.senderName || "QQ")}</strong>
       <span class="badge ${ok ? "ok" : "off"}">${escapeHtml(ok ? t("replied") : t("ignored"))}</span>
-      <p>${escapeHtml(event.text || "—")}${record.reply ? `<small>${escapeHtml(t("replyLabel"))}${escapeHtml(record.reply)}</small>` : ""}</p>
+      <p>${escapeHtml(displayQqText(event.text) || "—")}${record.reply ? `<small>${escapeHtml(t("replyLabel"))}${escapeHtml(displayQqText(record.reply))}</small>` : ""}</p>
     </article>`;
   }).join("") : emptyState(t("noEvents")));
 }
@@ -1564,7 +1581,8 @@ function renderUnifiedMemory(memory) {
   const stateText = Object.values(memory.currentState || {}).filter(Boolean).join(" · ");
   const categories = [
     [t("unifiedEntries"), memory.entries?.length || 0], [t("handoffs"), counts.handoff], [t("ideas"), counts.idea],
-    [t("projects"), counts.projectNote], [t("todos"), counts.openLoop], [t("notes"), counts.note + counts.dailyState]
+    [t("projects"), counts.projectNote], [t("todos"), counts.openLoop], [t("notes"), counts.note + counts.dailyState],
+    [t("memoryPeople"), counts.personProfile + counts.personSession]
   ];
   return `<div class="memory-layout memory-browser">
     <aside class="memory-side">
@@ -1574,7 +1592,7 @@ function renderUnifiedMemory(memory) {
     </aside>
     <section class="memory-entries">
       <div class="list-head"><span>${escapeHtml(t("unifiedEntries"))}</span><span>${escapeHtml(memory.updatedAt ? t("updated", { time: formatTime(memory.updatedAt) }) : "")}</span></div>
-      ${entries.length ? entries.map((entry) => renderMemoryEntry({ role: `${formatUnifiedType(entry.type)}${entry.topic ? ` · ${entry.topic}` : ""}`, text: entry.summary, at: entry.updatedAt })).join("") : emptyState(t("noMemory"))}
+      ${entries.length ? entries.map((entry) => renderMemoryEntry({ tag: formatUnifiedType(entry.type), role: entry.topic || "", text: entry.summary, at: entry.updatedAt })).join("") : emptyState(t("noMemory"))}
     </section>
     <aside class="memory-side memory-state">
       <article class="state-card"><h3>${escapeHtml(t("recentState"))}</h3><p>${escapeHtml(stateText || t("noState"))}</p></article>
@@ -1638,7 +1656,9 @@ function renderGroupedMemory(groups, fallbackScope) {
 }
 
 function renderMemoryEntry(entry) {
-  return `<article class="memory-entry"><div class="meta">${escapeHtml(formatRole(entry.role))}${entry.at ? ` · ${escapeHtml(formatTime(entry.at))}` : ""}</div><p>${escapeHtml(entry.text || entry.summary || "")}</p></article>`;
+  const role = formatRole(entry.role);
+  const meta = [role, entry.at ? formatTime(entry.at) : ""].filter(Boolean).map(escapeHtml).join(" · ");
+  return `<article class="memory-entry"><div class="meta">${entry.tag ? `<span class="memory-tag">${escapeHtml(entry.tag)}</span>` : ""}${meta ? `<span>${meta}</span>` : ""}</div><p>${escapeHtml(entry.text || entry.summary || "")}</p></article>`;
 }
 
 function formatRole(role) {
@@ -1660,13 +1680,13 @@ function rememberOpenMemoryGroups() {
 }
 
 function countUnifiedEntries(entries) {
-  const counts = { handoff: 0, idea: 0, projectNote: 0, openLoop: 0, dailyState: 0, note: 0 };
+  const counts = { handoff: 0, idea: 0, projectNote: 0, openLoop: 0, dailyState: 0, note: 0, personProfile: 0, personSession: 0 };
   entries.forEach((entry) => { counts[entry.type] = (counts[entry.type] || 0) + 1; });
   return counts;
 }
 
 function formatUnifiedType(type) {
-  return { handoff: t("handoffs"), idea: t("ideas"), projectNote: t("projects"), openLoop: t("todos"), dailyState: t("recentState"), note: t("notes") }[type] || type || t("notes");
+  return { handoff: t("handoffs"), idea: t("ideas"), projectNote: t("projects"), openLoop: t("todos"), dailyState: t("recentState"), note: t("notes"), personProfile: t("memoryPersonProfile"), personSession: t("memoryPersonSession") }[type] || type || t("notes");
 }
 
 // ---------- Knowledge ----------
