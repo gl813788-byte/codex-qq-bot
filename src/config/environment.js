@@ -325,6 +325,26 @@ export function createEnvironmentConfig(env = process.env) {
       max: 600
     }),
 
+    // Host capacity gate before every agent CLI start. Android kills Termux
+    // (QQ, the Hub and all agents) above 32 child processes; "auto" limits
+    // processes and available memory only on Android hosts, 0 disables.
+    agentProcessLimit: autoOrInteger(env.CODEX_REMOTE_CONTACT_AGENT_PROCESS_LIMIT, { min: 0, max: 100_000 }),
+    // Processes left free after a turn starts, for its own short-lived
+    // children (git, ripgrep, shell commands).
+    agentProcessReserve: boundedInteger(env.CODEX_REMOTE_CONTACT_AGENT_PROCESS_RESERVE, {
+      defaultValue: 2,
+      min: 0,
+      max: 16
+    }),
+    agentMinAvailableMb: autoOrInteger(env.CODEX_REMOTE_CONTACT_AGENT_MIN_AVAILABLE_MB, { min: 0, max: 64 * 1024 }),
+    // How long a QQ reply waits for room before it is refused; background
+    // model tasks wait a third of it, interest judgments never wait.
+    agentCapacityWaitMs: boundedInteger(env.CODEX_REMOTE_CONTACT_AGENT_CAPACITY_WAIT_MS, {
+      defaultValue: 90_000,
+      min: 0,
+      max: 10 * 60_000
+    }),
+
     // Hub-managed background sub-agents (long tasks and routine activities)
     // run in their own small slot pool, never in the reply limiter.
     subagentMaxConcurrency: boundedInteger(env.CODEX_REMOTE_CONTACT_SUBAGENT_MAX_CONCURRENCY, {
@@ -383,6 +403,15 @@ function serviceTierValue(value) {
 function boundedInteger(value, { defaultValue, min, max }) {
   const number = Number(String(value ?? "").trim() || defaultValue);
   if (!Number.isFinite(number)) return defaultValue;
+  return Math.max(min, Math.min(max, Math.floor(number)));
+}
+
+// "auto" (the default) or a bounded integer.
+function autoOrInteger(value, { min, max }) {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (!text || text === "auto") return "auto";
+  const number = Number(text);
+  if (!Number.isFinite(number)) return "auto";
   return Math.max(min, Math.min(max, Math.floor(number)));
 }
 

@@ -5,7 +5,8 @@ import { isClaudeThreadId, runClaudeCodeTurn } from "../claude/claude-code-turn.
 import { runQqCodexTurnWithFusionRecovery } from "../../qq-codex-turn-recovery.js";
 import { summarizeProcessDiagnostics } from "../../process-diagnostics.js";
 import { buildQqOperationLogDetails } from "../../qq-operation-log.js";
-import { AGENT_LOG_CATEGORY, getAgentEngine } from "../agent/agent-engines.js";
+import { AGENT_LOG_CATEGORY, countAgentTurnProcesses, getAgentEngine } from "../agent/agent-engines.js";
+import { describeAgentHostCapacity } from "../agent/agent-process-gate.js";
 import { assertAgentTurnNotNested, runAgentToolCall } from "../agent/agent-tool-context.js";
 import { notifyObserver } from "../agent/agent-turn-process.js";
 import { buildCodexLeanQqConfig } from "./codex-lean-config.js";
@@ -66,10 +67,14 @@ export function runQqAgentBackgroundTask(engine, {
   timeoutMs,
   signal,
   onSpawn,
-  onExit
+  onExit,
+  // Optional host capacity gate (agent-process-gate.js); background
+  // judgments do not wait for room by default.
+  processGate = null,
+  capacityWaitMs = 0
 } = {}) {
   const agent = selectQqAgentEngine(engine);
-  return agent.runTurn({
+  const runTurn = () => agent.runTurn({
     codexPath,
     claudePath,
     cwd,
@@ -91,6 +96,12 @@ export function runQqAgentBackgroundTask(engine, {
     onSpawn,
     onExit
   });
+  if (!processGate) return runTurn();
+  return processGate.acquire({
+    processes: countAgentTurnProcesses(agent, { tools: false }),
+    waitMs: capacityWaitMs,
+    signal
+  }).then((slot) => runTurn().finally(() => slot.release()));
 }
 
 export function createQqCodexTurnRunner({
@@ -115,7 +126,13 @@ export function createQqCodexTurnRunner({
   logModelOutput,
   trackBackgroundTask,
   refreshQuota,
-  observeQuotaNotification
+  observeQuotaNotification,
+  // Host capacity gate checked before each turn starts its CLI. Turns tied
+  // to a QQ event wait up to replyCapacityWaitMs for room, other turns up to
+  // backgroundCapacityWaitMs; a turn may pass options.capacityWaitMs.
+  processGate = null,
+  replyCapacityWaitMs = 90_000,
+  backgroundCapacityWaitMs = 30_000
 } = {}) {
   assertFunction(limiter?.run, "limiter.run");
   assertFunction(getReplyScope, "getReplyScope");
@@ -141,7 +158,10 @@ export function createQqCodexTurnRunner({
       const engineSettings = { ai: state.ai, claudeModel, claudeReasoningEffort };
       const model = agent.selectModel(engineSettings);
       const reasoningEffort = agent.selectReasoningEffort(engineSettings);
+      let capacitySlot = null;
       try {
+        capacitySlot = await acquireCapacity(options, replyScope, agent, model);
+        if (replyScope?.cancelled) throw createStoppedError();
         const requestedThreadId = (threadId) => agent.canResume(threadId) ? threadId : null;
         const runAttempt = (attempt = {}) => agent.runTurn({
           codexPath,
@@ -253,10 +273,32 @@ export function createQqCodexTurnRunner({
           reasoningEffort
         });
         if (generationId && stoppedGenerationIds.delete(generationId)) throw createStoppedError();
+        if (replyScope?.cancelled && error?.code === "ABORT_ERR") throw createStoppedError();
         throw error;
+      } finally {
+        capacitySlot?.release();
       }
     }, { signal: replyScope?.signal });
   };
+
+  function acquireCapacity(options, replyScope, agent, model) {
+    if (!processGate) return null;
+    const waitMs = Number.isFinite(Number(options.capacityWaitMs))
+      ? Number(options.capacityWaitMs)
+      : options.qqEvent ? replyCapacityWaitMs : backgroundCapacityWaitMs;
+    return processGate.acquire({
+      processes: countAgentTurnProcesses(agent, { tools: (options.dynamicTools || []).length > 0 }),
+      waitMs,
+      signal: replyScope?.signal,
+      onWait: (status) => logger?.warn?.("Agent turn waiting for host capacity", {
+        ...buildQqTurnOperationLogDetails(options, "waiting", agent),
+        operation: "agent.capacity",
+        model,
+        waitLimitMs: waitMs,
+        ...describeAgentHostCapacity(status)
+      }, AGENT_LOG_CATEGORY, options.qqEvent ? logContext?.(options.qqEvent, {}) || {} : {})
+    });
+  }
 }
 
 function recordSuccess({ state, result, options, startedAt, generationId, logger, logContext, agent, model, reasoningEffort }) {

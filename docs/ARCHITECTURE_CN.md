@@ -103,6 +103,7 @@
 | `src/qq-manual-ai-task.js` + `src/qq-menu.js` | 手动模型任务与 QQ 菜单的纯策略/呈现边界 | 修改任务别名、范围校验、强制模式说明或菜单视觉分区 |
 | `src/qq-command-catalog.js` + `src/qq-command-reply.js` | 唯一的 QQ 指令目录与回复排版 | 新增指令及其权限 key、菜单行、说明和用法；所有指令回复统一使用卡片、`✅` 结果与 `⚠️` 警告格式 |
 | `src/qq-manual-ai-task-runner.js` | 手动 AI 任务生命周期 | 前台结果/后台受理、同任务锁、有界状态历史；后台工作保留原模型限流 |
+| `src/infrastructure/agent/agent-process-gate.js` | Agent CLI 启动前的本机余量闸门 | 按 Android 幻影进程上限统计存活进程并检查可用内存，为刚启动的回合预留余量，排队等待或以 `CODEX_HOST_BUSY` 拒绝 |
 | `src/infrastructure/agent/agent-tool-context.js` | 原生工具模型调用边界 | 标记工具异步上下文，拒绝同步嵌套模型；后台提交显式脱离工具等待链 |
 | `src/unified-memory/` | 跨通道统一记忆 | SQLite/FTS/语义向量混合召回、QQ 号/唯一别名人物识别、AI 画像提升、跨会话人物范围过滤和单次简述注入 |
 | `src/*.js` | 现有领域与基础设施模块 | 修改对应能力并渐进迁移 |

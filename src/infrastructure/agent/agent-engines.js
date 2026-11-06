@@ -19,6 +19,10 @@ const engines = Object.freeze({
     modelCatalog: true,
     // Native image generation, saved under ~/.codex/generated_images/<thread>.
     imageGeneration: true,
+    // Processes one turn adds: the npm `codex` wrapper plus the native
+    // app-server, and the QQ MCP tool bridge when tools are offered.
+    turnProcesses: 2,
+    toolBridgeProcesses: 1,
     selectModel: ({ ai } = {}) => ai?.model || null,
     selectReasoningEffort: ({ ai } = {}) => ai?.reasoningEffort || null
   }),
@@ -30,6 +34,9 @@ const engines = Object.freeze({
     reportsQuota: false,
     modelCatalog: false,
     imageGeneration: false,
+    // `claude -p` itself, plus the QQ MCP tool bridge when tools are offered.
+    turnProcesses: 1,
+    toolBridgeProcesses: 1,
     selectModel: ({ claudeModel } = {}) => claudeModel || null,
     selectReasoningEffort: ({ ai, claudeReasoningEffort } = {}) => claudeReasoningEffort || ai?.reasoningEffort || null
   })
@@ -60,6 +67,12 @@ export function describeAgentEngine(id, settings = {}) {
     modelCatalog: engine.modelCatalog,
     imageGeneration: engine.imageGeneration
   };
+}
+
+// How many host processes one turn of this engine starts.
+export function countAgentTurnProcesses(engine, { tools = false } = {}) {
+  const facts = typeof engine === "string" ? getAgentEngine(engine) : engine || getAgentEngine();
+  return Math.max(1, Number(facts.turnProcesses) || 1) + (tools ? Math.max(0, Number(facts.toolBridgeProcesses) || 0) : 0);
 }
 
 export function formatAgentEngineSummary(description) {

@@ -73,6 +73,7 @@ const messageTranslationsZh = Object.freeze({
   "QQ sub-agent state changed": "子代理状态变化",
   "QQ sub-agent report failed": "子代理结果汇报失败",
   "QQ sub-agent waiting for memory": "子代理等待手机内存释放后再启动",
+  "Agent turn waiting for host capacity": "手机进程数或内存余量不足，模型回合排队等待（避免 Android 杀掉整个 Bot）",
   "QQ self-initiated Qzone write allowed": "Bot 自主发说说/评论已放行（计入每日上限）",
   "QQ special message sent": "QQ 卡片/特殊消息发送结束",
   "QQ bot daily routine generation failed": "Bot 今日作息生成失败，一小时后再试",
@@ -292,6 +293,11 @@ const detailLabelsZh = Object.freeze({
   drawingCount: "画作数量",
   availableMemory: "当前可用内存",
   minimumMemory: "需要的最少内存",
+  capacityReason: "等待原因",
+  processCount: "当前进程数",
+  processLimit: "进程上限",
+  requestedProcesses: "本轮将新增进程",
+  waitLimitMs: "最长等待毫秒数",
   runs: "运行轮数",
   clipCount: "语音段数",
   heardCount: "已听清段数",
@@ -898,7 +904,7 @@ const detailValuesZh = Object.freeze({
   },
   operation: {
     list: "列出", search: "搜索", view: "查看", status: "查看状态", add: "添加", edit: "修改", delete: "删除", clear: "清空",
-    "agent.turn": "Agent 回复轮次", "agent.tool": "Agent 工具调用", "session.send": "跨会话发送",
+    "agent.turn": "Agent 回复轮次", "agent.tool": "Agent 工具调用", "agent.capacity": "模型启动余量检查", "session.send": "跨会话发送",
     "history.search": "聊天记录搜索",
     "administrator.add": "添加 Bot 管理员", "administrator.remove": "移除 Bot 管理员",
     "friend.add": "主动加好友", "group.join": "主动加群", "settings.update": "更新设置", "settings.persist": "配置持久化",
@@ -925,7 +931,7 @@ const detailValuesZh = Object.freeze({
     restarted: "已截断并续答",
     started: "已开始", stopped: "已暂停", success: "成功", denied: "已拒绝", timeout: "超时", unknown: "未知",
     superseded: "候选已变化", "kept_due_to_activity": "因新活动而保留", "candidate-selected": "已选出候选", "no-candidate": "没有候选",
-    frozen: "已冻结并关闭入口", extended: "已延长静默等待", fallback: "已使用降级结果",
+    frozen: "已冻结并关闭入口", extended: "已延长静默等待", fallback: "已使用降级结果", waiting: "等待中",
     synchronized: "已同步", skipped: "已跳过", initialized: "已初始化",
     sent: "已发送", ignored: "已忽略", silent: "主动沉默", command: "指令已处理",
     delivered: "已送达", busy: "繁忙", changed: "头像已更换", empty: "没有新特征", removed: "已清理",
@@ -994,6 +1000,7 @@ const detailValuesZh = Object.freeze({
     collecting: "收集中", judging: "判定中", approved: "已批准", declined: "已拒绝", closed: "已关闭",
     short: "短期", middle: "中期", long: "长期"
   },
+  capacityReason: { processes: "进程数接近 Android 上限", memory: "可用内存不足" },
   freezeReason: {
     quiet_window_pending: "正在等待 5 秒静默窗口",
     message_limit_reached_waiting_for_quiet: "已达消息上限，继续等待 5 秒静默"

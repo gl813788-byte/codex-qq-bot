@@ -283,6 +283,10 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 | `CODEX_REMOTE_CONTACT_SUBAGENT_MAX_QUEUED` | `2` | 子代理排队数，满了直接拒绝，范围 0–8 |
 | `CODEX_REMOTE_CONTACT_SUBAGENT_TIMEOUT_MS` | `1200000` | 单轮子代理的整轮超时，范围 60000–7200000 |
 | `CODEX_REMOTE_CONTACT_SUBAGENT_MIN_AVAILABLE_MB` | `1000` | 子代理/作息活动启动前要求的最少可用内存（MB）；子代理最多等 10 分钟 |
+| `CODEX_REMOTE_CONTACT_AGENT_PROCESS_LIMIT` | `auto` | 每次启动 Agent CLI（回复、后台模型任务、子代理、订阅兴趣判定）前检查的本机进程上限。`auto` 在 Android 上为 32（子进程超过 32 个时系统的幻影进程杀手会杀掉整个 Termux），其他系统关闭；`0` 关闭（例如已用 adb 关掉 Android 限制） |
+| `CODEX_REMOTE_CONTACT_AGENT_PROCESS_RESERVE` | `2` | 回合启动后仍保留的空闲进程数，留给它自己短暂的子进程 |
+| `CODEX_REMOTE_CONTACT_AGENT_MIN_AVAILABLE_MB` | `auto` | 启动 Agent CLI 前要求的最少可用内存（MB）；`auto` 在 Android 上为 500，其他系统关闭，`0` 关闭。15 秒内刚启动的回合每个按 300 MB 预扣 |
+| `CODEX_REMOTE_CONTACT_AGENT_CAPACITY_WAIT_MS` | `90000` | QQ 回复等待余量的最长时间，超时则放弃本轮；后台模型任务等待其三分之一，子代理至少等 5 分钟，兴趣判定从不等待（没有余量即不批准） |
 | `CODEX_REMOTE_CONTACT_LIFE_ACTIVITIES` | `1` | 按作息真的去做线上活动；`0` 关闭 |
 | `CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_DAILY_LIMIT` | `5` | 每天最多几次作息活动，范围 0–24 |
 | `CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_MIN_GAP_MINUTES` | `60` | 两次作息活动的最小间隔分钟，范围 10–720 |

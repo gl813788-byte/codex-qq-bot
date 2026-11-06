@@ -281,6 +281,10 @@ Self-persona thresholds use `CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_*`; account st
 | `CODEX_REMOTE_CONTACT_SUBAGENT_MAX_QUEUED` | `2` | Queued sub-agents before refusal, range 0–8 |
 | `CODEX_REMOTE_CONTACT_SUBAGENT_TIMEOUT_MS` | `1200000` | Whole-turn deadline of one sub-agent run, range 60000–7200000 |
 | `CODEX_REMOTE_CONTACT_SUBAGENT_MIN_AVAILABLE_MB` | `1000` | Minimum available memory (MB) before a sub-agent or routine activity starts; a sub-agent waits up to ten minutes |
+| `CODEX_REMOTE_CONTACT_AGENT_PROCESS_LIMIT` | `auto` | Host process ceiling checked before every agent CLI start (replies, background model tasks, sub-agents, subscription interest judgments). `auto` is 32 on Android, where the phantom-process killer kills Termux above 32 child processes, and off elsewhere; `0` disables (for example after disabling the Android limit with adb) |
+| `CODEX_REMOTE_CONTACT_AGENT_PROCESS_RESERVE` | `2` | Processes kept free after a turn starts, for its own short-lived children |
+| `CODEX_REMOTE_CONTACT_AGENT_MIN_AVAILABLE_MB` | `auto` | Minimum available memory (MB) before an agent CLI starts; `auto` is 500 on Android and off elsewhere, `0` disables. Turns started in the last 15 seconds count as 300 MB each |
+| `CODEX_REMOTE_CONTACT_AGENT_CAPACITY_WAIT_MS` | `90000` | How long a QQ reply waits for room before it is refused; background model tasks wait a third of it, sub-agents at least five minutes, interest judgments never wait (no room means no approval) |
 | `CODEX_REMOTE_CONTACT_LIFE_ACTIVITIES` | `1` | Really carry out the online parts of the daily routine; `0` disables |
 | `CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_DAILY_LIMIT` | `5` | Routine activities per day, range 0–24 |
 | `CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_MIN_GAP_MINUTES` | `60` | Minimum minutes between routine activities, range 10–720 |

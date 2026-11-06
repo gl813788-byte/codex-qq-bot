@@ -64,11 +64,23 @@ On this configured machine:
   `ncc napcat` need confirmation below 3000 MB available or 1500 MB free swap.
   The `memguard` daemon (`ncc memguard`, auto-started by `ncc all|hub|napcat`)
   terminates expendable work (tests, media, downloads, installs, background
-  CLIs; at the limit a per-turn `codex app-server`) before Android kills
-  Termux, and never touches QQ/NapCat, the Hub or Claude. Disabling the
-  phantom-process killer needs adb (`~/disable-phantom-killer.sh` in Termux,
-  with wireless debugging paired on the phone). Check `ncc status` after any
+  CLIs; at the limit a per-turn `codex app-server` or Hub `claude -p ...
+  --strict-mcp-config` turn) before Android kills Termux, and never touches
+  QQ/NapCat, the Hub or an interactive Claude. Its loop never forks (builtins,
+  `[[ =~ ]]`, FIFO `read -t` instead of `sleep`): forking at 31/32 would
+  trigger the kill itself. Disabling the phantom-process killer needs adb
+  (`~/disable-phantom-killer.sh` in Termux, with wireless debugging paired on
+  the phone); afterwards set `MEMGUARD_PHANTOM_LIMIT=0` and
+  `CODEX_REMOTE_CONTACT_AGENT_PROCESS_LIMIT=0`. Check `ncc status` after any
   heavy step.
+- Crashes on this phone were mostly the 32-process limit, not RAM: the idle
+  stack is about 18 processes, and every agent turn adds its CLI (Codex 2,
+  Claude 1) plus a QQ MCP bridge. Every agent CLI start passes the Hub's
+  capacity gate (`src/infrastructure/agent/agent-process-gate.js`,
+  `agent.capacity` logs, `/api/maintenance` `agent.capacity`): replies wait
+  for room, interest judgments do not, and no room fails with
+  `CODEX_HOST_BUSY` instead of killing Termux. An interactive Claude Code
+  session adds 2-5 processes and ~350 MB while it works.
 - Interactive Codex CLI: `~/.codex/config.toml` sets
   `features.daemon_auto_start = false`. Its shared app-server daemon socket
   path exceeds the Unix socket limit under PRoot, and PRoot's remap is private
@@ -585,6 +597,7 @@ Common machine-controller intent:
 | Reconnect after login | `ncc connect` |
 | Start NapCat only | `ncc napcat` |
 | Stop NapCat and its Xvfb session | `ncc stop-napcat` |
+| Remove leftovers (dead screens, stale X11 sockets/locks, xvfb-run dirs, PID files; orphaned turn CLIs only while no Hub runs) | `ncc cleanup` (also runs before every start) |
 | Start Hub only | `ncc hub` |
 | Show one-shot startup resource profile | `ncc resources` |
 | Avatar memory status / refresh / describe | `ncc avatars` / `ncc avatars refresh [GROUP]` / `ncc avatars describe [GROUP] [--all]` |
@@ -624,9 +637,13 @@ repository `npm start` uses the same planner; `npm run ncc -- resources --json`
 previews a fresh estimate. No resident monitor is introduced. `ncc all` must start
 both Hub and QQ; it brings the Hub up first so active QQ events do not spin on a
 missing loopback receiver, and cleans a newly started Hub if QQ startup fails.
-There is no resident memory monitor or shell `wait` supervisor. QQ and Xvfb run
-directly in separate screen sessions, while exact PID/PGID state supports bounded
-cleanup. Verify that QQ, Xvfb, and any turn-scoped Codex or Claude children are
+There is no resident memory monitor or shell `wait` supervisor. QQ runs in its
+own screen session and Xvfb detached (`setsid`, no screen wrapper), while exact
+PID/PGID state supports bounded cleanup. QQ starts with `NCC_QQ_PROCESS_FLAGS`
+(default `--no-zygote --in-process-gpu` plus an in-process network service),
+which folds its six processes into two (main + NodeService) and saves about
+250 MB; set it empty to test Electron's defaults. A stale X11 socket or lock
+(no live X server) is cleared instead of exhausting displays `:90`-`:120`. Verify that QQ, Xvfb, and any turn-scoped Codex or Claude children are
 gone after a diagnostic stop.
 
 Proactive friend-add uses social bridge v20 routes `/inspect-friend` and

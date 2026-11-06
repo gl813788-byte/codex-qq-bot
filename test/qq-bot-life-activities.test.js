@@ -28,7 +28,10 @@ test("routine segments keep a plan only for real online activities", () => {
   assert.equal(normalized.segments[1].plan, "刷B站看看猫猫视频");
 });
 
-test("a planned segment becomes due once, some minutes in, within the daily budget", () => {
+// Loading normalizes the daily ledger against the wall clock, so tests that
+// pass a fixed `now` pin Date.now to it; otherwise they only pass on that date.
+test("a planned segment becomes due once, some minutes in, within the daily budget", (t) => {
+  t.mock.method(Date, "now", () => now);
   const life = normalizeQqBotLifeState({ routine });
   const due = selectQqLifeActivityDue(life, { now, dailyLimit: 3, minGapMinutes: 30 });
   assert.equal(due.segment.start, "14:00");
@@ -52,7 +55,8 @@ test("experiences are recorded, bounded in time and shown as real things the Bot
   assert.equal(reloaded.experiences[0].summary, "刷到一个猫猫迷惑行为合集，笑死");
 });
 
-test("the Bot's own Qzone writes and friend requests are capped per day", () => {
+test("the Bot's own Qzone writes and friend requests are capped per day", (t) => {
+  t.mock.method(Date, "now", () => now);
   let life = normalizeQqBotLifeState({});
   const limits = { qzone_post: 1, qzone_comment: 2 };
   const first = consumeQqLifeSocialAllowance(life, "qzone_post", { limits, now });
