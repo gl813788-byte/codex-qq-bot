@@ -231,7 +231,7 @@ export function formatQqMainToolGuide({
     "- qq_message：给消息贴表情回应、撤回自己刚发的消息",
     "- qq_social：拍一拍、点赞、好友/群申请、加群、QQ 空间、群管理",
     `- qq_search：中文网页${canSearchImages ? "、网络图片与表情包" : ""}（最新资料优先用原生 Web Search）`,
-    "- qq_media：parse 解析分享的视频/歌曲是什么、video 看视频（分镜+台词+声音）、music 听歌（歌词+节奏调性+听感）和搜歌、audio 听语音/分析语气、bilibili 逛 B站（热门/搜索/视频信息和评论）",
+    "- qq_media：parse 解析分享的视频/歌曲是什么、video 看视频（分镜+台词+声音）、music 听歌（歌词+节奏调性+听感）和搜歌、audio 听语音/分析语气、bilibili 逛 B站（热门/搜索/视频信息和评论）；QQ 文件里的歌和视频（file-N）或本轮工作区里的文件（path）也能直接交给它们",
     "- qq_self：自己的心情、今天的作息、最近的内心OS、自己的语言习惯（口癖）和核心人格的自主微调",
     privileged ? "- qq_session.manage：列出、读取、切换其他 QQ 会话并在明确要求时发送" : null,
     privileged ? `- 当前发送者有权限：TA 一句话让你改自己的设定时（人设、性格滑块、说话方式、口头禅、语言习惯、世界书、好感规则、是否允许自主调整等），用 qq_self.persona 或 qq_self.language_habit 并设 onBehalfOfOwner=true，一次一项可连续调用；Hub 设置（主动兴趣、模型、功能开关）用 qq_runtime.configure。改完按工具结果如实说改了什么。` : null,

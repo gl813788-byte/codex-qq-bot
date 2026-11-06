@@ -200,23 +200,17 @@ export function createQqMediaRuntime({
     const tools = await status();
     if (!tools.ffprobe) throw mediaError("MEDIA_UNAVAILABLE", "本机没有 ffprobe");
     const result = await runProcess(tools.ffprobe, [
-      "-v", "error", "-show_entries", "format=duration:stream=codec_type,width,height", "-of", "json", inputPath
-    ], { timeoutMs: 20_000, maxOutputBytes: 256 * 1024, signal, env: childEnv() });
+      "-v", "error",
+      "-show_entries", "format=duration,format_name,bit_rate:format_tags:stream=codec_type,codec_name,width,height,sample_rate,channels:stream_disposition=attached_pic",
+      "-of", "json", "--", inputPath
+    ], { timeoutMs: 20_000, maxOutputBytes: 1024 * 1024, signal, env: childEnv() });
     let parsed = {};
     try {
       parsed = JSON.parse(result.stdout || "{}");
     } catch {
       parsed = {};
     }
-    const streams = Array.isArray(parsed.streams) ? parsed.streams : [];
-    const video = streams.find((stream) => stream.codec_type === "video");
-    return {
-      durationSeconds: Number(parsed.format?.duration) || 0,
-      hasVideo: Boolean(video),
-      hasAudio: streams.some((stream) => stream.codec_type === "audio"),
-      width: Number(video?.width) || 0,
-      height: Number(video?.height) || 0
-    };
+    return normalizeQqProbe(parsed);
   }
 
   // Public platform links only (the caller validates the host). The format
@@ -469,6 +463,41 @@ export function normalizeQqLinkInfo(info = {}) {
     height: count(info.height),
     isLive: info.is_live === true,
     ageLimit: count(info.age_limit)
+  };
+}
+
+// ffprobe JSON → stream facts plus the container's embedded tags. Cover art
+// in an audio file is an attached-picture video stream, not a video track.
+export function normalizeQqProbe(parsed = {}) {
+  const streams = Array.isArray(parsed?.streams) ? parsed.streams : [];
+  const video = streams.find((stream) => stream?.codec_type === "video" && Number(stream?.disposition?.attached_pic) !== 1);
+  const audio = streams.find((stream) => stream?.codec_type === "audio");
+  const rawTags = parsed?.format?.tags && typeof parsed.format.tags === "object" ? parsed.format.tags : {};
+  const tags = {};
+  for (const [key, value] of Object.entries(rawTags)) tags[String(key).toLowerCase()] ||= String(value ?? "");
+  const lyrics = String(tags.lyrics || tags.unsyncedlyrics || tags["lyrics-eng"] || "").replace(/\r\n?/g, "\n").trim();
+  return {
+    durationSeconds: Number(parsed?.format?.duration) || 0,
+    hasVideo: Boolean(video),
+    hasAudio: Boolean(audio),
+    width: Number(video?.width) || 0,
+    height: Number(video?.height) || 0,
+    format: compact(parsed?.format?.format_name, 40),
+    bitRate: Number(parsed?.format?.bit_rate) || 0,
+    videoCodec: compact(video?.codec_name, 20),
+    audioCodec: compact(audio?.codec_name, 20),
+    sampleRate: Number(audio?.sample_rate) || 0,
+    channels: Number(audio?.channels) || 0,
+    coverArt: streams.some((stream) => Number(stream?.disposition?.attached_pic) === 1),
+    tags: {
+      title: compact(tags.title, 120),
+      artist: compact(tags.artist || tags.album_artist, 80),
+      album: compact(tags.album, 80),
+      date: compact(tags.date || tags.year, 20),
+      genre: compact(tags.genre, 40),
+      comment: compact(tags.comment || tags.description, 200)
+    },
+    lyrics: [...lyrics].slice(0, 3000).join("")
   };
 }
 

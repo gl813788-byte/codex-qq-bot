@@ -482,7 +482,7 @@ import {
 import { createWebSearch } from "./web-search.js";
 import { isSupportedImageContentType, readResponseJson, writeResponseBodyToFile } from "./bounded-stream.js";
 import { createQqMediaRuntime } from "./qq-media/media-runtime.js";
-import { collectQqMediaCandidates, formatQqMediaCandidates, isQqParsableMediaUrl } from "./qq-media/media-candidates.js";
+import { collectQqMediaCandidates, formatQqMediaCandidates, isQqParsableMediaUrl, listQqMediaFiles } from "./qq-media/media-candidates.js";
 import { createQqMetingLoader } from "./qq-media/music-resolver.js";
 import { buildQqMediaUpdateEnv, createQqMediaUpdater } from "./qq-media/media-updates.js";
 import { createQqMediaServices } from "./app/qq-media-services.js";
@@ -7984,7 +7984,8 @@ function formatQqBotInternalToolContext(event) {
       available: {
         video: Boolean(event.qqMediaToolStatus?.video),
         audio: Boolean(event.qqMediaToolStatus?.audio),
-        music: Boolean(event.qqMediaToolStatus?.music && event.qqMediaToolStatus?.analysis)
+        music: Boolean(event.qqMediaToolStatus?.music && event.qqMediaToolStatus?.analysis),
+        analysis: Boolean(event.qqMediaToolStatus?.analysis)
       }
     })
   });
@@ -8027,6 +8028,9 @@ async function executeQqMediaNativeTool(call, event, replyScope) {
     candidates: getQqMediaCandidatesForEvent(event),
     state: getQqMediaTurnState(event),
     taskWorkspace: event.qqTaskWorkspace,
+    // A QQ file the model picked (file-N) is a media download.
+    fetchInboundFile: (selector) => downloadQqInboundFileForEvent(event, selector, { maxBytes: mediaMaxDownloadBytes }),
+    maxFileBytes: mediaMaxDownloadBytes,
     signal: activeReply ? replyScope.signal : background.signal,
     isUrlInConversation: (url) => isQqUrlInRecentConversation(event, url),
     assertActive
@@ -8503,52 +8507,57 @@ function executeQqRobotProfileNativeTool(call, event, { rootEvent = event } = {}
   };
 }
 
-async function executeQqInboundFileNativeTool(call, event) {
-  const selector = String(call?.arguments?.selector || "").trim();
-  const candidates = collectQqInboundFileCandidates(event);
-  const candidate = candidates.find((file) => file.selector === selector);
+// One detected QQ file (file-N) of this turn, downloaded once into the task
+// input directory and shared by qq_context.download_file and qq_media.
+async function downloadQqInboundFileForEvent(event, selector, { maxBytes = qqFileMaxBytes } = {}) {
+  const candidate = collectQqInboundFileCandidates(event).find((file) => file.selector === selector);
   if (!candidate) {
-    return {
-      ok: false,
-      error: "文件编号不属于本轮触发消息；只能使用提示中列出的 file-N 编号。"
-    };
+    throw Object.assign(new Error("文件编号不属于本轮触发消息；只能使用提示中列出的 file-N 编号。"), { code: "QQ_FILE_UNKNOWN" });
   }
   if (!event?.qqTaskWorkspace?.inputDir) {
-    return { ok: false, error: "本轮 QQ 任务工作区不可用，无法安全下载文件。" };
+    throw Object.assign(new Error("本轮 QQ 任务工作区不可用，无法安全下载文件。"), { code: "QQ_FILE_WORKSPACE" });
   }
   const cache = event.qqDownloadedInboundFiles && typeof event.qqDownloadedInboundFiles === "object"
     ? event.qqDownloadedInboundFiles
     : {};
   event.qqDownloadedInboundFiles = cache;
   const cached = cache[selector];
-  if (cached?.path && await fileExists(cached.path)) {
-    return {
-      ok: true,
-      reply: `文件 ${selector} 已下载到本轮输入目录：${cached.path}（${cached.bytes} 字节）。`
-    };
-  }
+  if (cached?.path && await fileExists(cached.path)) return { ...cached, cached: true };
   try {
     const saved = await downloadQqInboundFile(candidate, {
       inputDir: event.qqTaskWorkspace.inputDir,
-      maxBytes: qqFileMaxBytes,
+      maxBytes,
       resolveDownloadUrl: resolveOneBotInboundFileUrl,
       fetchDownload: fetchQqInboundFileUrl
     });
     cache[selector] = saved;
     event.qqToolFilePaths = [...new Set([...(event.qqToolFilePaths || []), saved.path])];
-    return {
-      ok: true,
-      reply: `文件 ${selector}（${saved.name}）已下载到本轮输入目录：${saved.path}（${saved.bytes} 字节）。现在可以用原生文件或 Shell 能力读取；需要回传时把成品写入本轮 output 目录。`
-    };
+    return saved;
   } catch (error) {
     logger.warn("QQ inbound file download failed", {
       selector,
       fileName: candidate.name || null,
       declaredBytes: candidate.fileSize || null,
-      maxBytes: qqFileMaxBytes,
+      maxBytes,
       errorCode: String(error?.code || "QQ_FILE_DOWNLOAD_FAILED"),
       error
     }, "qq", qqLogContext(event));
+    throw error;
+  }
+}
+
+async function executeQqInboundFileNativeTool(call, event) {
+  const selector = String(call?.arguments?.selector || "").trim();
+  try {
+    const saved = await downloadQqInboundFileForEvent(event, selector);
+    if (saved.cached) {
+      return { ok: true, reply: `文件 ${selector} 已下载到本轮输入目录：${saved.path}（${saved.bytes} 字节）。` };
+    }
+    return {
+      ok: true,
+      reply: `文件 ${selector}（${saved.name}）已下载到本轮输入目录：${saved.path}（${saved.bytes} 字节）。现在可以用原生文件或 Shell 能力读取；音频/视频可以直接交给 qq_media（selector=${selector}，或用 path 指定工作区里的文件）去听/看；需要回传时把成品写入本轮 output 目录。`
+    };
+  } catch (error) {
     return {
       ok: false,
       error: String(error?.message || "QQ 文件下载失败。")
@@ -10861,10 +10870,10 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     ? buildQqHumanActionPlan(event, humanBehaviorPlan, {
       actionRates: summarizeQqHumanActionRates(state.qq.humanActionStats, scopeId),
       media: {
-        videos: mediaCandidates.videos.length,
+        videos: mediaCandidates.videos.length + listQqMediaFiles(mediaCandidates, "video").length,
         audios: mediaCandidates.audios.length,
         unheardAudios: Math.max(0, mediaCandidates.audios.length - heardCurrentVoices),
-        musics: (mediaCandidates.musics || []).length
+        musics: (mediaCandidates.musics || []).length + listQqMediaFiles(mediaCandidates, "audio").length
       },
       mediaAvailable: {
         video: Boolean(event.qqMediaToolStatus?.video),

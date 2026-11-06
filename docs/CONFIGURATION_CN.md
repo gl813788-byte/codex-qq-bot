@@ -271,7 +271,7 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 | --- | --- | --- |
 | `CODEX_REMOTE_CONTACT_MEDIA_TOOLS_DIR` | `runtime/media-tools` | 可选媒体组件目录（`npm run ncc -- media install` 安装到这里） |
 | `CODEX_REMOTE_CONTACT_MEDIA_MAX_VIDEO_SECONDS` | `1200` | 单次看视频的时长预算；下载时允许到它的 3 倍，范围 30–7200 |
-| `CODEX_REMOTE_CONTACT_MEDIA_MAX_DOWNLOAD_MB` | `200` | 视频下载上限（MB），范围 10–2048 |
+| `CODEX_REMOTE_CONTACT_MEDIA_MAX_DOWNLOAD_MB` | `200` | 视频下载上限（MB），范围 10–2048；`qq_media` 打开的 QQ 文件（`file-N`）和工作区文件（`path`）也受此限制 |
 | `CODEX_REMOTE_CONTACT_MEDIA_ASR_LANGUAGE` | `auto` | SenseVoice 语言：`auto`、`zh`、`en`、`ja`、`ko`、`yue` |
 | `CODEX_REMOTE_CONTACT_MEDIA_ASR_THREADS` | `2` | 语音识别线程数，范围 1–4 |
 | `CODEX_REMOTE_CONTACT_MEDIA_JOB_TIMEOUT_MS` | `300000` | 单个媒体子进程（下载/转写/分镜）的超时，范围 30000–1800000 |

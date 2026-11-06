@@ -269,7 +269,7 @@ Self-persona thresholds use `CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_*`; account st
 | --- | --- | --- |
 | `CODEX_REMOTE_CONTACT_MEDIA_TOOLS_DIR` | `runtime/media-tools` | Directory of the optional media components (installed by `npm run ncc -- media install`) |
 | `CODEX_REMOTE_CONTACT_MEDIA_MAX_VIDEO_SECONDS` | `1200` | Watch budget per call; downloads may be up to three times longer; range 30–7200 |
-| `CODEX_REMOTE_CONTACT_MEDIA_MAX_DOWNLOAD_MB` | `200` | Video download cap in MB, range 10–2048 |
+| `CODEX_REMOTE_CONTACT_MEDIA_MAX_DOWNLOAD_MB` | `200` | Video download cap in MB, range 10–2048; also bounds QQ files (`file-N`) and workspace files (`path`) opened by `qq_media` |
 | `CODEX_REMOTE_CONTACT_MEDIA_ASR_LANGUAGE` | `auto` | SenseVoice language: `auto`, `zh`, `en`, `ja`, `ko`, `yue` |
 | `CODEX_REMOTE_CONTACT_MEDIA_ASR_THREADS` | `2` | Speech-recognition threads, range 1–4 |
 | `CODEX_REMOTE_CONTACT_MEDIA_JOB_TIMEOUT_MS` | `300000` | Timeout of one media child process (download/transcribe/storyboard), range 30000–1800000 |

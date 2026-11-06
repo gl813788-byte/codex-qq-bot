@@ -1,3 +1,4 @@
+import { collectQqInboundFileCandidates } from "../qq-inbound-files.js";
 import { classifyQqSharedContent, extractQqUrls } from "../qq-message-content.js";
 import { QQ_MUSIC_SITES, isQqMusicShareUrl } from "./music-links.js";
 
@@ -6,7 +7,9 @@ import { QQ_MUSIC_SITES, isQqMusicShareUrl } from "./music-links.js";
 // each with a turn-scoped selector (video-1, music-1, audio-1) so the model
 // never passes raw paths or signed QQ URLs. Platform links are limited to
 // known public video and music sites because the downloaders must never be
-// pointed at arbitrary hosts.
+// pointed at arbitrary hosts. QQ files in the message or its quote keep the
+// file-N selectors of qq_context.download_file; their names only decide what
+// the directory lists, and ffprobe decides what a file really contains.
 
 export const QQ_MEDIA_VIDEO_PLATFORMS = Object.freeze(["bilibili", "douyin", "kuaishou", "youtube", "acfun", "ixigua", "weibo", "zhihu"]);
 // Posts that are often videos; yt-dlp decides when the link is opened.
@@ -30,6 +33,17 @@ export function isQqListenableMusicUrl(url) {
 // Any link qq_media may open by URL once it appeared in the conversation.
 export function isQqParsableMediaUrl(url) {
   return isQqWatchableVideoUrl(url) || isQqListenableMusicUrl(url);
+}
+
+const AUDIO_FILE_EXTENSIONS = new Set(["mp3", "flac", "wav", "m4a", "aac", "ogg", "oga", "opus", "wma", "ape", "aiff", "aif", "alac", "amr", "wv", "dsf", "dff", "mka"]);
+const VIDEO_FILE_EXTENSIONS = new Set(["mp4", "m4v", "mkv", "mov", "webm", "avi", "flv", "wmv", "ts", "m2ts", "mts", "3gp", "mpg", "mpeg", "rmvb", "rm", "vob", "ogv"]);
+
+// "audio" / "video" from a file name's extension, otherwise "".
+export function classifyQqMediaFileName(name) {
+  const extension = String(name || "").toLowerCase().match(/\.([a-z0-9]{1,5})$/)?.[1] || "";
+  if (AUDIO_FILE_EXTENSIONS.has(extension)) return "audio";
+  if (VIDEO_FILE_EXTENSIONS.has(extension)) return "video";
+  return "";
 }
 
 function splitMusicDescription(value) {
@@ -108,13 +122,28 @@ export function collectQqMediaCandidates(event = {}) {
       addVideo({ kind: "link", source, senderName, platform: classifyQqSharedContent({ url }).platform, title: "", url });
     }
   }
-  return { videos, audios, musics };
+  // Every detected QQ file stays addressable (a misnamed song still plays);
+  // only media-looking names are listed in the directory.
+  const files = collectQqInboundFileCandidates(event).map((file) => ({
+    kind: "qq_file",
+    selector: file.selector,
+    name: file.name,
+    sizeBytes: file.fileSize || null,
+    origin: file.origin,
+    mediaType: classifyQqMediaFileName(file.name)
+  }));
+  return { videos, audios, musics, files };
 }
 
 export function findQqMediaCandidate(candidates = {}, selector = "") {
   const value = String(selector || "").trim().toLowerCase();
   if (!value) return null;
-  return [...(candidates.videos || []), ...(candidates.audios || []), ...(candidates.musics || [])].find((item) => item.selector === value) || null;
+  return [...(candidates.videos || []), ...(candidates.audios || []), ...(candidates.musics || []), ...(candidates.files || [])].find((item) => item.selector === value) || null;
+}
+
+// Media-looking QQ files of this turn (audio or video by name).
+export function listQqMediaFiles(candidates = {}, mediaType = "") {
+  return (candidates.files || []).filter((file) => (mediaType ? file.mediaType === mediaType : Boolean(file.mediaType)));
 }
 
 const sourceLabels = Object.freeze({ current: "当前消息", quoted: "被引用消息", forward: "聊天记录" });
@@ -136,11 +165,18 @@ export const QQ_MEDIA_PLATFORM_LABELS = Object.freeze({
 });
 const platformLabels = QQ_MEDIA_PLATFORM_LABELS;
 
+function formatFileSize(bytes) {
+  const value = Number(bytes) || 0;
+  if (!value) return "";
+  return value >= 1048576 ? `${(value / 1048576).toFixed(value >= 10 * 1048576 ? 0 : 1)}MB` : `${Math.max(1, Math.round(value / 1024))}KB`;
+}
+
 export function formatQqMediaCandidates(candidates = {}, { available = {} } = {}) {
   const videos = candidates.videos || [];
   const audios = candidates.audios || [];
   const musics = candidates.musics || [];
-  if (!videos.length && !audios.length && !musics.length) return "";
+  const files = listQqMediaFiles(candidates);
+  if (!videos.length && !audios.length && !musics.length && !files.length) return "";
   const lines = ["【本轮可看/可听的媒体】"];
   for (const video of videos) {
     const label = video.kind === "qq_video"
@@ -157,6 +193,10 @@ export function formatQqMediaCandidates(candidates = {}, { available = {} } = {}
   }
   for (const audio of audios) {
     lines.push(`- ${audio.selector}：语音（${sourceLabels[audio.source] || audio.source}${audio.senderName ? `，${audio.senderName}` : ""}）`);
+  }
+  for (const file of files) {
+    const size = formatFileSize(file.sizeBytes);
+    lines.push(`- ${file.selector}：${file.mediaType === "video" ? "视频文件" : "音频文件"}「${String(file.name || "未命名").slice(0, 80)}」（${file.origin || "当前消息"}${size ? `，${size}` : ""}）`);
   }
   const tips = [];
   if (videos.length || musics.length) {
@@ -176,6 +216,11 @@ export function formatQqMediaCandidates(candidates = {}, { available = {} } = {}
     tips.push(available.audio
       ? "语音可以用 qq_media.audio(action=listen, selector) 听（转写+语气+背景声），analyze 再加音高、音量和是否在唱歌"
       : "本机还没装语音识别组件，听不了语音；可以如实说没听清");
+  }
+  if (files.length) {
+    tips.push(available.analysis === false
+      ? "本机没有 ffmpeg/ffprobe，打不开这些音频/视频文件；如实说没法听/看"
+      : "这些文件不用先 qq_context.download_file，直接把 file-N 交给 qq_media：歌/音频用 music(action=listen) 听，说话的录音用 audio(action=listen/analyze)，视频文件用 video(action=watch) 看，只想知道格式、时长和内嵌的歌名歌手用 parse");
   }
   if (tips.length) lines.push(`${tips.join("；")}。`);
   return lines.join("\n");

@@ -81,7 +81,7 @@ export function formatQqInboundFileCandidates(candidates, { maxBytes = 0 } = {})
   return [
     `触发消息中检测到 ${files.length} 个文件${limit}：`,
     ...files.map((file) => `- ${file.selector} · ${file.name || "未命名文件"} · ${file.fileSize ? formatByteSize(file.fileSize) : "大小未知"} · ${file.origin}`),
-    "文件尚未下载。只有确实需要读取内容时才调用 qq_context.download_file；不要根据文件名假装已经看过内容。"
+    "文件尚未下载。只有确实需要读取内容时才调用 qq_context.download_file；音频/视频文件要听或看时直接把 file-N 交给 qq_media，不用先下载；不要根据文件名假装已经看过或听过内容。"
   ].join("\n");
 }
 
