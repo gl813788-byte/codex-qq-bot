@@ -288,8 +288,8 @@ const reactionOnlyModes = new Set(["casual", "social_emotion", "visual_reaction"
 // only ever replying. Suggestions only; tools still decide what happened.
 export function buildQqHumanActionPlan(event = {}, plan = {}, {
   actionRates = null,
-  media = { videos: 0, audios: 0, unheardAudios: 0 },
-  mediaAvailable = { video: false, audio: false },
+  media = { videos: 0, audios: 0, unheardAudios: 0, musics: 0 },
+  mediaAvailable = { video: false, audio: false, music: false },
   stickerCandidates = 0,
   expression = null
 } = {}) {
@@ -330,6 +330,13 @@ export function buildQqHumanActionPlan(event = {}, plan = {}, {
     if (stableFraction(`watch:${key}`) < watchChance) actions.push("watch_video");
   }
   if (media.unheardAudios > 0 && mediaAvailable.audio) actions.push("listen_audio");
+  // A shared song is played the way a person taps a music card: usually when
+  // it was shared with the Bot, sometimes when it just went by.
+  let musicChance = 0;
+  if (Number(media.musics) > 0 && mediaAvailable.music) {
+    musicChance = directed || mode === "shared_content" ? 0.8 : 0.45;
+    if (stableFraction(`music:${key}`) < musicChance) actions.push("listen_music");
+  }
 
   let favoriteChance = 0;
   if (stickerCandidates > 0) {
@@ -342,6 +349,7 @@ export function buildQqHumanActionPlan(event = {}, plan = {}, {
     reactionOnlyChance: round3(reactionOnlyChance),
     pokeBackChance: round3(pokeBackChance),
     watchChance: round3(watchChance),
+    musicChance: round3(musicChance),
     favoriteChance: round3(favoriteChance),
     measured: Boolean(measured),
     sample: Number(actionRates?.sample || 0),
@@ -365,6 +373,7 @@ export function formatQqHumanActionContext(actionPlan = {}) {
   if (actions.includes("poke_back")) lines.push("- 别人拍了你：像人一样拍回去（qq_social.act poke），可以拍完不说话，也可以再接一句。");
   if (actions.includes("watch_video")) lines.push("- 有人发了视频：先像人一样点开看（qq_media.video watch），看完再聊你的真实观感；不看就别装看过。");
   if (actions.includes("listen_audio")) lines.push("- 有语音还没听：用 qq_media.audio listen 听一下再回。");
+  if (actions.includes("listen_music")) lines.push("- 有人分享了歌：像人一样点开听（qq_media.music listen），听完再聊旋律、歌词和你的感受；只想知道是哪首就 qq_media.parse；没听就别装听过。");
   if (actions.includes("save_sticker")) lines.push("- 对方发的表情包如果你觉得好玩，可以 inspect 看看、label 标注，喜欢就收藏（favorite）。");
   if (lines.length === 1) lines.push("- 这轮没有特别要做的动作；照常回应，或者觉得没必要回就 status=silent。");
   lines.push("- 动作只在工具返回成功后才算做了；不用每轮都做动作，也别为了显得忙乱用工具。");

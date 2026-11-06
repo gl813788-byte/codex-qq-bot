@@ -202,24 +202,45 @@ export function buildQqNativeToolSpecs({
     {
       type: "namespace",
       name: "qq_media",
-      description: "Watch videos, hear voice clips and browse Bilibili the way a person would before reacting.",
+      description: "Parse shared videos and songs, watch videos, listen to music, hear voice clips and browse Bilibili the way a person would before reacting.",
       tools: [fn(
+        "parse",
+        "Find out what a shared video or song is without downloading it. Video (video-N, bili-N or a video link from this conversation): title, author, duration, upload date, description, views/likes/comments, tags and, when the platform names it, the background music. Song (music-N from a NetEase/QQ Music/Kugou/Kuwo card or link, or song-N from qq_media.music search): song title, singers, album, duration, release date, VIP flag, lyricist/composer and the first lyric lines. Light and fast; use it when you only need to know what something is. Parsing is not watching or listening: never claim to have seen or heard it from this alone.",
+        objectSchema({
+          selector: string("video-N, music-N, audio-N, bili-N or song-N; otherwise empty."),
+          url: string("Alternatively a video or song link that appeared in this conversation; otherwise empty.")
+        }, []),
+        webRead
+      ), fn(
         "video",
-        "Watch a video before talking about it. list shows this turn's videos (QQ video files, Bilibili/Douyin/Kuaishou/YouTube links in the current message, its quote or chat records) and bili-N results from qq_media.bilibili. watch downloads it locally and returns numbered storyboard sheets (one frame per shot) as visual input plus a timestamped transcript, sound description and, for Bilibili, title/UP/stats/hot comments. Long videos show a window (default first 4 minutes); pass from/to seconds to see later parts or zoom into a few seconds. Heavy: at most 3 watches per turn, one media job at a time. Never claim to have watched a video without this tool.",
+        "Watch a video before talking about it. list shows this turn's videos (QQ video files, Bilibili/Douyin/Kuaishou/YouTube/AcFun/Xigua/Weibo/Xiaohongshu/Zhihu links in the current message, its quote or chat records) and bili-N results from qq_media.bilibili. watch downloads it locally and returns numbered storyboard sheets (one frame per shot) as visual input plus a timestamped transcript, sound description and, for Bilibili, title/UP/stats/hot comments. Long videos show a window (default first 4 minutes); pass from/to seconds to see later parts or zoom into a few seconds. Heavy: at most 3 watches per turn, one media job at a time. Never claim to have watched a video without this tool.",
         objectSchema({
           action: { type: "string", enum: ["list", "watch"] },
           selector: string("video-N from the media directory, or bili-N from qq_media.bilibili results; otherwise empty."),
-          url: string("Alternatively a Bilibili/Douyin/Kuaishou/YouTube link that appeared in this conversation; otherwise empty."),
+          url: string("Alternatively a Bilibili/Douyin/Kuaishou/YouTube/AcFun/Xigua/Weibo/Xiaohongshu/Zhihu video link that appeared in this conversation; otherwise empty."),
           from: { type: "number", minimum: 0, description: "watch: start second, default 0." },
           to: { type: "number", minimum: 0, description: "watch: end second; default the whole short video or a 4-minute window." }
         }, ["action"]),
         webRead
       ), fn(
         "audio",
-        "Hear a voice message (audio-N) or a video's sound track (video-N): local speech recognition with timestamps, the speaker's tone (emotion) and background sounds such as music, laughter or applause. Short voice messages that trigger you are usually transcribed already; use this for quoted, forwarded or long ones. Transcripts may contain homophone errors.",
+        "Hear a voice message (audio-N) or a video's sound track (video-N). listen: local speech recognition with timestamps, the speaker's tone (emotion) and background sounds such as music, laughter or applause. analyze: the same plus how the voice sounds (pitch level and range, speaking rate, loudness) and, when someone sings, the tempo and key. Short voice messages that trigger you are usually transcribed already; use listen for quoted, forwarded or long ones and analyze when how it was said matters. Transcripts may contain homophone errors; never infer identity, age or gender from a voice.",
         objectSchema({
-          action: { type: "string", enum: ["list", "listen"] },
+          action: { type: "string", enum: ["list", "listen", "analyze"] },
           selector: string("audio-N or video-N from this turn's media directory.")
+        }, ["action"]),
+        webRead
+      ), fn(
+        "music",
+        "Really listen to a song before talking about how it sounds. listen downloads it locally (music-N from a shared NetEase/QQ Music/Kugou/Kuwo card or link, or song-N from search; when the original platform has no playable audio the same title and singer on another platform is used and the result says so) and returns the song facts, timed platform lyrics and a local music analysis: tempo (BPM), key, danceability, dynamics, a loudness curve over time (intro, chorus, ending) and AudioSet sound tags for genre, instruments and vocals. listen with video-N or audio-N analyzes the music inside a video or voice clip and guesses the song from recognized lyrics. search finds songs by title/singer (or byLyrics=true by a lyric line) and returns song-N selectors. Numbers are estimates for describing the feel. Heavy: at most 3 listens per turn, one media job at a time. Never claim to have heard a song without listen.",
+        objectSchema({
+          action: { type: "string", enum: ["list", "search", "listen"] },
+          selector: string("listen: music-N, song-N, video-N or audio-N; otherwise empty."),
+          query: string("search: song title and singer, or a lyric line; otherwise empty."),
+          byLyrics: { type: "boolean", description: "search: true to search lyrics instead of titles." },
+          platform: { type: "string", enum: ["netease", "qq", "kugou", "kuwo"], description: "search: platform, default netease." },
+          from: { type: "number", minimum: 0, description: "listen: start second, default 0." },
+          to: { type: "number", minimum: 0, description: "listen: end second, default the whole song (at most 15 minutes)." }
         }, ["action"]),
         webRead
       ), fn(

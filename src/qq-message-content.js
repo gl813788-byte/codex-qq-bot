@@ -50,7 +50,10 @@ export function extractQqRichMessageContent(segments = [], fallbackText = "") {
   const markers = [];
   for (const segment of list) {
     const card = parseRichSegment(segment);
-    if (card) cards.push(card);
+    if (card) {
+      cards.push(card);
+      continue;
+    }
     const marker = describeQqSpecialSegment(segment);
     if (marker) markers.push(marker);
   }
@@ -133,12 +136,15 @@ const sharedPlatforms = Object.freeze([
   { platform: "douyin", name: "抖音", kind: "video", hosts: /(?:^|\.)(?:douyin\.com|iesdouyin\.com)$/i, apps: /抖音/ },
   { platform: "kuaishou", name: "快手", kind: "video", hosts: /(?:^|\.)(?:kuaishou\.com|chenzhongtech\.com|gifshow\.com)$/i, apps: /快手/ },
   { platform: "youtube", name: "YouTube", kind: "video", hosts: /(?:^|\.)(?:youtube\.com|youtu\.be)$/i, apps: /youtube/i },
+  { platform: "acfun", name: "AcFun", kind: "video", hosts: /(?:^|\.)acfun\.cn$/i, apps: /acfun/i },
+  { platform: "ixigua", name: "西瓜视频", kind: "video", hosts: /(?:^|\.)ixigua\.com$/i, apps: /西瓜视频/ },
   { platform: "xiaohongshu", name: "小红书", kind: "post", hosts: /(?:^|\.)(?:xiaohongshu\.com|xhslink\.com)$/i, apps: /小红书/ },
   { platform: "weibo", name: "微博", kind: "post", hosts: /(?:^|\.)(?:weibo\.com|weibo\.cn)$/i, apps: /微博/ },
   { platform: "zhihu", name: "知乎", kind: "article", hosts: /(?:^|\.)zhihu\.com$/i, apps: /知乎/ },
   { platform: "netease-music", name: "网易云音乐", kind: "music", hosts: /(?:^|\.)(?:music\.163\.com|163cn\.tv)$/i, apps: /网易云音乐/ },
   { platform: "qq-music", name: "QQ音乐", kind: "music", hosts: /(?:^|\.)(?:y\.qq\.com|i\.y\.qq\.com)$/i, apps: /QQ音乐/ },
-  { platform: "kugou", name: "酷狗音乐", kind: "music", hosts: /(?:^|\.)kugou\.com$/i, apps: /酷狗/ }
+  { platform: "kugou", name: "酷狗音乐", kind: "music", hosts: /(?:^|\.)kugou\.com$/i, apps: /酷狗/ },
+  { platform: "kuwo", name: "酷我音乐", kind: "music", hosts: /(?:^|\.)kuwo\.cn$/i, apps: /酷我/ }
 ]);
 
 // Platform and content kind of a shared link or card, from its host first and
@@ -158,6 +164,10 @@ export function classifyQqSharedContent({ url = "", appName = "" } = {}) {
   if (match.platform === "bilibili" && host && !/b23\.tv|bili2233/i.test(host)) {
     kind = /\/video\/|\/bangumi\/play\/|[?&]bvid=/i.test(String(url)) ? "video" : /live\.bilibili/i.test(host) ? "live" : "link";
   }
+  // Weibo and Zhihu pages are posts or articles unless they are video pages.
+  if (match.platform === "weibo" && /(?:^|\.)video\.weibo\.com$/i.test(host)) kind = "video";
+  if (match.platform === "weibo" && /\/tv\/show\//i.test(String(url))) kind = "video";
+  if (match.platform === "zhihu" && /\/zvideo\//i.test(String(url))) kind = "video";
   return { platform: match.platform, platformName: match.name, kind };
 }
 
@@ -281,6 +291,7 @@ export function formatQqCurrentMessagePrompt(event = {}, currentMessageText = ""
 function parseRichSegment(segment) {
   const type = String(segment?.type || "").toLowerCase();
   const data = segment?.data && typeof segment.data === "object" ? segment.data : {};
+  if (type === "music") return normalizeCard({ type, ...describeQqMusicSegment(data) });
   if (type === "share") {
     return normalizeCard({
       type,
@@ -306,6 +317,33 @@ function parseRichSegment(segment) {
   return null;
 }
 
+// OneBot music segments: a platform song id (163/qq/kugou/kuwo) or a custom
+// card with its own jump and audio URLs.
+const musicSegmentApps = Object.freeze({ "163": "网易云音乐", netease: "网易云音乐", qq: "QQ音乐", tencent: "QQ音乐", kugou: "酷狗音乐", kuwo: "酷我音乐" });
+
+function describeQqMusicSegment(data = {}) {
+  const platformType = String(data.type || "").toLowerCase();
+  const id = cleanCardText(data.id).slice(0, 64);
+  const songUrl = !id ? "" : platformType === "163" || platformType === "netease"
+    ? (/^\d+$/.test(id) ? `https://music.163.com/song?id=${id}` : "")
+    : platformType === "qq" || platformType === "tencent"
+      ? (/^\d+$/.test(id) ? `https://i.y.qq.com/v8/playsong.html?songid=${id}` : /^[0-9A-Za-z]+$/.test(id) ? `https://y.qq.com/n/ryqq/songDetail/${id}` : "")
+      : platformType === "kugou" && /^[0-9a-f]{32}$/i.test(id)
+        ? `https://www.kugou.com/song/#hash=${id}`
+        : platformType === "kuwo" && /^\d+$/.test(id)
+          ? `https://www.kuwo.cn/play_detail/${id}`
+          : "";
+  return {
+    kind: "music",
+    appName: musicSegmentApps[platformType] || "",
+    title: data.title || (songUrl ? "一首歌" : ""),
+    description: data.content || data.singer,
+    url: songUrl || data.url || data.jumpUrl,
+    audioUrl: data.audio || data.voice || data.musicUrl,
+    preview: data.image
+  };
+}
+
 // QQ Ark cards keep their payload under meta.<view>: mini programs
 // (detail_1: app name in title, the shared item in desc), news/link cards,
 // music, contact and group cards, and locations.
@@ -315,7 +353,15 @@ function describeQqJsonCard(parsed) {
   const pick = (value) => (value && typeof value === "object" ? value : null);
   const music = pick(meta.music);
   if (music) {
-    return { kind: "music", appName: music.tag, title: music.title, description: music.desc, url: music.jumpUrl || music.musicUrl };
+    return {
+      kind: "music",
+      appName: music.tag,
+      title: music.title,
+      description: music.desc,
+      url: music.jumpUrl || music.musicUrl,
+      audioUrl: music.musicUrl,
+      preview: music.preview
+    };
   }
   const contact = pick(meta.contact);
   if (contact) {
@@ -422,6 +468,7 @@ function normalizeCard(card) {
     title: cleanCardText(card.title),
     description: cleanCardText(card.description),
     url,
+    ...(card.audioUrl && extractQqUrls(card.audioUrl)[0] ? { audioUrl: extractQqUrls(card.audioUrl)[0].slice(0, 2000) } : {}),
     ...(card.qqId ? { qqId: String(card.qqId) } : {}),
     ...(card.preview ? { preview: normalizePreviewUrl(card.preview) } : {})
   };

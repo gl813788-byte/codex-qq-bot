@@ -277,6 +277,10 @@ Self-persona thresholds use `CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_*`; account st
 | `CODEX_REMOTE_CONTACT_MEDIA_VOICE_AUTO` | `1` | Transcribe voice messages that trigger the Bot before routing; `0` disables (voice is ignored again) |
 | `CODEX_REMOTE_CONTACT_MEDIA_VOICE_AUTO_MAX_SECONDS` | `90` | Longest clip transcribed automatically, range 5–600 |
 | `CODEX_REMOTE_CONTACT_MEDIA_MIN_AVAILABLE_MB` | `1200` | Minimum available physical memory (MB) before a media job starts; `0` disables the check |
+| `CODEX_REMOTE_CONTACT_MEDIA_AUTO_UPDATE` | `compatible` | Media component releases: `compatible` installs same-major (same 0.x minor) releases and newly added components automatically, `all` also major versions, `check` only reports, `off` disables checking |
+| `CODEX_REMOTE_CONTACT_MEDIA_UPDATE_CHECK_HOURS` | `12` | Hours between release checks, range 1–336 |
+| `CODEX_REMOTE_CONTACT_MEDIA_UPDATE_WINDOW` | `3-6` | Local hours when the running Hub may install updates (wraps past midnight, e.g. `23-5`); empty means any time. Outside it, pending updates are installed by the controller before the next Hub start |
+| `CODEX_REMOTE_CONTACT_MEDIA_UPDATE_MIN_MB` | `1500` | Minimum available memory (MB) for the running Hub to install an update; the installer applies the same 1500 MB gate (`CODEX_REMOTE_CONTACT_MEDIA_INSTALL_MIN_MB`) |
 | `CODEX_REMOTE_CONTACT_SUBAGENT_MAX_CONCURRENCY` | `1` | Background sub-agents running at once; `0` disables sub-agents and routine activities; max 4 |
 | `CODEX_REMOTE_CONTACT_SUBAGENT_MAX_QUEUED` | `2` | Queued sub-agents before refusal, range 0–8 |
 | `CODEX_REMOTE_CONTACT_SUBAGENT_TIMEOUT_MS` | `1200000` | Whole-turn deadline of one sub-agent run, range 60000–7200000 |

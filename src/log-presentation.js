@@ -67,8 +67,11 @@ const messageTranslationsZh = Object.freeze({
   "QQ bot drawing saved": "Bot 的画已存进画作库",
   "QQ bot life activity finished": "Bot 作息活动结束",
   "QQ bot life activity could not start": "Bot 作息活动未能开始",
-  "QQ media tool finished": "QQ 媒体工具调用结束（看视频/听语音/逛 B站）",
+  "QQ media tool finished": "QQ 媒体工具调用结束（解析/看视频/听歌/听语音/逛 B站）",
   "QQ voice message heard": "QQ 语音消息已在本机转写",
+  "QQ voice converted to text": "QQ 语音已按 /转文字 转成文字",
+  "QQ media components update": "媒体组件更新",
+  "QQ media update check failed": "媒体组件更新检查失败",
   "Unable to load QQ human action statistics": "加载群友互动频率统计失败（已保留原文件）",
   "QQ sub-agent state changed": "子代理状态变化",
   "QQ sub-agent report failed": "子代理结果汇报失败",
@@ -921,7 +924,8 @@ const detailValuesZh = Object.freeze({
     "memory.language_habit": "Bot 语言习惯", "memory.persona_self_edit": "核心人格自主调整",
     "media.tool": "媒体工具", "media.voice": "语音识别", "agent.subagent": "子代理",
     "memory.life_activity": "Bot 作息活动", "social.qzone_self": "Bot 自主空间动态",
-    "social.card": "卡片与特殊消息", "memory.bot_drawing": "Bot 画作"
+    "social.card": "卡片与特殊消息", "memory.bot_drawing": "Bot 画作",
+    "media.update": "媒体组件更新"
   },
   outcome: {
     loaded: "已加载", created: "已新建", updated: "已更新", rejected: "已拒绝", unchanged: "无变化", recorded: "已记录",
@@ -941,7 +945,9 @@ const detailValuesZh = Object.freeze({
     adopted: "已采用", dropped: "已去掉", "already-adopted": "早已采用", "not-found": "没有这个习惯",
     "invalid-term": "写法无效", "invalid-kind": "类型无效", "invalid-scope": "范围无效", "invalid-action": "操作无效",
     "owner-locked": "主人设定不可改", full: "已满", imported: "已导入",
-    "invalid-field": "设定不可自改", "invalid-key": "设定项无效", "invalid-value": "取值无效", "not-allowed": "不允许"
+    "invalid-field": "设定不可自改", "invalid-key": "设定项无效", "invalid-value": "取值无效", "not-allowed": "不允许",
+    checked: "已检查新版本", deferred: "已推迟", check_failed: "检查失败", apply_failed: "安装失败",
+    transcribed: "已转写", partial: "部分转写", command_transcribed: "已转成文字", command_failed: "没能转成文字"
   },
   layer: {
     "short-term": "短期记忆", impression: "印象记忆", knowledge: "长期知识", unified: "统一记忆",

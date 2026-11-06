@@ -32,6 +32,7 @@
 | `src/app/qq-file-agent-turn.js` | 主人/管理员/公开文件 Agent 能力策略 | 文件任务根目录、沙箱、管理员破坏性操作拒绝策略或文件任务指令 |
 | `src/app/qq-host-command.js` | 按命令申请本机权限 | 原始发送者身份校验、隔离命令环境、执行时限和结果；两个引擎共用 |
 | `src/qq-media/` + `src/app/qq-media-tool.js` + `src/app/qq-media-services.js` | 看视频、听声音、逛 B站 | 媒体候选与选择器、视频平台白名单、可选组件探测、单槽媒体队列与内存检查、yt-dlp/分镜/转写子进程参数、B站只读客户端（WBI 签名）、QQ 视频与语音获取，以及 `qq_media` 的视觉结果 |
+| `src/qq-media/music-links.js` + `music-resolver.js` + `media-updates.js` | 歌曲与组件更新 | 音乐分享链接解析、可信音频域名、LRC 歌词解析、基于 Meting 的歌曲解析，以及新版本检查与自动更新策略 |
 | `scripts/media/` | 可选媒体组件安装与转写子进程 | `ncc media` 安装校验、SenseVoice/VAD/CED 转写 worker 的输入输出约定 |
 | `src/app/qq-voice-transcription.js` | 语音消息自动转写 | 路由前听语音的数量与时限、`[语音]` 标记替换 |
 | `src/qq-human-action-stats.js` | 群友互动频率统计 | 贴表情、拍一拍、撤回、分享等计数、半衰期与汇总；动作规划在 `src/qq-human-behavior.js` |

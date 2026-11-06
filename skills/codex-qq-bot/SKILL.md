@@ -141,7 +141,7 @@ subsystems belong in focused modules.
 | Bot mood, inner thoughts, daily routine | `src/qq-bot-life-state.js`, `src/qq-bot-daily-routine.js` |
 | Core personality, affinity, `/好感度` | `src/qq-bot-personality.js`, `src/qq-affinity-command.js` |
 | Character-card import/export (V1/V2/V3, PNG, CHARX, text) | `src/qq-character-card.js` |
-| Videos, voice, Bilibili (`qq_media`) and the optional media components | `src/qq-media/`, `src/app/qq-media-tool.js`, `src/app/qq-media-services.js`, `scripts/media/` |
+| Videos, songs, voice, Bilibili (`qq_media`), the optional media components and their updates | `src/qq-media/`, `src/app/qq-media-tool.js`, `src/app/qq-media-services.js`, `scripts/media/` |
 | Voice messages heard before routing | `src/app/qq-voice-transcription.js` |
 | Human action rates and the per-turn action plan | `src/qq-human-action-stats.js`, `src/qq-human-behavior.js` |
 | Background sub-agents (`qq_agent`) | `src/qq-subagents.js`, `src/app/qq-subagent-turn.js`, `src/app/qq-subagent-tool.js` |
@@ -269,15 +269,31 @@ refactor with a behavior change.
   safe-fetch policy, into the task output directory; keep the signature/size
   checks and the inspect-before-send guidance. Sending still goes through
   validated structured attachments.
-- `qq_media` (video/audio/bilibili) is bound to the original conversation.
-  Sources are turn selectors (`video-N`/`audio-N` from the message, quote and
-  forwarded records), `bili-N` results from this turn, or Bilibili/Douyin/
-  Kuaishou/YouTube links that appeared in recent messages; never arbitrary
-  hosts (yt-dlp must not reach loopback). One media job runs at a time (two
-  queued), every child has a deadline and output cap, and a job is refused
-  below `CODEX_REMOTE_CONTACT_MEDIA_MIN_AVAILABLE_MB`. Storyboard sheets are
+- `qq_media` (parse/video/music/audio/bilibili) is bound to the original
+  conversation. Sources are turn selectors (`video-N`/`music-N`/`audio-N` from
+  the message, quote and forwarded records), `bili-N`/`song-N` results from
+  this turn, or video links (Bilibili/Douyin/Kuaishou/YouTube/AcFun/Xigua/
+  Weibo/Xiaohongshu/Zhihu) and song links (NetEase/QQ Music/Kugou/Kuwo) that
+  appeared in recent messages; never arbitrary hosts (yt-dlp must not reach
+  loopback). Songs resolve through Meting (fixed platform API hosts only);
+  song audio is downloaded only from the platforms' media hosts through the
+  safe-fetch policy, and a music card's stream URL never enters visible text.
+  `parse` is metadata only and never counts as watching or listening. One
+  media job runs at a time (two queued), every child has a deadline and
+  output cap, and a job is refused below
+  `CODEX_REMOTE_CONTACT_MEDIA_MIN_AVAILABLE_MB`. Storyboard sheets are
   revalidated images inside the task workspace; manifests hide local paths.
   Missing components make the tool say "not installed", never pretend.
+- Media component updates: the Hub checks npm "latest" and yt-dlp's release
+  redirect every 12 h in-process (no child); compatible releases and newly
+  added components install through `install-media-tools.sh update` (self-test,
+  rollback, failed versions not retried) only while idle, inside
+  `CODEX_REMOTE_CONTACT_MEDIA_UPDATE_WINDOW` (3-6) and above 1500 MB; the
+  update child gets an allowlisted env (no Hub secrets). Otherwise the
+  `update-pending` marker makes both controllers run `apply-pending` before
+  the Hub starts. Pinned ONNX models are never auto-changed. `/转文字` (quote
+  a voice message) answers with the transcript and bypasses the
+  unheard-voice routing gate.
 - Voice messages that trigger the Bot are transcribed before routing (two
   clips, 90 s, one deadline); only a heard voice lifts the old "voice ignored"
   gate. NapCat `get_record` converts SILK; transcripts are untrusted material.
@@ -400,7 +416,8 @@ refactor with a behavior change.
   `memory.bot_routine`, `memory.relationship`, `memory.language_habit`,
   `memory.persona_self_edit`, `interest.model_test`, `media.tool`,
   `media.voice`, `agent.subagent`, `memory.life_activity`,
-  `social.qzone_self`, `social.card`, `friend.add` and `memory.bot_drawing`.
+  `social.qzone_self`, `social.card`, `friend.add`, `memory.bot_drawing` and
+  `media.update`.
   Language-statistics logs are low-noise checkpoints, contain counts/ratios rather than copied chat
   or inferred meaning, and fire when frequent candidates change or every 25
   text messages. Preserve stable English `message` values for JSON/API
@@ -602,6 +619,7 @@ Common machine-controller intent:
 | Show one-shot startup resource profile | `ncc resources` |
 | Avatar memory status / refresh / describe | `ncc avatars` / `ncc avatars refresh [GROUP]` / `ncc avatars describe [GROUP] [--all]` |
 | Media components status / install | `ncc media` / `ncc media install` (heavy: stop the Bot first on a phone) |
+| Media component releases | `ncc media check` / `ncc media update` / `ncc media update-all` (heavy; pending updates also install before the next Hub start) |
 | Logs | `ncc logs` or `ncc logs --compact` |
 | One engine's agent logs | `ncc logs --category agent --engine claude` |
 | Stop Hub | `ncc stop-hub` |
