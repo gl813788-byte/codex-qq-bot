@@ -275,7 +275,11 @@ refactor with a behavior change.
   this turn, or video links (Bilibili/Douyin/Kuaishou/YouTube/AcFun/Xigua/
   Weibo/Xiaohongshu/Zhihu) and song links (NetEase/QQ Music/Kugou/Kuwo) that
   appeared in recent messages; never arbitrary hosts (yt-dlp must not reach
-  loopback). Songs resolve through Meting (fixed platform API hosts only);
+  loopback). The Bot may also choose a file: `file-N` (QQ files of the
+  message/quote, same selectors and download cache as
+  `qq_context.download_file`) or `path` inside the turn's task workspace
+  (realpath inside the root, non-empty regular file, media download cap);
+  ffprobe, not the name, decides audio/video, and cover art is not video. Songs resolve through Meting (fixed platform API hosts only);
   song audio is downloaded only from the platforms' media hosts through the
   safe-fetch policy, and a music card's stream URL never enters visible text.
   `parse` is metadata only and never counts as watching or listening. One

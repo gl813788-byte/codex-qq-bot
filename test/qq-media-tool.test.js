@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createQqMediaRuntime, inspectQqMediaTools, parseQqStoryboardOutput } from "../src/qq-media/media-runtime.js";
+import { createQqMediaRuntime, inspectQqMediaTools, normalizeQqProbe, parseQqStoryboardOutput } from "../src/qq-media/media-runtime.js";
 import {
   executeQqMediaAudioTool,
   executeQqMediaBilibiliTool,
   executeQqMediaMusicTool,
   executeQqMediaParseTool,
   executeQqMediaVideoTool,
-  getQqMediaTurnState
+  getQqMediaTurnState,
+  resolveQqWorkspaceMediaFile
 } from "../src/app/qq-media-tool.js";
 import { applyQqVoiceTranscripts, hasQqHeardVoice, transcribeQqEventVoices } from "../src/app/qq-voice-transcription.js";
 
@@ -487,4 +488,204 @@ test("analysis and link parsing run bounded worker and yt-dlp commands", async (
   assert.ok(ytdlp.includes("--skip-download"));
   assert.match(ytdlp[ytdlp.indexOf("-O") + 1], /^%\(\.\{id,title,/);
   assert.deepEqual(ytdlp.slice(-2), ["--", "https://v.douyin.com/abc/"]);
+});
+
+function fileRuntime(calls, probe = {}) {
+  return {
+    status: async () => ({ video: true, audio: true, music: true, analysis: true, essentia: true, tagging: true }),
+    probe: async (path) => {
+      calls.push(["probe", path]);
+      return {
+        durationSeconds: 269,
+        hasAudio: true,
+        hasVideo: false,
+        format: "flac",
+        audioCodec: "flac",
+        sampleRate: 44100,
+        channels: 2,
+        bitRate: 912000,
+        coverArt: true,
+        tags: { title: "晴天", artist: "周杰伦", album: "叶惠美", date: "2003", genre: "", comment: "" },
+        lyrics: "故事的小黄花\n从出生那年就飘着",
+        ...probe
+      };
+    },
+    analyze: async (path, options) => {
+      calls.push(["analyze", options.mode, options.from, options.to, options.asr, options.maxSeconds]);
+      return {
+        ok: true,
+        durationSeconds: 269,
+        essentia: true,
+        music: { from: 0, to: 269, rhythm: { bpm: 69, regularity: 0.9 }, key: { key: "G", scale: "major", strength: 0.8 } },
+        sounds: { overall: [{ label: "Music", prob: 0.9 }, { label: "Male singing", prob: 0.7 }], timeline: [] }
+      };
+    },
+    transcribe: async (path) => {
+      calls.push(["transcribe", path]);
+      return { ok: true, durationSeconds: 12, segments: [{ start: 0, end: 2, text: "会议开始" }] };
+    }
+  };
+}
+
+const quotedFlac = { kind: "qq_file", selector: "file-1", name: "晴天.flac", mediaType: "audio", origin: "引用消息" };
+
+test("a quoted QQ song file (file-N) is downloaded once and really listened to as a whole song", async () => {
+  const taskWorkspace = await workspace();
+  const calls = [];
+  const state = getQqMediaTurnState({});
+  const fetched = [];
+  const deps = {
+    runtime: fileRuntime(calls),
+    music: fakeMusic(calls),
+    fetchInboundFile: async (selector) => {
+      fetched.push(selector);
+      const path = join(taskWorkspace.inputDir, `${selector}-x-晴天.flac`);
+      await writeFile(path, Buffer.alloc(64, 1));
+      return { path, bytes: 64, name: "晴天.flac" };
+    },
+    candidates: { videos: [], audios: [], musics: [], files: [quotedFlac] },
+    state,
+    taskWorkspace
+  };
+  try {
+    const listed = await executeQqMediaMusicTool({ action: "list" }, deps);
+    assert.match(listed.reply, /file-1：音频文件「晴天\.flac」/);
+    const result = await executeQqMediaMusicTool({ action: "listen", selector: "FILE-1" }, deps);
+    assert.equal(result.ok, true);
+    assert.match(result.reply, /你真的把 file-1「晴天\.flac」放来听了，0:00-4:29/);
+    assert.match(result.reply, /FLAC 音频｜时长 4:29｜44\.1kHz 立体声｜约 912kbps｜带封面/);
+    assert.match(result.reply, /文件内嵌标签：《晴天》- 周杰伦｜专辑《叶惠美》｜2003/);
+    assert.match(result.reply, /文件内嵌歌词：\n故事的小黄花/);
+    assert.match(result.reply, /速度约 69 BPM/);
+    assert.doesNotMatch(result.reply, /qq-media-test-|input\//);
+    // Whole song window, no speech recognition when the file carries lyrics,
+    // and no lyric-based song guessing when the file names the song.
+    assert.deepEqual(calls.find((call) => call[0] === "analyze"), ["analyze", "music", 0, 269, false, 900]);
+    assert.equal(calls.some((call) => call[0] === "lyrics"), false);
+    assert.equal(state.heard.at(-1).title, "晴天");
+    await executeQqMediaAudioTool({ action: "listen", selector: "file-1" }, deps);
+    assert.deepEqual(fetched, ["file-1"]);
+  } finally {
+    await rm(taskWorkspace.root, { recursive: true, force: true });
+  }
+});
+
+test("the Bot may pick any file inside the turn workspace by path, and nothing outside it", async () => {
+  const taskWorkspace = await workspace();
+  const outside = await mkdtemp(join(tmpdir(), "qq-media-outside-"));
+  const calls = [];
+  try {
+    await mkdir(join(taskWorkspace.outputDir, "unzipped"), { recursive: true });
+    const inside = join(taskWorkspace.outputDir, "unzipped", "会议.m4a");
+    await writeFile(inside, Buffer.alloc(32, 1));
+    const secret = join(outside, "secret.mp3");
+    await writeFile(secret, Buffer.alloc(32, 1));
+    const { symlink } = await import("node:fs/promises");
+    await symlink(secret, join(taskWorkspace.inputDir, "link.mp3"));
+    await writeFile(join(taskWorkspace.inputDir, "empty.mp3"), "");
+    const deps = () => ({ runtime: fileRuntime(calls, { tags: {}, lyrics: "" }), candidates: { files: [] }, state: getQqMediaTurnState({}), taskWorkspace });
+
+    const relative = await executeQqMediaAudioTool({ action: "listen", path: "output/unzipped/会议.m4a" }, deps());
+    assert.equal(relative.ok, true);
+    assert.match(relative.reply, /你听了 「会议\.m4a」/);
+    assert.match(relative.reply, /会议开始/);
+    const absolute = await executeQqMediaParseTool({ path: inside }, deps());
+    assert.equal(absolute.ok, true);
+    assert.match(absolute.reply, /解析结果（「会议\.m4a」）/);
+    assert.match(absolute.reply, /文件里没有歌名\/歌手标签/);
+    assert.match(absolute.reply, /path=同一个路径/);
+
+    for (const path of [secret, "input/link.mp3", "../../etc/passwd", "input/empty.mp3", "input", "input/missing.mp3"]) {
+      const refused = await executeQqMediaMusicTool({ action: "listen", path }, deps());
+      assert.equal(refused.ok, false, path);
+      assert.match(refused.error, /只能打开本轮工作区|找不到这个文件|文件是空的|不是普通文件/, path);
+      assert.doesNotMatch(refused.error, /qq-media-outside-|secret/, path);
+    }
+    assert.equal(calls.filter((call) => call[0] === "analyze").length, 0);
+    await assert.rejects(resolveQqWorkspaceMediaFile(inside, taskWorkspace, { maxBytes: 16 }), (error) => error.code === "MEDIA_TOO_LARGE");
+    assert.equal(await resolveQqWorkspaceMediaFile("output/unzipped/会议.m4a", taskWorkspace), await realpath(inside));
+  } finally {
+    await rm(taskWorkspace.root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("file sources are probed: unknown file-N, audio-only watches and non-media files are refused honestly", async () => {
+  const taskWorkspace = await workspace();
+  try {
+    const path = join(taskWorkspace.inputDir, "file-1-a.flac");
+    await writeFile(path, Buffer.alloc(16, 1));
+    const deps = (probe = {}) => ({
+      runtime: { ...fileRuntime([], probe), storyboard: async () => { throw new Error("must not run"); } },
+      fetchInboundFile: async () => ({ path }),
+      candidates: { videos: [], audios: [], musics: [], files: [quotedFlac] },
+      state: getQqMediaTurnState({}),
+      taskWorkspace
+    });
+    const unknown = await executeQqMediaAudioTool({ action: "listen", selector: "file-9" }, deps());
+    assert.match(unknown.error, /不在本轮消息或引用消息的文件里/);
+    const watch = await executeQqMediaVideoTool({ action: "watch", selector: "file-1" }, deps());
+    assert.equal(watch.ok, false);
+    assert.match(watch.error, /没有画面，是音频；听歌用 qq_media\.music/);
+    const notMedia = await executeQqMediaParseTool({ selector: "file-1" }, deps({ hasAudio: false, hasVideo: false }));
+    assert.equal(notMedia.ok, false);
+    assert.match(notMedia.error, /没有能识别的音频或视频.*\.ncm/);
+    const silent = await executeQqMediaMusicTool({ action: "listen", selector: "file-1" }, deps({ hasAudio: false }));
+    assert.match(silent.error, /file-1「晴天\.flac」 里没有声音轨/);
+  } finally {
+    await rm(taskWorkspace.root, { recursive: true, force: true });
+  }
+});
+
+test("a video sent as a QQ file is watched from its file-N", async () => {
+  const taskWorkspace = await workspace();
+  const calls = [];
+  try {
+    const result = await executeQqMediaVideoTool({ action: "watch", selector: "file-2" }, {
+      runtime: fakeRuntime(calls),
+      fetchInboundFile: async (selector) => {
+        const path = join(taskWorkspace.inputDir, `${selector}-clip.mp4`);
+        await writeFile(path, Buffer.alloc(16, 1));
+        return { path };
+      },
+      candidates: { videos: [], audios: [], files: [{ kind: "qq_file", selector: "file-2", name: "clip.mp4", mediaType: "video" }] },
+      state: getQqMediaTurnState({}),
+      taskWorkspace
+    });
+    assert.equal(result.ok, true);
+    assert.match(result.reply, /你点开看了这个视频（file-2「clip\.mp4」）/);
+    assert.equal(result.contentItems.filter((item) => item.type === "inputImage").length, 1);
+    assert.equal(calls.some((call) => call[0] === "download"), false);
+  } finally {
+    await rm(taskWorkspace.root, { recursive: true, force: true });
+  }
+});
+
+test("probe output keeps embedded tags and does not count cover art as video", async () => {
+  const probe = normalizeQqProbe({
+    format: { duration: "201.5", format_name: "flac", bit_rate: "880000", tags: { TITLE: "歌", ARTIST: "人", ALBUM: "专辑", LYRICS: "第一句\r\n第二句" } },
+    streams: [
+      { codec_type: "audio", codec_name: "flac", sample_rate: "48000", channels: 2 },
+      { codec_type: "video", codec_name: "mjpeg", width: 500, height: 500, disposition: { attached_pic: 1 } }
+    ]
+  });
+  assert.equal(probe.hasVideo, false);
+  assert.equal(probe.coverArt, true);
+  assert.equal(probe.hasAudio, true);
+  assert.deepEqual([probe.tags.title, probe.tags.artist, probe.tags.album], ["歌", "人", "专辑"]);
+  assert.equal(probe.lyrics, "第一句\n第二句");
+  assert.equal(normalizeQqProbe({ streams: [{ codec_type: "video", width: 640, height: 360 }] }).hasVideo, true);
+  let seen = null;
+  const runtime = createQqMediaRuntime({
+    toolsDir: "/tools",
+    workerScript: "/worker.mjs",
+    inspect: async () => ({ ffprobe: "/usr/bin/ffprobe", paths: {} }),
+    runProcess: async (command, args) => {
+      seen = args;
+      return { stdout: "{}" };
+    }
+  });
+  await runtime.probe("/work/a.flac");
+  assert.match(seen[seen.indexOf("-show_entries") + 1], /format_tags.*stream_disposition=attached_pic/);
+  assert.deepEqual(seen.slice(-2), ["--", "/work/a.flac"]);
 });

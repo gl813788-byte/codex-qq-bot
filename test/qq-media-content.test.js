@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { classifyQqSharedContent, extractQqRichMessageContent } from "../src/qq-message-content.js";
-import { collectQqMediaCandidates, findQqMediaCandidate, formatQqMediaCandidates, isQqWatchableVideoUrl } from "../src/qq-media/media-candidates.js";
+import { classifyQqMediaFileName, collectQqMediaCandidates, findQqMediaCandidate, formatQqMediaCandidates, isQqWatchableVideoUrl } from "../src/qq-media/media-candidates.js";
 import { createBilibiliClient, isBilibiliShortLink, parseBilibiliVideoId, signBilibiliWbiParams } from "../src/qq-media/bilibili.js";
 
 const bilibiliMiniApp = JSON.stringify({
@@ -125,4 +125,36 @@ test("the Bilibili client resolves short links and normalizes video facts and co
   const comments = await client.hotComments(info.aid);
   assert.deepEqual(comments, [{ user: "路人", text: "笑死", likes: 9 }]);
   assert.ok(calls.every((url) => url.startsWith("https://api.bilibili.com/")));
+});
+
+test("QQ files keep their download_file selectors in the media directory, listed only when they look like media", () => {
+  const event = {
+    groupId: "1084253274",
+    senderId: "10001",
+    files: [{ name: "说明.txt", fileId: "/a", messageType: "group", groupId: "1084253274" }],
+    replyContext: {
+      senderName: "乙",
+      files: [
+        { name: "晴天.FLAC", fileId: "/b", fileSize: 31457280, messageType: "group", groupId: "1084253274" },
+        { name: "clip.mp4", fileId: "/c", fileSize: 2048, messageType: "group", groupId: "1084253274" }
+      ]
+    }
+  };
+  const candidates = collectQqMediaCandidates(event);
+  assert.deepEqual(candidates.files.map((file) => [file.selector, file.mediaType, file.origin]), [
+    ["file-1", "", "当前消息"],
+    ["file-2", "audio", "引用消息"],
+    ["file-3", "video", "引用消息"]
+  ]);
+  // A misnamed file stays addressable; ffprobe decides what it contains.
+  assert.equal(findQqMediaCandidate(candidates, "file-1").name, "说明.txt");
+  assert.equal(classifyQqMediaFileName("a.Opus"), "audio");
+  assert.equal(classifyQqMediaFileName("a.ncm"), "");
+  const text = formatQqMediaCandidates(candidates, { available: { video: true, audio: true, music: true, analysis: true } });
+  assert.match(text, /file-2：音频文件「晴天\.FLAC」（引用消息，30MB）/);
+  assert.match(text, /file-3：视频文件「clip\.mp4」/);
+  assert.doesNotMatch(text, /说明\.txt/);
+  assert.match(text, /不用先 qq_context\.download_file，直接把 file-N 交给 qq_media/);
+  assert.match(formatQqMediaCandidates(candidates, { available: { analysis: false } }), /没有 ffmpeg\/ffprobe/);
+  assert.equal(formatQqMediaCandidates({ files: [{ selector: "file-1", mediaType: "" }] }), "");
 });
