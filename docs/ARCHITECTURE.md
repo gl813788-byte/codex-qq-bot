@@ -103,6 +103,7 @@ environment + runtime paths
 | `src/qq-manual-ai-task.js` + `src/qq-menu.js` | Pure manual-model-task and QQ-menu policy/presentation boundaries | changing task aliases, scope validation, force-mode guidance, or visual menu sections |
 | `src/qq-command-catalog.js` + `src/qq-command-reply.js` | Single QQ command catalog and reply layout | adding a command, its permission key, menu line, description and usage; every command reply uses the shared card, `✅` result and `⚠️` warning shapes |
 | `src/qq-manual-ai-task-runner.js` | Manual AI task lifecycle | Foreground results/background acceptance, task locks, bounded job history; background work keeps the existing model limiter |
+| `src/infrastructure/agent/agent-process-gate.js` | Host capacity gate before agent CLI starts | Count live processes against the Android phantom limit and available memory, reserve room for just-started turns, wait or refuse with `CODEX_HOST_BUSY` |
 | `src/infrastructure/agent/agent-tool-context.js` | Native-tool model-call boundary | Mark async tool context, reject synchronous nested models, explicitly detach background submission from the tool wait chain |
 | `src/unified-memory/` | Cross-channel memory | SQLite/FTS/vector hybrid recall, QQ-id/unique-alias person resolution, AI profile promotion, cross-session person scoping, and one-shot brief injection |
 | `src/*.js` | Existing domain and infrastructure modules | changing the named capability while it is migrated incrementally |

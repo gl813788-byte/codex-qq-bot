@@ -69,7 +69,7 @@ ncc connect
 
 本机全局控制器会从固定的 `NAPCAT_WORK_DIR`（默认 `/root/.local/share/napcat`）启动 QQ。这样 QQ 的相对路径缓存数据库不会再落进调用 `ncc` 时所在的仓库或 shell 目录；需要时可用环境变量改成其他持久目录。
 
-启动时一次性检测可用物理内存、可用 CPU，以及 cgroup v1/v2 当前层级和父层级的内存/CPU 配额。预留系统余量后，估算 QQ、Hub 堆、模型/OneBot 并发、队列、图片大小和压缩尺寸预算；不会把交换空间当成预算，也不通过压力测试寻找机器的崩溃极限。`ncc resources` 可预览本机控制器的快照，`npm run ncc -- resources --json` 可查看重新检测的详细估算；`npm start` 使用同一套策略。明确设置的并发、图片、压缩尺寸和 Node 堆配置优先；`NCC_RESOURCE_PROFILE` 仍可指定 `standard`、`balanced`、`low`。已有服务沿用保存的预算，重启后再检测。不启动常驻监控。`ncc all` 先启动 Hub，再启动 QQ；若 QQ 启动失败，会清理本次新启动的 Hub。QQ 和 Xvfb 仍由独立 `screen` 会话托管。
+启动时一次性检测可用物理内存、可用 CPU，以及 cgroup v1/v2 当前层级和父层级的内存/CPU 配额。预留系统余量后，估算 QQ、Hub 堆、模型/OneBot 并发、队列、图片大小和压缩尺寸预算；不会把交换空间当成预算，也不通过压力测试寻找机器的崩溃极限。`ncc resources` 可预览本机控制器的快照，`npm run ncc -- resources --json` 可查看重新检测的详细估算；`npm start` 使用同一套策略。明确设置的并发、图片、压缩尺寸和 Node 堆配置优先；`NCC_RESOURCE_PROFILE` 仍可指定 `standard`、`balanced`、`low`。已有服务沿用保存的预算，重启后再检测。不启动常驻监控。`ncc all` 先启动 Hub，再启动 QQ；若 QQ 启动失败，会清理本次新启动的 Hub。QQ 由独立 `screen` 会话托管；Xvfb 以独立会话在后台运行，不再套 `screen`。每次启动（`all`、`hub`、`napcat`）前，控制器会清理 Android 杀进程或 Hub 崩溃留下的残留：失效的 `screen` socket、没有存活 X 服务的 X11 socket/lock、`xvfb-run` 临时目录、过期 PID 文件，以及（仅在没有 Hub 运行时）遗留的单轮 Agent 进程和临时目录；`ncc cleanup` 可手动执行同样的清理。QQ 启动时带 `--no-zygote --in-process-gpu` 并把网络服务并入主进程（`NCC_QQ_PROCESS_FLAGS`，设为空值恢复 Electron 默认），QQ 由 6 个进程合并为 2 个，约省 250 MB。
 
 ### 切换 AI 引擎
 
@@ -136,6 +136,8 @@ npm run ncc -- media uninstall  # 只删除本项目创建的媒体组件目录
 ```
 
 安装会下载约 200 MB 模型并解压，属于重负载步骤：可用内存低于 1500 MB（`CODEX_REMOTE_CONTACT_MEDIA_INSTALL_MIN_MB`）时脚本会拒绝继续。手机上建议先 `ncc stop-hub` / `ncc stop-napcat` 再安装；装好后 Hub 一分钟内自动识别，不需要重启。运行时每个媒体任务、子代理和作息活动启动前都检查可用内存，不够就拒绝或推迟，日志分别是 `media.tool`、`media.voice`、`agent.subagent` 和 `memory.life_activity`；可以用 `npm run ncc -- logs --category agent` 查看子代理状态变化。
+
+每次启动 Agent CLI（QQ 回复、后台模型任务、子代理和订阅兴趣判定）还要经过同一道本机余量闸门。Android 12+ 在 Termux 拥有超过 32 个子进程时会直接杀掉整个应用，所以在 Android 上闸门会统计存活进程数（与 memguard 显示的口径相同）加上 15 秒内刚启动回合预留的进程数，并检查可用内存。如果启动后剩余进程少于 `CODEX_REMOTE_CONTACT_AGENT_PROCESS_RESERVE`，回合会排队等待：QQ 回复最多等 `CODEX_REMOTE_CONTACT_AGENT_CAPACITY_WAIT_MS`，后台任务等其三分之一，子代理至少等 5 分钟；兴趣判定不等待，直接不批准。等不到余量的回合以 `CODEX_HOST_BUSY` 失败，而不是让 QQ、Hub 和所有 Agent 一起被杀。等待会记录为 `agent.capacity` 日志；`/api/maintenance` 的 `agent.capacity` 显示闸门状态。用 adb 关闭 Android 限制后，可设置 `CODEX_REMOTE_CONTACT_AGENT_PROCESS_LIMIT=0`。
 
 主动加好友需要 NapCat 社交桥 v20（`/health` 的 capabilities 里有 `outgoing-friend-request-submit`）。更新 `modules/napcat-social-bridge/` 后需要按 NapCat 插件流程重新部署并重启 NapCat；重启可能要求重新扫码登录，应在空闲时由主人确认后进行。桥版本过旧时 `/加好友` 会明确回答“不支持”，不会伪报成功。社交桥接口只接受本机直连，带 `X-Forwarded-For`、`CF-Connecting-IP` 等转发头的请求一律拒绝；需要远程扫码时不要把 6099 端口整体用隧道暴露出去，应只转发 WebUI 路径并在登录后立即关闭。
 

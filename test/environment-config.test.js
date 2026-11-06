@@ -128,3 +128,23 @@ test("QQ agent turns default to deferred MCP tools and keep every native Codex f
   assert.equal(chatOnly.qqBaseInstructionsMode, "qq");
   assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT: "grpc" }).agentToolTransport, "mcp");
 });
+
+test("agent host capacity gate settings default to auto and stay bounded", () => {
+  const defaults = createEnvironmentConfig({});
+  assert.equal(defaults.agentProcessLimit, "auto");
+  assert.equal(defaults.agentMinAvailableMb, "auto");
+  assert.equal(defaults.agentProcessReserve, 2);
+  assert.equal(defaults.agentCapacityWaitMs, 90_000);
+  const custom = createEnvironmentConfig({
+    CODEX_REMOTE_CONTACT_AGENT_PROCESS_LIMIT: "0",
+    CODEX_REMOTE_CONTACT_AGENT_MIN_AVAILABLE_MB: "700",
+    CODEX_REMOTE_CONTACT_AGENT_PROCESS_RESERVE: "99",
+    CODEX_REMOTE_CONTACT_AGENT_CAPACITY_WAIT_MS: "-5"
+  });
+  assert.equal(custom.agentProcessLimit, 0);
+  assert.equal(custom.agentMinAvailableMb, 700);
+  assert.equal(custom.agentProcessReserve, 16);
+  assert.equal(custom.agentCapacityWaitMs, 0);
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_AGENT_PROCESS_LIMIT: "AUTO" }).agentProcessLimit, "auto");
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_AGENT_PROCESS_LIMIT: "many" }).agentProcessLimit, "auto");
+});

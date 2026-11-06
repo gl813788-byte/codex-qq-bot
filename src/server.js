@@ -515,6 +515,11 @@ import {
 } from "./qq-bot-drawings.js";
 import { createHostMemoryGate, formatMegabytes, readAvailableMemoryBytes } from "./host-memory.js";
 import {
+  createAgentProcessGate,
+  resolveAgentMinAvailableBytes,
+  resolveAgentProcessLimit
+} from "./infrastructure/agent/agent-process-gate.js";
+import {
   classifyQqHumanMessageActions,
   normalizeQqHumanActionStats,
   recordQqHumanAction,
@@ -687,6 +692,10 @@ const {
   mediaCookiesFile,
   mediaMinAvailableBytes,
   subagentMinAvailableBytes,
+  agentProcessLimit,
+  agentProcessReserve,
+  agentMinAvailableMb,
+  agentCapacityWaitMs,
   mediaVoiceAutoTranscribe,
   mediaVoiceAutoMaxSeconds,
   subagentMaxConcurrency,
@@ -986,6 +995,13 @@ const qqMediaRuntime = createQqMediaRuntime({
   runProcess
 });
 const checkQqSubagentMemory = createHostMemoryGate({ minAvailableBytes: subagentMinAvailableBytes });
+// One host capacity gate for every agent CLI start (replies, background
+// model tasks, sub-agents and subscription interest judgments).
+const agentProcessGate = createAgentProcessGate({
+  processLimit: resolveAgentProcessLimit(agentProcessLimit),
+  reserveProcesses: agentProcessReserve,
+  minAvailableBytes: resolveAgentMinAvailableBytes(agentMinAvailableMb)
+});
 const qqMediaServices = createQqMediaServices({
   fetchWithUrlPolicy,
   safeFetchMode,
@@ -3806,7 +3822,8 @@ async function buildMaintenanceStatus({ force = false } = {}) {
       cliVersion: agentCliVersionProbe.peek(agentCliPath),
       connection: claudeConnection,
       ...agentRun,
-      queue
+      queue,
+      capacity: agentProcessGate.describe()
     },
     // Kept for existing controllers; the run fields mirror the agent above.
     codex: {
@@ -13737,7 +13754,10 @@ const runSteerableQqCodexTurn = createQqCodexTurnRunner({
   logModelOutput: logAgentModelOutput,
   trackBackgroundTask,
   refreshQuota: refreshCodexQuotaSnapshotAfterRun,
-  observeQuotaNotification: (message) => codexProtocolQuota.observeNotification(message)
+  observeQuotaNotification: (message) => codexProtocolQuota.observeNotification(message),
+  processGate: agentProcessGate,
+  replyCapacityWaitMs: agentCapacityWaitMs,
+  backgroundCapacityWaitMs: Math.round(agentCapacityWaitMs / 3)
 });
 
 // Background sub-agents (long tasks someone asked for, and the online parts
@@ -13779,7 +13799,11 @@ const runQqBackgroundAgentTurn = createQqCodexTurnRunner({
   logModelOutput: logAgentModelOutput,
   trackBackgroundTask,
   refreshQuota: refreshCodexQuotaSnapshotAfterRun,
-  observeQuotaNotification: (message) => codexProtocolQuota.observeNotification(message)
+  observeQuotaNotification: (message) => codexProtocolQuota.observeNotification(message),
+  // Queued jobs nobody is waiting on: give them a long time to find room.
+  processGate: agentProcessGate,
+  replyCapacityWaitMs: Math.max(agentCapacityWaitMs, 5 * 60_000),
+  backgroundCapacityWaitMs: Math.max(agentCapacityWaitMs, 5 * 60_000)
 });
 
 const qqSubagentManager = createQqSubagentManager({
@@ -14188,7 +14212,10 @@ const qqSubscriptionInterestRunner = createSubscriptionModelTaskRunner({
   runTask: (engine, options) => runQqAgentBackgroundTask(engine, {
     ...options,
     codexPath: codexCliPath,
-    claudePath: claudeCliPath
+    claudePath: claudeCliPath,
+    // An optional judgment never waits for room; no room means no approval.
+    processGate: agentProcessGate,
+    capacityWaitMs: 0
   }),
   onSpawn: (child) => activeCodexChildren.add(child),
   onExit: (child) => activeCodexChildren.delete(child)
