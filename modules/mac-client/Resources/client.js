@@ -15,7 +15,7 @@ const translations = {
     navOverview: "总览", navChannels: "通道", navIntelligence: "行为", navMemory: "记忆", navKnowledge: "知识", navActivity: "日志", navSettings: "设置",
     overviewTitle: "运行总览", channelsTitle: "消息通道", intelligenceTitle: "Bot 行为", memoryTitle: "记忆", knowledgeTitle: "知识库", activityTitle: "日志", settingsTitle: "设置",
     overviewSubtitle: "{engine} 正在驱动 QQ Bot", overviewSubtitleWaiting: "正在读取运行状态", channelsSubtitle: "QQ 通道、群白名单与最近事件", intelligenceSubtitle: "功能开关、人设、表达学习与主动兴趣", memorySubtitle: "统一摘要与 QQ 会话上下文", knowledgeSubtitle: "黑话、群内知识与成员理解", activitySubtitle: "所有模块的结构化运行日志", settingsSubtitle: "外观、刷新与访问方式",
-    connecting: "正在连接", waitingSync: "等待同步", quickActions: "快速操作", openQuickActions: "打开快速操作", refreshCurrent: "刷新当前页面", toggleTheme: "切换主题",
+    connecting: "正在连接", waitingSync: "等待同步", quickActions: "快速操作", openQuickActions: "打开快速操作", saveAndSync: "保存修改并同步", saveAndSyncPending: "保存 {count} 处未保存的修改并同步", saveSyncDone: "已保存 {count} 处修改并同步", saveSyncFailed: "{sections}保存失败，修改仍保留，可再点一次", syncDoneNothing: "已同步，没有未保存的修改", syncFailedNow: "同步失败，请确认 Hub 正在运行", saveSectionBot: "Bot 设置", toggleTheme: "切换主题",
     hubUnavailable: "Hub 暂时不可用", offlineHint: "请确认本地服务已启动。", retry: "重试", manageChannels: "管理通道", openApi: "查看 API",
     runtimeSummary: "运行摘要", serviceHealth: "服务状态", serviceHealthHint: "Hub 与各个依赖的实时健康度", checkNow: "立即检查",
     usageWindow: "Codex 用量", latencyTitle: "接口响应", waitingSamples: "等待首个样本", sampleCount: "最近 {count} 次采样", now: "现在",
@@ -91,7 +91,7 @@ const translations = {
     navOverview: "Overview", navChannels: "Channels", navIntelligence: "Behavior", navMemory: "Memory", navKnowledge: "Knowledge", navActivity: "Logs", navSettings: "Settings",
     overviewTitle: "Overview", channelsTitle: "Channels", intelligenceTitle: "Bot behavior", memoryTitle: "Memory", knowledgeTitle: "Knowledge base", activityTitle: "Logs", settingsTitle: "Settings",
     overviewSubtitle: "{engine} is driving the QQ Bot", overviewSubtitleWaiting: "Reading runtime status", channelsSubtitle: "QQ channel, group allowlist and recent events", intelligenceSubtitle: "Switches, persona, expression learning and proactive interest", memorySubtitle: "Unified summaries and QQ conversation context", knowledgeSubtitle: "Slang, group knowledge and member notes", activitySubtitle: "Structured runtime logs from every module", settingsSubtitle: "Appearance, refresh and access",
-    connecting: "Connecting", waitingSync: "Waiting to sync", quickActions: "Quick actions", openQuickActions: "Open quick actions", refreshCurrent: "Refresh this page", toggleTheme: "Toggle theme",
+    connecting: "Connecting", waitingSync: "Waiting to sync", quickActions: "Quick actions", openQuickActions: "Open quick actions", saveAndSync: "Save changes and sync", saveAndSyncPending: "Save {count} unsaved changes and sync", saveSyncDone: "Saved {count} changes and synced", saveSyncFailed: "Could not save {sections}; your edits are kept, try again", syncDoneNothing: "Synced; nothing unsaved", syncFailedNow: "Sync failed; check that the Hub is running", saveSectionBot: "Bot settings", toggleTheme: "Toggle theme",
     hubUnavailable: "Hub is unavailable", offlineHint: "Make sure the local service is running.", retry: "Retry", manageChannels: "Manage channels", openApi: "View API",
     runtimeSummary: "Runtime summary", serviceHealth: "Services", serviceHealthHint: "Live health of the Hub and its dependencies", checkNow: "Check now",
     usageWindow: "Codex usage", latencyTitle: "API response", waitingSamples: "Waiting for the first sample", sampleCount: "Samples: {count}", now: "Now",
@@ -205,6 +205,7 @@ const app = (() => {
     logCategories: new Set(["system", "qq", "onebot", "agent", "search", "interest", "learning", "memory", "lifecycle"]),
     commandIndex: 0,
     connectionOk: false,
+    saveSyncRunning: false,
     runtimeSamples: loadRuntimeSamples()
   };
 })();
@@ -685,6 +686,66 @@ async function refreshView({ quiet = false } = {}) {
   await Promise.allSettled(tasks);
 }
 
+// ---------- Save & sync ----------
+// The top-bar refresh button first saves every form with unsaved edits, so a
+// save button scrolled out of view (or hidden on another tab) never loses them.
+function pendingSettingsSaves() {
+  const saves = [];
+  if (app.dirtyForms.has("botSettingsForm") && app.state?.qq?.botSettings) {
+    saves.push({ label: t("saveSectionBot"), save: () => saveBotSettings(null, { announce: false }) });
+  }
+  for (const result of runExtensionHook("pendingSaves")) if (Array.isArray(result)) saves.push(...result);
+  return saves;
+}
+
+// Saves run one after another: several forms post to the same settings route,
+// and each save must finish before the next reads the state it returns.
+async function runSaveSync(saves, sync) {
+  const failed = [];
+  for (const item of saves) {
+    let saved = false;
+    try { saved = await item.save(); } catch { saved = false; }
+    if (saved !== true) failed.push(item.label);
+  }
+  let synced = false;
+  try { synced = (await sync()) !== false; } catch { synced = false; }
+  return { saved: saves.length - failed.length, failed, synced };
+}
+
+function updateSaveSyncButton() {
+  const button = $("#refreshButton");
+  const count = app.saveSyncRunning ? 0 : pendingSettingsSaves().length;
+  const label = count ? t("saveAndSyncPending", { count }) : t("saveAndSync");
+  button.classList.toggle("has-unsaved", count > 0);
+  if (button.title !== label) {
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+}
+
+async function saveAndSync() {
+  if (app.saveSyncRunning) return;
+  app.saveSyncRunning = true;
+  const button = $("#refreshButton");
+  button.disabled = true;
+  button.classList.add("loading");
+  updateSaveSyncButton();
+  try {
+    const result = await runSaveSync(pendingSettingsSaves(), async () => {
+      await refreshView();
+      return app.connectionOk;
+    });
+    if (result.failed.length) showToast(t("saveSyncFailed", { sections: result.failed.join(app.language === "en" ? ", " : "、") }), "error");
+    else if (!result.synced) showToast(t("syncFailedNow"), "error");
+    else showToast(result.saved ? t("saveSyncDone", { count: result.saved }) : t("syncDoneNothing"), "success");
+  } finally {
+    app.saveSyncRunning = false;
+    button.disabled = false;
+    button.classList.remove("loading");
+    updateSaveSyncButton();
+  }
+}
+
 function setSync(status, detail = "") {
   const root = $("#syncState");
   root.className = `sync-state ${status}`;
@@ -762,6 +823,7 @@ function renderAll() {
   renderLogs();
   renderSettings();
   runExtensionHook("render");
+  updateSaveSyncButton();
 }
 
 function renderState() {
@@ -1200,9 +1262,10 @@ function setBotControlStatus(status, messageKey) {
   const node = $("#botControlStatus");
   node.className = `save-state ${status === "ok" ? "" : status}`;
   node.textContent = t(messageKey);
+  updateSaveSyncButton();
 }
 
-async function saveBotSettings(control) {
+async function saveBotSettings(control, { announce = true } = {}) {
   const form = $("#botSettingsForm");
   if (!form.reportValidity()) return false;
   const controls = $$("input, select, button", form);
@@ -1217,7 +1280,7 @@ async function saveBotSettings(control) {
     clearBotSettingsDraft();
     setBotControlStatus("ok", "settingsSynced");
     renderState();
-    showToast(t("botSettingsSaved"), "success");
+    if (announce) showToast(t("botSettingsSaved"), "success");
     return true;
   } catch (error) {
     app.dirtyForms.add("botSettingsForm");
@@ -2198,7 +2261,7 @@ async function mutate(action, { control, success = t("saved"), busyKey = "" } = 
   if (control) control.disabled = true;
   try {
     const result = await action();
-    showToast(success, "success");
+    if (success) showToast(success, "success");
     return result;
   } catch (error) {
     showToast(error.message, "error");
@@ -2573,7 +2636,9 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-$("#refreshButton").addEventListener("click", () => refreshView().catch(() => undefined));
+$("#refreshButton").addEventListener("click", () => { void saveAndSync(); });
+// Forms without their own save-state indicator only mark themselves dirty.
+document.addEventListener("input", updateSaveSyncButton);
 $("#offlineRetry").addEventListener("click", () => refreshView().catch(() => undefined));
 $("#refreshHealth").addEventListener("click", () => refreshMaintenance({ force: true }).catch(() => undefined));
 $("#refreshMemory").addEventListener("click", () => refreshMemory().catch(() => undefined));

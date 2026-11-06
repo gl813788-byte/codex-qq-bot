@@ -42,7 +42,7 @@ const personaTranslations = {
     affinityMaxDelta: "每轮最大变化", affinityDailyCap: "每人每日上限", affinityHalfLife: "淡化半衰期（天，0 不衰减）", affinityOwnerFloor: "主人好感下限",
     affinityReveal: "允许用户查看自己的好感度", affinityRevealHint: "关闭后普通用户发送 /好感度 只会得到一句玩笑。",
     personaPreview: "提示词预览", personaPreviewHint: "保存后主模型实际看到的人格与关系段落（关系示例取好感最高的人）。",
-    revertChanges: "撤销修改", savePersona: "保存人格", personaSaved: "人格已保存", presetApplied: "已套用预设：{name}", presetCustom: "自定义",
+    revertChanges: "撤销修改", savePersona: "保存人格", personaSaved: "人格已保存", saveSectionPersona: "人格", saveSectionPreset: "兴趣偏好", saveSectionAi: "模型设置", saveSectionIdentity: "身份设置", presetApplied: "已套用预设：{name}", presetCustom: "自定义",
     personaPreviewEmpty: "核心人格未启用或没有任何非中性的设定。",
     relationships: "好感与关系", relationshipsHint: "Bot 对每个人的好感、熟悉度、称呼与印象。点击一行可编辑或锁定。",
     peopleSearch: "搜索名字、QQ 号、称呼或印象", affinityLevel: "好感等级", sortBy: "排序", sortAffinity: "按好感", sortFamiliarity: "按熟悉度", sortRecent: "按最近互动",
@@ -133,7 +133,7 @@ const personaTranslations = {
     affinityMaxDelta: "Max change per turn", affinityDailyCap: "Daily cap per person", affinityHalfLife: "Fade half-life (days, 0 = never)", affinityOwnerFloor: "Owner floor",
     affinityReveal: "Users may see their own affinity", affinityRevealHint: "When off, /好感度 only gets a joke from ordinary users.",
     personaPreview: "Prompt preview", personaPreviewHint: "What the main model sees after saving (the relationship example uses the top person).",
-    revertChanges: "Revert", savePersona: "Save persona", personaSaved: "Persona saved", presetApplied: "Applied preset: {name}", presetCustom: "Custom",
+    revertChanges: "Revert", savePersona: "Save persona", personaSaved: "Persona saved", saveSectionPersona: "persona", saveSectionPreset: "interest preferences", saveSectionAi: "model settings", saveSectionIdentity: "identity settings", presetApplied: "Applied preset: {name}", presetCustom: "Custom",
     personaPreviewEmpty: "The core personality is off or has no non-neutral settings.",
     relationships: "Affinity & relationships", relationshipsHint: "How the Bot feels about each person. Click a row to edit or lock it.",
     peopleSearch: "Search name, QQ, nickname or tags", affinityLevel: "Affinity level", sortBy: "Sort", sortAffinity: "By affinity", sortFamiliarity: "By familiarity", sortRecent: "By recent contact",
@@ -219,6 +219,7 @@ const personaExtension = {
   runCommand: personaRunCommand,
   tick: personaTick,
   judgeProviderChanged: personaFillModelOptions,
+  pendingSaves: personaPendingSaves,
   peopleMemoryModel: personaPeopleMemoryModel,
   personCardExtra: personaPersonCardExtra,
   knowledgeBadge: personaKnowledgeBadge,
@@ -699,17 +700,19 @@ function presetFieldsChanged(profile, next) {
     || (profile.identity || "") !== next.identity;
 }
 
-async function savePersona(control) {
-  if (!personaUi.data) return;
+async function savePersona(control, { announce = true } = {}) {
+  if (!personaUi.data) return false;
   const profile = collectPersonaProfile();
   const body = { profile: { ...profile, preset: presetFieldsChanged(personaUi.data.profile, profile) ? "custom" : personaUi.data.profile.preset } };
   setPersonaSaveState("saving", "settingsSaving");
   try {
-    personaUi.data = await mutate(() => api("/api/qq/personality", { method: "POST", body: JSON.stringify(body) }), { control, success: t("personaSaved"), busyKey: "persona" });
+    personaUi.data = await mutate(() => api("/api/qq/personality", { method: "POST", body: JSON.stringify(body) }), { control, success: announce ? t("personaSaved") : "", busyKey: "persona" });
     personaUi.dirty = false;
     renderPersona();
+    return true;
   } catch {
     setPersonaSaveState("error", "settingsSaveFailed");
+    return false;
   }
 }
 
@@ -872,6 +875,7 @@ function setPersonaSaveState(status, key) {
   const node = $("#personaSaveState");
   node.className = `save-state ${status === "ok" ? "" : status}`;
   node.textContent = t(key);
+  updateSaveSyncButton();
 }
 
 function levelFor(score, levels = personaUi.data?.levels || []) {
@@ -1069,19 +1073,34 @@ function setPresetState(status, key) {
   const node = $("#interestPresetStatus");
   node.className = `save-state ${status === "ok" ? "" : status}`;
   node.textContent = t(key);
+  updateSaveSyncButton();
 }
 
-async function saveInterestPreset(control) {
+async function saveInterestPreset(control, { announce = true } = {}) {
   const lines = (selector) => $(selector).value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
   const body = { judgePreset: { likes: lines("#presetLikes"), dislikes: lines("#presetDislikes"), style: lines("#presetStyle") } };
   setPresetState("saving", "settingsSaving");
   try {
-    app.state = await mutate(() => api("/api/qq/bot-settings", { method: "POST", body: JSON.stringify(body) }), { control, success: t("presetSaved"), busyKey: "bot-settings" });
+    app.state = await mutate(() => api("/api/qq/bot-settings", { method: "POST", body: JSON.stringify(body) }), { control, success: announce ? t("presetSaved") : "", busyKey: "bot-settings" });
     personaUi.presetDirty = false;
     renderState();
+    return true;
   } catch {
     setPresetState("error", "settingsSaveFailed");
+    return false;
   }
+}
+
+// ---------- Save & sync ----------
+// Unsaved edits the top-bar save-and-sync button saves, in this order.
+function personaPendingSaves() {
+  const saves = [];
+  if (personaUi.dirty && personaUi.data) saves.push({ label: t("saveSectionPersona"), save: () => savePersona($("#savePersona"), { announce: false }) });
+  if (personaUi.presetDirty) saves.push({ label: t("saveSectionPreset"), save: () => saveInterestPreset($("#saveInterestPreset"), { announce: false }) });
+  if (personaUi.admin && $("#aiSettingsForm").dataset.dirty === "1") saves.push({ label: t("saveSectionAi"), save: () => saveAiSettings(null, { announce: false }) });
+  // Identity and roles stay loopback-only, exactly like the form itself.
+  if (personaUi.admin && isLoopbackBrowser() && $("#identityForm").dataset.dirty === "1") saves.push({ label: t("saveSectionIdentity"), save: () => saveIdentity(null, { announce: false }) });
+  return saves;
 }
 
 // ---------- Advanced settings ----------
@@ -1092,6 +1111,7 @@ function renderAdminSettings() {
   renderIdentityForm(admin);
   renderBans(admin);
   renderCommandPermissions(admin);
+  updateSaveSyncButton();
 }
 
 function renderAiSettingsForm(admin) {
@@ -1120,7 +1140,7 @@ function fillAiModelDependents(effort, tier) {
   $("#aiServiceTier").value = tiers.some((item) => item.id === tier) ? tier : "";
 }
 
-async function saveAiSettings(control) {
+async function saveAiSettings(control, { announce = true } = {}) {
   const body = {
     model: $("#aiModel").value,
     reasoningEffort: $("#aiEffort").value,
@@ -1129,13 +1149,15 @@ async function saveAiSettings(control) {
     serviceTier: $("#aiServiceTier").value
   };
   try {
-    personaUi.admin = await mutate(() => api("/api/settings/ai", { method: "POST", body: JSON.stringify(body) }), { control, success: t("aiSettingsSaved"), busyKey: "admin" });
+    personaUi.admin = await mutate(() => api("/api/settings/ai", { method: "POST", body: JSON.stringify(body) }), { control, success: announce ? t("aiSettingsSaved") : "", busyKey: "admin" });
     $("#aiSettingsForm").dataset.dirty = "";
     renderAdminSettings();
     void refreshState({ quiet: true }).catch(() => undefined);
     void refreshMaintenance({ quiet: true }).catch(() => undefined);
+    return true;
   } catch {
     // mutate already showed the error.
+    return false;
   }
 }
 
@@ -1152,9 +1174,9 @@ function renderIdentityForm(admin) {
   $("#identityAdmins").value = (admin.identity.adminUserIds || []).join(" ");
 }
 
-async function saveIdentity(control) {
+async function saveIdentity(control, { announce = true } = {}) {
   const form = $("#identityForm");
-  if (!form.reportValidity()) return;
+  if (!form.reportValidity()) return false;
   const body = {
     assistantName: $("#identityAssistantName").value.trim(),
     ownerLabel: $("#identityOwnerLabel").value.trim(),
@@ -1163,11 +1185,13 @@ async function saveIdentity(control) {
     adminUserIds: $("#identityAdmins").value
   };
   try {
-    personaUi.admin = await mutate(() => api("/api/settings/identity", { method: "POST", body: JSON.stringify(body) }), { control, success: t("identitySaved"), busyKey: "admin" });
+    personaUi.admin = await mutate(() => api("/api/settings/identity", { method: "POST", body: JSON.stringify(body) }), { control, success: announce ? t("identitySaved") : "", busyKey: "admin" });
     form.dataset.dirty = "";
     renderAdminSettings();
+    return true;
   } catch {
     // mutate already showed the error.
+    return false;
   }
 }
 
