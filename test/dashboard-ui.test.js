@@ -76,3 +76,56 @@ test("dashboard shows raw QQ CQ codes as short readable tags", () => {
   assert.equal(displayQqText("[CQ:unknown_kind,x=1]"), zh.cqOther);
   assert.equal(displayQqText("plain text [not a code]"), "plain text [not a code]");
 });
+
+test("save-and-sync saves dirty forms one at a time, keeps failures and still syncs", async () => {
+  const start = javascript.indexOf("async function runSaveSync");
+  const end = javascript.indexOf("\nfunction ", start + 1);
+  assert.notEqual(start, -1, "client.js must define runSaveSync");
+  const runSaveSync = vm.runInNewContext(`${javascript.slice(start, end)}; runSaveSync`, {}, { timeout: 100 });
+  const order = [];
+  let running = 0;
+  const step = (label, outcome) => ({
+    label,
+    save: async () => {
+      running += 1;
+      assert.equal(running, 1, "saves must not overlap");
+      order.push(label);
+      await new Promise((resolve) => setImmediate(resolve));
+      running -= 1;
+      if (outcome instanceof Error) throw outcome;
+      return outcome;
+    }
+  });
+  const result = await runSaveSync([step("bot", true), step("persona", false), step("ai", new Error("offline")), step("preset", true)], async () => {
+    order.push("sync");
+    return true;
+  });
+  assert.deepEqual(order, ["bot", "persona", "ai", "preset", "sync"]);
+  assert.deepEqual({ ...result, failed: [...result.failed] }, { saved: 2, failed: ["persona", "ai"], synced: true });
+  const empty = await runSaveSync([], async () => false);
+  assert.deepEqual({ ...empty, failed: [...empty.failed] }, { saved: 0, failed: [], synced: false });
+  const thrown = await runSaveSync([], async () => { throw new Error("offline"); });
+  assert.equal(thrown.synced, false);
+});
+
+test("the top-bar refresh button saves unsaved settings before syncing", () => {
+  assert.match(html, /id="refreshButton"[^>]*data-i18n-title="saveAndSync"/);
+  assert.match(javascript, /\$\("#refreshButton"\)\.addEventListener\("click", \(\) => \{ void saveAndSync\(\); \}\)/);
+  assert.match(personaScript, /pendingSaves: personaPendingSaves/);
+  for (const name of ["savePersona", "saveInterestPreset", "saveAiSettings", "saveIdentity"]) {
+    assert.match(personaScript, new RegExp(`async function ${name}\\(control, \\{ announce = true \\} = \\{\\}\\)`), `${name} must support quiet batch saves`);
+  }
+});
+
+test("buttons with light text keep a solid background where color-mix is unsupported", () => {
+  const css = readFileSync(new URL("client.css", resources), "utf8");
+  const blocks = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selector: selector.trim(), body }));
+  const lightText = blocks.filter(({ selector, body }) => /\bcolor:\s*(var\(--on-accent\)|#fff\b)/.test(body) || /\.button\.(primary|danger)/.test(selector));
+  assert.ok(lightText.some(({ selector }) => selector === ".button.primary"), "the primary button rule must be checked");
+  for (const { selector, body } of lightText) {
+    const backgrounds = [...body.matchAll(/(?:^|;|\s)background:\s*([^;]+)/g)].map((match) => match[1]);
+    const firstMixed = backgrounds.findIndex((value) => value.includes("color-mix("));
+    if (firstMixed === -1) continue;
+    assert.ok(backgrounds.slice(0, firstMixed).some((value) => !value.includes("color-mix(")), `${selector} needs a plain background before its color-mix background`);
+  }
+});
