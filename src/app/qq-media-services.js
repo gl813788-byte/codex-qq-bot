@@ -2,13 +2,20 @@ import { copyFile, mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createBilibiliClient } from "../qq-media/bilibili.js";
 import { mediaError } from "../qq-media/media-runtime.js";
+import { isQqTrustedMusicAudioUrl } from "../qq-media/music-links.js";
+import { createQqMusicResolver } from "../qq-media/music-resolver.js";
 
 // Network and OneBot side effects behind qq_media: Bilibili API reads through
 // the safe-fetch policy, QQ video downloads into the turn's input directory,
-// and voice clips converted by NapCat (QQ voice is SILK, which ffmpeg cannot
-// decode). Every returned path is a regular file inside outputDir.
+// voice clips converted by NapCat (QQ voice is SILK, which ffmpeg cannot
+// decode), and songs: Meting resolves facts, lyrics and stream URLs while
+// the audio itself is downloaded here through the safe-fetch policy from the
+// platforms' media hosts only. Every returned path is a regular file inside
+// outputDir.
 
 const MAX_VOICE_BYTES = 20 * 1024 * 1024;
+const MAX_SONG_BYTES = 60 * 1024 * 1024;
+const audioExtensions = Object.freeze({ "audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/aac": "aac", "audio/flac": "flac", "audio/x-flac": "flac", "audio/ogg": "ogg", "audio/wav": "wav", "audio/x-wav": "wav" });
 
 export function createQqMediaServices({
   fetchWithUrlPolicy,
@@ -17,6 +24,8 @@ export function createQqMediaServices({
   writeResponseBodyToFile,
   callOneBotAction,
   maxVideoBytes = 200 * 1024 * 1024,
+  maxSongBytes = MAX_SONG_BYTES,
+  loadMeting = async () => null,
   userAgent = "codex-qq-bot",
   mergeSignals = (...signals) => AbortSignal.any(signals.filter(Boolean))
 } = {}) {
@@ -47,6 +56,7 @@ export function createQqMediaServices({
   }
 
   const bilibili = createBilibiliClient({ fetchJson, resolveRedirect });
+  const music = createQqMusicResolver({ loadMeting, resolveRedirect });
 
   async function downloadTo(url, outputPath, { signal, maxBytes }) {
     const response = await fetchWithUrlPolicy(url, {
@@ -59,6 +69,20 @@ export function createQqMediaServices({
     }
     await writeResponseBodyToFile(response, outputPath, { maxBytes });
     return outputPath;
+  }
+
+  function refererFor(url) {
+    const host = (() => {
+      try {
+        return new URL(url).hostname;
+      } catch {
+        return "";
+      }
+    })();
+    if (/qq\.com$/i.test(host)) return "https://y.qq.com/";
+    if (/kugou\.com$/i.test(host)) return "https://www.kugou.com/";
+    if (/kuwo\.cn$/i.test(host)) return "https://www.kuwo.cn/";
+    return "https://music.163.com/";
   }
 
   async function copyRegularFile(source, target, maxBytes) {
@@ -104,7 +128,29 @@ export function createQqMediaServices({
     throw mediaError("MEDIA_DOWNLOAD_FAILED", "QQ 没能转换这条语音（可能已过期）");
   }
 
+  // One song file from a music platform's media host. Redirects stay under
+  // the safe-fetch policy; a redirect to an HTML page (NetEase sends VIP
+  // songs to /404) is rejected by type before anything is decoded.
+  async function downloadSong(url, { outputDir, signal } = {}) {
+    if (!isQqTrustedMusicAudioUrl(url)) throw mediaError("MEDIA_UNTRUSTED", "这个音频地址不在音乐平台的媒体域名下");
+    await mkdir(outputDir, { recursive: true });
+    let finalUrl = String(url);
+    const response = await fetchWithUrlPolicy(url, {
+      headers: { "user-agent": userAgent, referer: refererFor(url) },
+      signal: mergeSignals(signal, AbortSignal.timeout(120_000))
+    }, { mode: safeFetchMode, onRedirect: (next) => { finalUrl = next; } });
+    const type = String(response.headers?.get?.("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (!response.ok || /^text\/|json|html/.test(type) || !isQqTrustedMusicAudioUrl(finalUrl)) {
+      await response.body?.cancel?.().catch?.(() => undefined);
+      throw mediaError("MEDIA_DOWNLOAD_FAILED", response.ok ? "平台没有给出可播放的音频（可能是会员/版权限制）" : `音频下载返回 HTTP ${response.status}`);
+    }
+    const extension = audioExtensions[type] || (finalUrl.match(/\.(mp3|m4a|flac|aac|ogg|wav)(?:[?#]|$)/i)?.[1] || "mp3").toLowerCase();
+    const target = join(outputDir, `song.${extension}`);
+    await writeResponseBodyToFile(response, target, { maxBytes: maxSongBytes });
+    return target;
+  }
+
   const fetchSubtitle = (url, options) => fetchJson(url, { ...options, maxBytes: 4 * 1024 * 1024 });
 
-  return { bilibili, fetchQqVideo, fetchVoice, fetchSubtitle, fetchJson };
+  return { bilibili, music, fetchQqVideo, fetchVoice, fetchSubtitle, fetchJson, downloadSong, resolveRedirect };
 }

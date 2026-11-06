@@ -72,6 +72,16 @@ const commands = [
     configurable: true
   },
   {
+    key: "voiceToText",
+    category: "conversation",
+    menuLine: "/转文字",
+    description: "把语音消息转成文字",
+    usage: [["/转文字", "回复（引用）一条语音消息发送"]],
+    aliases: ["转文字", "语音转文字", "转文本", "识别语音"],
+    defaultPublic: true,
+    configurable: true
+  },
+  {
     key: "session",
     category: "conversation",
     menuLine: "/会话模式",

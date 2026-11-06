@@ -114,3 +114,37 @@ export function hasQqHeardVoice(event) {
   return Array.isArray(event?.qqVoiceTranscripts)
     && event.qqVoiceTranscripts.some((item) => item.source === "current" && item.ok);
 }
+
+// /转文字: the command a person sends while quoting a voice message.
+export function isQqVoiceToTextCommand(compact) {
+  return /^(?:转文字|语音转文字|转文本|识别语音|stt)$/i.test(String(compact || ""));
+}
+
+export function hasQqQuotedOrCurrentVoice(event) {
+  return (event?.contentContext?.media?.audios || []).length > 0
+    || (event?.replyContext?.contentContext?.media?.audios || []).length > 0;
+}
+
+// Transcripts heard before routing are reused unless they were cut at the
+// automatic length limit; then the clip is heard again with a longer limit.
+export function needsQqVoiceRetranscription(transcripts = [], { autoMaxSeconds = 90 } = {}) {
+  const usable = transcripts.filter((item) => item.ok);
+  if (!usable.length) return true;
+  return usable.some((item) => Number(item.durationSeconds) >= Math.max(1, autoMaxSeconds - 1));
+}
+
+export function formatQqVoiceToTextReply(transcripts = [], { available = true, hasVoice = true } = {}) {
+  if (!hasVoice) return "回复（引用）一条语音消息，再发 /转文字。";
+  if (!available) return "本机还没装语音识别组件，转不了文字（主人可运行 npm run ncc -- media install）。";
+  const lines = [];
+  for (const [index, item] of transcripts.entries()) {
+    const label = transcripts.length > 1 ? `第 ${index + 1} 条` : "这条语音";
+    if (!item.ok) {
+      lines.push(`${label}没识别出来（${item.code === "MEDIA_BUSY" ? "媒体处理正忙，稍后再试" : item.code === "MEDIA_LOW_MEMORY" ? "手机内存不够，稍后再试" : "可能已过期"}）。`);
+      continue;
+    }
+    const length = item.durationSeconds ? `（${item.durationSeconds} 秒）` : "";
+    lines.push(item.noSpeech || !item.text ? `${label}${length}听不出说了什么。` : `${label}${length}：\n${item.text}`);
+  }
+  return lines.length ? `🎙️ 语音转文字\n${lines.join("\n")}\n（本机识别，可能有同音错字）` : "没找到能转的语音。";
+}

@@ -482,9 +482,18 @@ import {
 import { createWebSearch } from "./web-search.js";
 import { isSupportedImageContentType, readResponseJson, writeResponseBodyToFile } from "./bounded-stream.js";
 import { createQqMediaRuntime } from "./qq-media/media-runtime.js";
-import { collectQqMediaCandidates, formatQqMediaCandidates, isQqWatchableVideoUrl } from "./qq-media/media-candidates.js";
+import { collectQqMediaCandidates, formatQqMediaCandidates, isQqParsableMediaUrl } from "./qq-media/media-candidates.js";
+import { createQqMetingLoader } from "./qq-media/music-resolver.js";
+import { buildQqMediaUpdateEnv, createQqMediaUpdater } from "./qq-media/media-updates.js";
 import { createQqMediaServices } from "./app/qq-media-services.js";
-import { hasQqHeardVoice, transcribeQqEventVoices } from "./app/qq-voice-transcription.js";
+import {
+  formatQqVoiceToTextReply,
+  hasQqHeardVoice,
+  hasQqQuotedOrCurrentVoice,
+  isQqVoiceToTextCommand,
+  needsQqVoiceRetranscription,
+  transcribeQqEventVoices
+} from "./app/qq-voice-transcription.js";
 import { createQqSubagentManager } from "./qq-subagents.js";
 import { executeQqSubagentTool } from "./app/qq-subagent-tool.js";
 import { createNeteaseMusicSearch } from "./app/qq-card-tools.js";
@@ -528,6 +537,8 @@ import {
 import {
   executeQqMediaAudioTool,
   executeQqMediaBilibiliTool,
+  executeQqMediaMusicTool,
+  executeQqMediaParseTool,
   executeQqMediaVideoTool,
   getQqMediaTurnState
 } from "./app/qq-media-tool.js";
@@ -698,6 +709,10 @@ const {
   agentCapacityWaitMs,
   mediaVoiceAutoTranscribe,
   mediaVoiceAutoMaxSeconds,
+  mediaAutoUpdate,
+  mediaUpdateCheckHours,
+  mediaUpdateWindow,
+  mediaUpdateMinAvailableBytes,
   subagentMaxConcurrency,
   subagentMaxQueued,
   subagentTimeoutMs,
@@ -982,8 +997,9 @@ const qqInterestVisionCache = createQqInterestVisionCapabilityCache();
 const qqZone = createQqZoneClient({ callOneBotAction });
 // Optional local media understanding (videos, voice, sound); missing
 // components make the tools answer "not installed" instead of failing.
+const qqMediaToolsDir = mediaToolsDir || join(projectDir, "runtime", "media-tools");
 const qqMediaRuntime = createQqMediaRuntime({
-  toolsDir: mediaToolsDir || join(projectDir, "runtime", "media-tools"),
+  toolsDir: qqMediaToolsDir,
   workerScript: join(projectDir, "scripts", "media", "qq-media-worker.mjs"),
   cookiesFile: mediaCookiesFile,
   maxVideoSeconds: mediaMaxVideoSeconds,
@@ -1009,9 +1025,56 @@ const qqMediaServices = createQqMediaServices({
   writeResponseBodyToFile,
   callOneBotAction: (endpoint, payload) => callOneBotAction(endpoint, payload),
   maxVideoBytes: mediaMaxDownloadBytes,
+  loadMeting: createQqMetingLoader(qqMediaToolsDir),
   userAgent: userAgentName,
   mergeSignals: (...signals) => mergeAbortSignals(...signals)
 });
+// New releases of the media components: a light check every few hours; the
+// installer's self-tested, rolled-back update runs only while the Bot is
+// idle in the update window with enough memory and process room, otherwise
+// the controller applies it before the next start.
+const qqMediaUpdater = createQqMediaUpdater({
+  toolsDir: qqMediaToolsDir,
+  mode: mediaAutoUpdate,
+  checkIntervalMs: mediaUpdateCheckHours * 60 * 60 * 1000,
+  window: mediaUpdateWindow,
+  minAvailableBytes: mediaUpdateMinAvailableBytes,
+  readAvailable: () => readAvailableMemoryBytes(),
+  isIdle: () => Object.keys(state.qq.activeGenerations || {}).length === 0
+    && !qqMediaRuntime.busy
+    && qqSubagentManager.stats().running === 0,
+  // npm and its children briefly add a few processes.
+  acquireCapacity: () => agentProcessGate.acquire({ processes: 5, waitMs: 0 }),
+  // The update keeps running (and rolls back on failure) even if the Hub
+  // stops meanwhile: it is not tied to the shutdown signal.
+  runUpdate: ({ mode }) => qqMediaRuntime.runExclusive(() => runProcess("bash", [join(projectDir, "scripts", "media", "install-media-tools.sh"), "update"], {
+    timeoutMs: 30 * 60 * 1000,
+    maxOutputBytes: 1024 * 1024,
+    allowFailure: true,
+    killProcessGroup: true,
+    env: buildQqMediaUpdateEnv(process.env, { toolsDir: qqMediaToolsDir, mode })
+  })).then((result) => ({
+    ok: result.code === 0,
+    detail: String(result.output || "").split(/\r?\n/).filter((line) => /^\[media\]/.test(line)).slice(-3).join(" ")
+  })),
+  fetchJson: (url, options) => qqMediaServices.fetchJson(url, { ...options, maxBytes: 256 * 1024 }),
+  resolveRedirect: (url, options) => qqMediaServices.resolveRedirect(url, options),
+  onEvent: (event) => {
+    const details = {
+      operation: "media.update",
+      outcome: event.type,
+      updates: (event.updates || event.targets || []).map((update) => `${update.name}@${update.current || "?"}->${update.latest}`).slice(0, 6),
+      ...(event.reason ? { reason: event.reason } : {}),
+      ...(event.type === "applied" ? { ok: event.ok, detail: String(event.detail || "").slice(0, 300) } : {}),
+      ...(event.errors?.length ? { errorCount: event.errors.length } : {}),
+      ...(event.error ? { error: event.error } : {})
+    };
+    if (event.type === "checked" && !details.updates.length && !details.errorCount) return;
+    const level = event.type === "apply_failed" || event.type === "check_failed" || (event.type === "applied" && !event.ok) ? "warn" : "info";
+    logger[level]("QQ media components update", details, "system");
+  }
+});
+
 const qqSocialBridge = createQqSocialBridgeClient({
   baseUrl: qqSocialExtensionBase,
   timeoutMs: oneBotRequestTimeoutMs
@@ -3825,6 +3888,9 @@ async function buildMaintenanceStatus({ force = false } = {}) {
       queue,
       capacity: agentProcessGate.describe()
     },
+    media: {
+      updates: qqMediaUpdater.status()
+    },
     // Kept for existing controllers; the run fields mirror the agent above.
     codex: {
       ...codexMaintenance,
@@ -4738,7 +4804,11 @@ function normalizeQqDisplayText(text) {
 async function shouldRespondToQq(event) {
   if (!state.channels.qq) return { ok: false, reason: "QQ channel is off" };
   if (isBannedQqSender(event)) return { ok: false, reason: "Sender is banned" };
-  if (hasUnhandledQqAudio(event)) return { ok: false, reason: "Voice message ignored until transcription is available" };
+  // /转文字 is an explicit request about the voice message; it is answered
+  // (with the transcript or why there is none) instead of being gated.
+  if (hasUnhandledQqAudio(event) && !isQqVoiceToTextCommandEvent(event)) {
+    return { ok: false, reason: "Voice message ignored until transcription is available" };
+  }
   if (event.queuedAggregate) return { ok: true, reason: "Queued QQ messages aggregated" };
   if (event.type === "private_message") return { ok: true };
   if (event.groupId && !state.qq.allowedGroups.includes(event.groupId)) {
@@ -5059,6 +5129,8 @@ async function runQqPeriodicChecks({ reason = "interval" } = {}) {
   await maybeScheduleQqKnowledgeDeletionReview();
   maybeScheduleQqAvatarFeatureDescription();
   await maybePruneQqMemoryImages();
+  // Not awaited: an update may take minutes and the updater keeps its own lock.
+  void qqMediaUpdater.tick()?.catch?.((error) => logger.warn("QQ media update check failed", { operation: "media.update", outcome: "failed", error }, "system"));
   if (!state.channels.qq || !state.qq.enhancer.enabled || !state.qq.proactive.enabled) return;
   for (const [groupId, cachedEvent] of qqProactiveLatestEventByGroupId) {
     if (!state.qq.allowedGroups.includes(groupId)) {
@@ -6349,6 +6421,38 @@ async function attachQqVoiceTranscripts(event) {
   return heard;
 }
 
+function isQqVoiceToTextCommandEvent(event) {
+  const command = stripMentionText(event?.text).trim();
+  if (!command.startsWith("/")) return false;
+  return isQqVoiceToTextCommand(command.replace(/^\/+/, "").replace(/\s+/g, "").toLowerCase())
+    && isQqCommandAllowedForEvent("voiceToText", event);
+}
+
+// /转文字 replies with the transcript of the quoted (or attached) voice
+// message, reusing what was heard before routing when it is complete.
+async function buildQqVoiceToTextReply(event) {
+  const hasVoice = hasQqQuotedOrCurrentVoice(event);
+  const status = hasVoice ? await qqMediaRuntime.status().catch(() => null) : null;
+  if (!hasVoice || !status?.audio) return formatQqVoiceToTextReply([], { hasVoice, available: Boolean(status?.audio) });
+  let transcripts = Array.isArray(event.qqVoiceTranscripts) ? event.qqVoiceTranscripts : [];
+  if (needsQqVoiceRetranscription(transcripts, { autoMaxSeconds: mediaVoiceAutoMaxSeconds })) {
+    const heard = await transcribeQqEventVoices(event, {
+      runtime: qqMediaRuntime,
+      fetchVoice: qqMediaServices.fetchVoice,
+      workRoot: join(qqTaskWorkspacesDir, "voice"),
+      maxSeconds: 600,
+      deadlineMs: 150_000
+    }).catch(() => ({ transcripts: [] }));
+    if (heard.transcripts.length) transcripts = heard.transcripts;
+  }
+  logger.info("QQ voice converted to text", {
+    operation: "media.voice",
+    outcome: transcripts.some((item) => item.ok) ? "command_transcribed" : "command_failed",
+    clipCount: transcripts.length
+  }, "qq", qqLogContext(event));
+  return formatQqVoiceToTextReply(transcripts, { hasVoice, available: true });
+}
+
 function hasUnhandledQqAudio(event) {
   if (hasQqHeardVoice(event)) return false;
   return Boolean(event.hasAudioSegment)
@@ -6690,6 +6794,10 @@ async function buildQqCommandAction(event) {
     return buildQqAffinityCommandAction(event, normalized);
   }
 
+  if (isQqCommandAllowedForEvent("voiceToText", event) && isQqVoiceToTextCommand(compact)) {
+    return { reply: await buildQqVoiceToTextReply(event) };
+  }
+
   const manualAiTask = parseQqManualAiTaskCommand(normalized);
   if (manualAiTask) {
     if (!isQqCommandAllowedForEvent("aiTasks", event)) {
@@ -6961,6 +7069,7 @@ function isAllowedQqCommandEvent(event) {
   if (isQqCommandAllowedForEvent("newDialog", event) && isPublicQqClearContextCommand(normalized, compact)) return true;
   if (isQqCommandAllowedForEvent("summary", event) && isPublicQqSummarizeContextCommand(normalized, compact)) return true;
   if (isQqCommandAllowedForEvent("affinity", event) && isQqAffinityCommand(normalized)) return true;
+  if (isQqCommandAllowedForEvent("voiceToText", event) && isQqVoiceToTextCommand(compact)) return true;
   if (hasQqPrivilegedAccess(event) && isOwnerOnlyQqCommand(normalized, compact)) return true;
   return isAllowedPublicQqCommand(normalized, compact, event);
 }
@@ -6978,6 +7087,7 @@ function isAllowedPublicQqCommand(normalized, compact, event) {
     || (isQqCommandAllowedForEvent("newDialog", event) && isPublicQqClearContextCommand(normalized, compact))
     || (isQqCommandAllowedForEvent("summary", event) && isPublicQqSummarizeContextCommand(normalized, compact))
     || (isQqCommandAllowedForEvent("affinity", event) && isQqAffinityCommand(normalized))
+    || (isQqCommandAllowedForEvent("voiceToText", event) && isQqVoiceToTextCommand(compact))
     || (isQqCommandAllowedForEvent("aiTasks", event) && Boolean(parseQqManualAiTaskCommand(normalized)))
     || (isQqCommandAllowedForEvent("status", event) && /^(状态|status|查看状态)$/i.test(compact))
     || (isQqCommandAllowedForEvent("config", event) && /^(详细配置|配置|config|settings|详细状态)$/i.test(compact))
@@ -7871,22 +7981,26 @@ function formatQqBotInternalToolContext(event) {
     canSearchImages: canQqSearchWebImages(),
     stickerLibraryHint: event.qqStickerLibraryHint || "",
     mediaSummary: formatQqMediaCandidates(getQqMediaCandidatesForEvent(event), {
-      available: { video: Boolean(event.qqMediaToolStatus?.video), audio: Boolean(event.qqMediaToolStatus?.audio) }
+      available: {
+        video: Boolean(event.qqMediaToolStatus?.video),
+        audio: Boolean(event.qqMediaToolStatus?.audio),
+        music: Boolean(event.qqMediaToolStatus?.music && event.qqMediaToolStatus?.analysis)
+      }
     })
   });
 }
 
 function getQqMediaCandidatesForEvent(event) {
-  if (!event || typeof event !== "object") return { videos: [], audios: [] };
+  if (!event || typeof event !== "object") return { videos: [], audios: [], musics: [] };
   event.qqMediaCandidates ||= collectQqMediaCandidates(event);
   return event.qqMediaCandidates;
 }
 
-// A public video link may be opened by URL only when it already appeared in
-// this conversation's recent messages.
+// A public video or song link may be opened by URL only when it already
+// appeared in this conversation's recent messages.
 function isQqUrlInRecentConversation(event, url) {
   const target = String(url || "").trim();
-  if (!target || !isQqWatchableVideoUrl(target)) return false;
+  if (!target || !isQqParsableMediaUrl(target)) return false;
   const scopeId = getQqMemoryScopeId(event);
   const entries = scopeId ? (state.qq.memory.recentMessages[scopeId] || []).slice(-80) : [];
   return entries.some((entry) => String(entry?.text || "").includes(target)
@@ -7908,6 +8022,8 @@ async function executeQqMediaNativeTool(call, event, replyScope) {
     fetchQqVideo: qqMediaServices.fetchQqVideo,
     fetchVoice: qqMediaServices.fetchVoice,
     fetchSubtitle: qqMediaServices.fetchSubtitle,
+    music: qqMediaServices.music,
+    downloadSong: qqMediaServices.downloadSong,
     candidates: getQqMediaCandidatesForEvent(event),
     state: getQqMediaTurnState(event),
     taskWorkspace: event.qqTaskWorkspace,
@@ -7916,13 +8032,16 @@ async function executeQqMediaNativeTool(call, event, replyScope) {
     assertActive
   };
   const startedAt = Date.now();
-  const result = call.tool === "video"
-    ? await executeQqMediaVideoTool(args, deps)
-    : call.tool === "audio"
-      ? await executeQqMediaAudioTool(args, deps)
-      : call.tool === "bilibili"
-        ? await executeQqMediaBilibiliTool(args, deps)
-        : { ok: false, error: "Unsupported qq_media tool." };
+  const executors = {
+    parse: executeQqMediaParseTool,
+    video: executeQqMediaVideoTool,
+    audio: executeQqMediaAudioTool,
+    music: executeQqMediaMusicTool,
+    bilibili: executeQqMediaBilibiliTool
+  };
+  const result = Object.hasOwn(executors, call.tool)
+    ? await executors[call.tool](args, deps)
+    : { ok: false, error: "Unsupported qq_media tool." };
   logger.info("QQ media tool finished", {
     operation: "media.tool",
     tool: call.tool,
@@ -10744,9 +10863,14 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       media: {
         videos: mediaCandidates.videos.length,
         audios: mediaCandidates.audios.length,
-        unheardAudios: Math.max(0, mediaCandidates.audios.length - heardCurrentVoices)
+        unheardAudios: Math.max(0, mediaCandidates.audios.length - heardCurrentVoices),
+        musics: (mediaCandidates.musics || []).length
       },
-      mediaAvailable: { video: Boolean(event.qqMediaToolStatus?.video), audio: Boolean(event.qqMediaToolStatus?.audio) },
+      mediaAvailable: {
+        video: Boolean(event.qqMediaToolStatus?.video),
+        audio: Boolean(event.qqMediaToolStatus?.audio),
+        music: Boolean(event.qqMediaToolStatus?.music && event.qqMediaToolStatus?.analysis)
+      },
       stickerCandidates: extractQqReplyStickerCandidates(event).length,
       expression: getQqPersonalityExpressionBias(state.qq.personality)
     })

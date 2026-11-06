@@ -3,8 +3,9 @@ import { access, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promi
 import { delimiter, join } from "node:path";
 
 // Optional local media understanding: the dsh-video-storyboard CLI for
-// videos, a SenseVoice/CED worker for audio, and yt-dlp for public video
-// links. Everything lives under one tools directory installed by
+// videos, a SenseVoice/CED worker for audio (plus essentia.js tempo/key
+// analysis), Meting for music-platform songs and lyrics, and yt-dlp for
+// public video links. Everything lives under one tools directory installed by
 // `ncc media install`; the Hub only inspects it and runs bounded child
 // processes, one job at a time with a short queue, so a phone never runs two
 // heavy media jobs at once or blocks QQ replies behind them.
@@ -23,6 +24,8 @@ export function resolveQqMediaToolPaths(toolsDir) {
     taggingModel: join(dir, "models", "audio-tagging", "model.int8.onnx"),
     taggingLabels: join(dir, "models", "audio-tagging", "class_labels_indices.csv"),
     bundledYtDlp: join(dir, "bin", "yt-dlp"),
+    metingPackage: join(dir, "node_modules", "@meting", "core", "package.json"),
+    essentiaPackage: join(dir, "node_modules", "essentia.js", "package.json"),
     cacheDir: join(dir, "cache"),
     dshHome: join(dir, "dsh-home")
   };
@@ -66,7 +69,7 @@ export async function inspectQqMediaTools({
   findExecutable = (name) => findQqExecutable(name, { env })
 } = {}) {
   const paths = resolveQqMediaToolPaths(toolsDir);
-  const [ffmpeg, ffprobe, storyboard, sherpa, senseVoice, tokens, vad, tagging, labels] = await Promise.all([
+  const [ffmpeg, ffprobe, storyboard, sherpa, senseVoice, tokens, vad, tagging, labels, meting, essentia] = await Promise.all([
     findExecutable(ffmpegPath),
     findExecutable(ffprobePath),
     fileExists(paths.storyboardCli),
@@ -75,7 +78,9 @@ export async function inspectQqMediaTools({
     fileExists(paths.senseVoiceTokens),
     fileExists(paths.vadModel),
     fileExists(paths.taggingModel),
-    fileExists(paths.taggingLabels)
+    fileExists(paths.taggingLabels),
+    fileExists(paths.metingPackage),
+    fileExists(paths.essentiaPackage)
   ]);
   const ytDlp = (ytDlpPath && await findExecutable(ytDlpPath))
     || (await findExecutable(paths.bundledYtDlp))
@@ -87,6 +92,8 @@ export async function inspectQqMediaTools({
   if (!sherpa) missing.push("sherpa-onnx-node");
   if (!senseVoice || !tokens) missing.push("SenseVoice 模型");
   if (!ytDlp) missing.push("yt-dlp");
+  if (!meting) missing.push("@meting/core（音乐解析）");
+  if (!essentia) missing.push("essentia.js（节奏/调性分析）");
   return {
     paths,
     ffmpeg,
@@ -97,6 +104,12 @@ export async function inspectQqMediaTools({
     vad: Boolean(vad),
     tagging: Boolean(tagging && labels),
     links: Boolean(ytDlp && ffmpeg),
+    // Song facts, lyrics and audio sources from music platforms.
+    music: Boolean(meting),
+    // Loudness curve and sound tags need only ffmpeg (+ sherpa for tags);
+    // tempo, key and pitch need essentia.js.
+    analysis: Boolean(ffmpeg && ffprobe),
+    essentia: Boolean(essentia),
     missing
   };
 }
@@ -247,6 +260,61 @@ export function createQqMediaRuntime({
     };
   }
 
+  // Facts about a public video link without downloading it: one yt-dlp run
+  // printing a fixed set of fields (the full JSON with formats can be huge).
+  async function inspectLink(url, { signal } = {}) {
+    const tools = await status();
+    if (!tools.ytDlp) throw mediaError("MEDIA_UNAVAILABLE", `本机没有 yt-dlp，无法解析视频链接（安装：${QQ_MEDIA_INSTALL_HINT}）`);
+    const fields = [
+      "id", "title", "uploader", "channel", "creator", "duration", "description", "view_count", "like_count",
+      "comment_count", "repost_count", "upload_date", "timestamp", "tags", "categories", "track", "artist", "artists",
+      "album", "webpage_url", "extractor_key", "width", "height", "is_live", "age_limit"
+    ];
+    const args = [
+      "--no-playlist", "--no-warnings", "--skip-download", "--no-write-comments",
+      "--socket-timeout", "20", "--retries", "1",
+      "-O", `%(.{${fields.join(",")}})j`,
+      ...(cookiesFile ? ["--cookies", cookiesFile] : []),
+      "--", String(url)
+    ];
+    const result = await runJob(() => runProcess(tools.ytDlp, args, {
+      timeoutMs: Math.min(jobTimeoutMs, 90_000), maxOutputBytes: 1024 * 1024, signal, env: childEnv(), allowFailure: true, killProcessGroup: true
+    }));
+    const info = parseLastJsonLine(result.stdout);
+    if (!info) {
+      const reason = String(result.stderr || "").split(/\r?\n/).filter((line) => /ERROR/i.test(line)).pop() || "";
+      throw mediaError("MEDIA_PARSE_FAILED", `没能解析这个链接${reason ? `（${compact(reason.replace(/^.*?ERROR:\s*/i, ""), 160)}）` : ""}`);
+    }
+    return normalizeQqLinkInfo(info);
+  }
+
+  // Local music/voice analysis (loudness curve, sound tags, optional sung
+  // words, and with essentia.js tempo/key/danceability or voice pitch).
+  async function analyze(inputPath, { mode = "music", from = 0, to = 0, focus = null, asr = false, tags = true, signal, maxSeconds = 600 } = {}) {
+    const tools = await status();
+    if (!tools.analysis) throw mediaError("MEDIA_UNAVAILABLE", `本机没有 ffmpeg/ffprobe，分析不了声音（安装：${QQ_MEDIA_INSTALL_HINT}）`);
+    const args = [
+      "--max-old-space-size=256", workerScript, "analyze",
+      "--tools", toolsDir, "--input", inputPath,
+      "--mode", mode === "voice" ? "voice" : "music",
+      "--language", asrLanguage, "--threads", String(asrThreads),
+      "--max-seconds", String(Math.max(5, Math.floor(maxSeconds))),
+      "--ffmpeg", tools.ffmpeg,
+      "--tags", tags && tools.tagging ? "1" : "0",
+      "--asr", asr && tools.audio ? "1" : "0",
+      ...(from > 0 ? ["--from", String(from)] : []),
+      ...(to > from ? ["--to", String(to)] : []),
+      ...(focus && focus.to > focus.from ? ["--focus-from", String(focus.from), "--focus-to", String(focus.to)] : [])
+    ];
+    const result = await runJob(() => runProcess(nodePath, args, {
+      timeoutMs: jobTimeoutMs, maxOutputBytes: 2 * 1024 * 1024, signal, env: childEnv(), allowFailure: true, killProcessGroup: true
+    }));
+    const parsed = parseLastJsonLine(result.stdout);
+    if (!parsed) throw mediaError("MEDIA_WORKER_FAILED", "声音分析进程没有返回结果");
+    if (parsed.ok === false) throw mediaError(parsed.code || "MEDIA_WORKER_FAILED", parsed.error || "声音分析失败");
+    return parsed;
+  }
+
   async function transcribe(inputPath, { from = 0, to = 0, signal, tags = true, maxSeconds = maxVideoSeconds } = {}) {
     const tools = await status();
     if (!tools.audio) throw mediaError("MEDIA_UNAVAILABLE", `本机还没装语音识别组件（安装：${QQ_MEDIA_INSTALL_HINT}）`);
@@ -325,9 +393,13 @@ export function createQqMediaRuntime({
 
   return {
     status,
+    // Work that must not overlap a media job (installing an update).
+    runExclusive: (task) => runJob(task),
     probe,
     downloadLink,
+    inspectLink,
     transcribe,
+    analyze,
     storyboard,
     writeTranscriptFile,
     writeBilibiliSubtitleFile,
@@ -365,6 +437,39 @@ export function parseQqStoryboardOutput(stdout = "", { outputDir = "" } = {}) {
       .trim()
     : "";
   return { sheets, summary, manifest: manifest.slice(0, 12_000) };
+}
+
+// yt-dlp's selected fields → bounded facts the model can read.
+export function normalizeQqLinkInfo(info = {}) {
+  const count = (value) => (Number.isFinite(Number(value)) && Number(value) >= 0 ? Math.round(Number(value)) : null);
+  const date = /^\d{8}$/.test(String(info.upload_date || ""))
+    ? `${String(info.upload_date).slice(0, 4)}-${String(info.upload_date).slice(4, 6)}-${String(info.upload_date).slice(6, 8)}`
+    : Number(info.timestamp) > 0 ? new Date(Number(info.timestamp) * 1000).toISOString().slice(0, 10) : "";
+  const artists = Array.isArray(info.artists) && info.artists.length ? info.artists : info.artist ? [info.artist] : [];
+  return {
+    id: compact(info.id, 60),
+    title: compact(info.title, 160),
+    uploader: compact(info.uploader || info.channel || info.creator, 60),
+    durationSeconds: Number(info.duration) > 0 ? Math.round(Number(info.duration)) : 0,
+    description: compact(info.description, 600),
+    views: count(info.view_count),
+    likes: count(info.like_count),
+    comments: count(info.comment_count),
+    reposts: count(info.repost_count),
+    uploadDate: date,
+    tags: (Array.isArray(info.tags) ? info.tags : []).map((tag) => compact(tag, 30)).filter(Boolean).slice(0, 10),
+    category: compact((Array.isArray(info.categories) ? info.categories : [])[0], 30),
+    // Background music some platforms (Douyin, YouTube Music) name.
+    track: compact(info.track, 80),
+    artists: artists.map((artist) => compact(artist, 40)).filter(Boolean).slice(0, 4),
+    album: compact(info.album, 80),
+    url: /^https?:\/\//i.test(String(info.webpage_url || "")) ? String(info.webpage_url).slice(0, 500) : "",
+    extractor: compact(info.extractor_key, 30),
+    width: count(info.width),
+    height: count(info.height),
+    isLive: info.is_live === true,
+    ageLimit: count(info.age_limit)
+  };
 }
 
 function parseLastJsonLine(stdout = "") {

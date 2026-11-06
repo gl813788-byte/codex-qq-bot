@@ -1,3 +1,4 @@
+import { normalizeQqMediaUpdateMode, parseQqMediaUpdateWindow } from "../qq-media/media-updates.js";
 import { parseAllowedOrigins } from "../http-utils.js";
 import { normalizeSafeFetchMode } from "../safe-fetch.js";
 import { CODEX_TASK_TIMEOUT_DEFAULTS, CODEX_TASK_TYPES } from "../codex-task-timeout.js";
@@ -315,6 +316,24 @@ export function createEnvironmentConfig(env = process.env) {
     }) * 1024 * 1024,
     subagentMinAvailableBytes: boundedInteger(env.CODEX_REMOTE_CONTACT_SUBAGENT_MIN_AVAILABLE_MB, {
       defaultValue: 1000,
+      min: 0,
+      max: 64 * 1024
+    }) * 1024 * 1024,
+    // New releases of the optional media components: compatible (default)
+    // installs same-major / same-0.x-minor releases automatically, all
+    // installs every release, check only reports, off disables checking.
+    mediaAutoUpdate: normalizeQqMediaUpdateMode(env.CODEX_REMOTE_CONTACT_MEDIA_AUTO_UPDATE),
+    mediaUpdateCheckHours: boundedInteger(env.CODEX_REMOTE_CONTACT_MEDIA_UPDATE_CHECK_HOURS, {
+      defaultValue: 12,
+      min: 1,
+      max: 24 * 14
+    }),
+    // Local hours when the running Hub may install updates ("3-6"); empty
+    // means any time. Outside it, or when busy or short of memory, updates
+    // wait for the controller to apply them before the next start.
+    mediaUpdateWindow: parseQqMediaUpdateWindow(env.CODEX_REMOTE_CONTACT_MEDIA_UPDATE_WINDOW ?? "3-6"),
+    mediaUpdateMinAvailableBytes: boundedInteger(env.CODEX_REMOTE_CONTACT_MEDIA_UPDATE_MIN_MB, {
+      defaultValue: 1500,
       min: 0,
       max: 64 * 1024
     }) * 1024 * 1024,

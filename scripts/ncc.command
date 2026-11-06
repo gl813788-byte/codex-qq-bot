@@ -791,6 +791,9 @@ start_hub() {
   ensure_settings
   choose_engine
   search_config
+  # Media component releases the running Hub could not install (busy, low
+  # memory, outside the update window) are applied before it starts.
+  bash "$PROJECT_DIR/scripts/media/install-media-tools.sh" apply-pending || true
   "$PROJECT_DIR/modules/install-launchd-plist.command"
   if [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
     "$PROJECT_DIR/modules/start-all.command"
@@ -963,11 +966,11 @@ case "${1:-menu}" in
   logs) shift; print_logs "$@" ;;
   help|-h|--help)
     cat <<EOF
-用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full] [--background]|avatars [status|refresh|describe]|media [status|install|uninstall]|branding|search-config|start|open|logs]
+用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full] [--background]|avatars [status|refresh|describe]|media [status|install|check|update|update-all|uninstall]|branding|search-config|start|open|logs]
 首次直接运行 ncc：自动检测环境、安装依赖、验证并填写配置；完成后再运行为常规功能菜单。
 资源检测：ncc resources [--json] 预览本机 CPU、内存和启动预算；每次启动自动重新检测。
 头像识别：ncc avatars [status] | refresh [群号|private:QQ号] [--qq QQ号,...] [--force] | describe [群号|private:QQ号] [--qq QQ号,...] [--all] [--force] [--background]
-媒体组件：ncc media [status|install|uninstall] 安装看视频（dsh-video-storyboard）、听语音（SenseVoice）和 yt-dlp；可用内存不足时会拒绝安装。
+媒体组件：ncc media [status|install|check|update|update-all|uninstall] 安装看视频（dsh-video-storyboard）、听语音（SenseVoice）、音乐解析（Meting）、节奏/调性分析（essentia.js）和 yt-dlp；check 查新版本，update 安装兼容新版本（自检失败自动回滚），update-all 含大版本；可用内存不足时会拒绝安装。
 安装中断后重新运行同一个 ncc，会验证并复用已完成的源码、环境、npm 依赖阶段。
 日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
 项目目录：$PROJECT_DIR
@@ -975,7 +978,7 @@ EOF
     ;;
   *)
     cat <<EOF
-用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full] [--background]|avatars [status|refresh|describe]|media [status|install|uninstall]|branding|search-config|start|open|logs]
+用法：ncc [menu|first-run|status|codex-login|claude-login|engine [codex|claude]|qq|owner|groups|session|session-mode MODE [SCOPE]|ai-tasks|ai-run TASK [SCOPE] [--force] [--full] [--background]|avatars [status|refresh|describe]|media [status|install|check|update|update-all|uninstall]|branding|search-config|start|open|logs]
 日志：ncc logs [--tail N] [-f] [--level LEVELS|--errors] [--category NAMES] [--trace ID] [--group ID] [--sender ID] [--search TEXT] [--since 30m|ISO] [--until ISO] [--slow [MS]] [--summary] [--json] [--all] [--verbose|--compact] [--plain|--color]
 项目目录：$PROJECT_DIR
 EOF

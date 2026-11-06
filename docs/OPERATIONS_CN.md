@@ -132,10 +132,13 @@ Hub 只按本轮原始、已验证的发送者授权：主人获准执行；Bot 
 ```bash
 npm run ncc -- media            # 查看 ffmpeg、dsh-video-storyboard、sherpa-onnx、模型和 yt-dlp
 npm run ncc -- media install    # 安装到 runtime/media-tools（模型按 SHA-256 校验）
+npm run ncc -- media check      # 对比已装组件和最新发布版本
+npm run ncc -- media update     # 安装兼容的新版本，自检失败自动回滚
+npm run ncc -- media update-all # 同上，包括大版本
 npm run ncc -- media uninstall  # 只删除本项目创建的媒体组件目录
 ```
 
-安装会下载约 200 MB 模型并解压，属于重负载步骤：可用内存低于 1500 MB（`CODEX_REMOTE_CONTACT_MEDIA_INSTALL_MIN_MB`）时脚本会拒绝继续。手机上建议先 `ncc stop-hub` / `ncc stop-napcat` 再安装；装好后 Hub 一分钟内自动识别，不需要重启。运行时每个媒体任务、子代理和作息活动启动前都检查可用内存，不够就拒绝或推迟，日志分别是 `media.tool`、`media.voice`、`agent.subagent` 和 `memory.life_activity`；可以用 `npm run ncc -- logs --category agent` 查看子代理状态变化。
+安装会下载约 200 MB 模型并解压，属于重负载步骤：可用内存低于 1500 MB（`CODEX_REMOTE_CONTACT_MEDIA_INSTALL_MIN_MB`）时脚本会拒绝继续。手机上建议先 `ncc stop-hub` / `ncc stop-napcat` 再安装；装好后 Hub 一分钟内自动识别，不需要重启。运行时每个媒体任务、子代理和作息活动启动前都检查可用内存，不够就拒绝或推迟，更新记录为 `media.update` 日志，`/api/maintenance` 的 `media.updates` 显示状态；运行中的 Hub 来不及装的更新由两套控制器在启动 Hub 前安装（`install-media-tools.sh apply-pending`）；日志分别是 `media.tool`、`media.voice`、`agent.subagent` 和 `memory.life_activity`；可以用 `npm run ncc -- logs --category agent` 查看子代理状态变化。
 
 每次启动 Agent CLI（QQ 回复、后台模型任务、子代理和订阅兴趣判定）还要经过同一道本机余量闸门。Android 12+ 在 Termux 拥有超过 32 个子进程时会直接杀掉整个应用，所以在 Android 上闸门会统计存活进程数（与 memguard 显示的口径相同）加上 15 秒内刚启动回合预留的进程数，并检查可用内存。如果启动后剩余进程少于 `CODEX_REMOTE_CONTACT_AGENT_PROCESS_RESERVE`，回合会排队等待：QQ 回复最多等 `CODEX_REMOTE_CONTACT_AGENT_CAPACITY_WAIT_MS`，后台任务等其三分之一，子代理至少等 5 分钟；兴趣判定不等待，直接不批准。等不到余量的回合以 `CODEX_HOST_BUSY` 失败，而不是让 QQ、Hub 和所有 Agent 一起被杀。等待会记录为 `agent.capacity` 日志；`/api/maintenance` 的 `agent.capacity` 显示闸门状态。用 adb 关闭 Android 限制后，可设置 `CODEX_REMOTE_CONTACT_AGENT_PROCESS_LIMIT=0`。
 

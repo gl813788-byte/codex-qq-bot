@@ -279,6 +279,10 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 | `CODEX_REMOTE_CONTACT_MEDIA_VOICE_AUTO` | `1` | 触发 Bot 的语音消息在路由前自动转写；`0` 关闭（语音消息恢复为忽略） |
 | `CODEX_REMOTE_CONTACT_MEDIA_VOICE_AUTO_MAX_SECONDS` | `90` | 自动转写的单段最长秒数，范围 5–600 |
 | `CODEX_REMOTE_CONTACT_MEDIA_MIN_AVAILABLE_MB` | `1200` | 媒体任务启动前要求的最少可用物理内存（MB）；`0` 关闭检查 |
+| `CODEX_REMOTE_CONTACT_MEDIA_AUTO_UPDATE` | `compatible` | 媒体组件新版本：`compatible` 自动安装同一大版本（0.x 为同一小版本）的新版本和新增组件，`all` 连大版本也装，`check` 只检查，`off` 关闭检查 |
+| `CODEX_REMOTE_CONTACT_MEDIA_UPDATE_CHECK_HOURS` | `12` | 两次检查新版本的间隔小时数，范围 1–336 |
+| `CODEX_REMOTE_CONTACT_MEDIA_UPDATE_WINDOW` | `3-6` | 运行中的 Hub 可以安装更新的本地时段（可跨午夜，如 `23-5`）；留空表示任意时间。时段外的待装更新由控制器在下次启动 Hub 前安装 |
+| `CODEX_REMOTE_CONTACT_MEDIA_UPDATE_MIN_MB` | `1500` | 运行中的 Hub 安装更新所需的最少可用内存（MB）；安装脚本本身也有同样的 1500 MB 门槛（`CODEX_REMOTE_CONTACT_MEDIA_INSTALL_MIN_MB`） |
 | `CODEX_REMOTE_CONTACT_SUBAGENT_MAX_CONCURRENCY` | `1` | 后台子代理同时运行数，`0` 关闭子代理和作息活动，最大 4 |
 | `CODEX_REMOTE_CONTACT_SUBAGENT_MAX_QUEUED` | `2` | 子代理排队数，满了直接拒绝，范围 0–8 |
 | `CODEX_REMOTE_CONTACT_SUBAGENT_TIMEOUT_MS` | `1200000` | 单轮子代理的整轮超时，范围 60000–7200000 |
