@@ -114,6 +114,12 @@ export function runCodexAppServerTurn({
     const pendingRequests = new Map();
     const dynamicToolCalls = new Map();
     const imageBudget = createProtocolImageBudget();
+    // Messages steered or restarted into this turn widen its output budget.
+    let turnWorkloadMessages = normalizePositiveInteger(workloadMessageCount, 1);
+    const addWorkload = (options) => {
+      const added = Math.floor(Number(options?.messageCount));
+      if (Number.isFinite(added) && added > 0) turnWorkloadMessages += added;
+    };
     const agentMessages = [];
     const completedItems = [];
     const supersededTurnIds = new Set();
@@ -366,9 +372,9 @@ export function runCodexAppServerTurn({
 
     const readProtocol = createNdjsonReader({
       errors,
-      maxBytes: scaleProtocolBytesForWorkload(
+      maxBytes: () => scaleProtocolBytesForWorkload(
         normalizePositiveInteger(maxProtocolBytes, DEFAULT_MAX_PROTOCOL_BYTES),
-        workloadMessageCount
+        turnWorkloadMessages
       ),
       getByteAllowance: imageBudget.remainingBytes,
       discountMessageBytes: imageBudget.discount,
@@ -377,13 +383,14 @@ export function runCodexAppServerTurn({
       onError: (error) => finish(error)
     });
 
-    const steer = async (input) => {
+    const steer = async (input, workload = {}) => {
       if (!turnActive || !threadId || !turnId) throw errors.inactive();
       const result = await request("turn/steer", {
         threadId,
         expectedTurnId: turnId,
         input: normalizeUserInput(input)
       });
+      addWorkload(workload);
       deadlines.arm({ renewal: true });
       return {
         threadId,
@@ -392,11 +399,12 @@ export function runCodexAppServerTurn({
       };
     };
 
-    const restart = async (input) => {
+    const restart = async (input, workload = {}) => {
       if (!turnActive || !threadId || !turnId) throw errors.inactive();
       if (restartInProgress || pendingRestart) throw errors.restarting();
       const interruptedTurnId = turnId;
       restartInProgress = true;
+      addWorkload(workload);
       deadlines.arm({ renewal: true });
       const completion = new Promise((restartResolve, restartReject) => {
         pendingRestart = {

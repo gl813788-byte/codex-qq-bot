@@ -398,7 +398,7 @@ test("generated-picture allowance is finite and never covers text or unrelated p
   }
 });
 
-test("a turn answering several stacked QQ messages gets a proportionally larger protocol budget", async () => {
+test("a turn answering several QQ messages at once gets a proportionally larger protocol budget", async () => {
   for (const [workloadMessageCount, succeeds] of [[1, false], [5, true]]) {
     const server = createFakeAppServer();
     let ready;
@@ -419,6 +419,30 @@ test("a turn answering several stacked QQ messages gets a proportionally larger 
     if (succeeds) server.complete("all answered");
     const result = await settled;
     if (succeeds) assert.equal(result.finalResponse, "all answered");
+  }
+});
+
+test("follow-ups steered into a running turn widen its protocol budget by their count", async () => {
+  for (const [messageCount, succeeds] of [[0, false], [4, true]]) {
+    const server = createFakeAppServer();
+    let ready;
+    const readyPromise = new Promise((resolve) => { ready = resolve; });
+    const resultPromise = runCodexAppServerTurn({
+      prompt: "first message",
+      maxProtocolBytes: 4_000,
+      timeoutMs: 5_000,
+      spawnProcess: server.spawn,
+      onReady: ready
+    });
+    const settled = succeeds
+      ? resultPromise
+      : assert.rejects(resultPromise, (error) => error.code === "CODEX_APP_SERVER_OUTPUT_LIMIT");
+    const controls = await readyPromise;
+    await controls.steer("消息一：later", { messageCount });
+    server.notify({ method: "item/agentMessage/delta", params: { delta: "x".repeat(5_000) } });
+    if (succeeds) server.complete("answered everyone");
+    const result = await settled;
+    if (succeeds) assert.equal(result.finalResponse, "answered everyone");
   }
 });
 

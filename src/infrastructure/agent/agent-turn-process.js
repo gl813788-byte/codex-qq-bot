@@ -115,13 +115,16 @@ export function scaleProtocolBytesForWorkload(baseBytes, messageCount = 1) {
 // Splits child stdout into JSON lines under a total byte budget. Optional
 // credits cover known binary echoes while keeping both unfinished frames and
 // ordinary output bounded. Both budget callbacks default to no allowance.
+// maxBytes may be a function when the budget grows during the turn.
 export function createNdjsonReader({
-  errors, maxBytes, isClosed = () => false, onMessage, onError,
+  errors, maxBytes: maxBytesOption, isClosed = () => false, onMessage, onError,
   getByteAllowance = () => 0, discountMessageBytes = () => 0
 }) {
+  const currentMaxBytes = typeof maxBytesOption === "function" ? maxBytesOption : () => maxBytesOption;
   let buffer = "";
   let bytes = 0;
   return (chunk) => {
+    const maxBytes = currentMaxBytes();
     if (isClosed()) return;
     const text = String(chunk || "");
     buffer += text;
