@@ -188,7 +188,7 @@ npm run ncc -- setup
 | `CODEX_REMOTE_CONTACT_CODEX_FILE_TASK_TIMEOUT_MS` | `300000` | 主人本机文件任务时限 |
 | `CODEX_REMOTE_CONTACT_CODEX_IMAGE_GENERATION_TIMEOUT_MS` | `600000` | 图片生成时限；允许配置到 60 分钟 |
 
-Hub 会先识别 Codex 任务类型，再把上表的任务基础时限按当前思考强度放大：`low ×1`、`medium ×1.5`、`high ×2`、`xhigh ×3`、`max ×4`、`ultra ×5`。因此普通文字回复默认从 `low` 的 2 分钟逐档增加；看图、总结、文件与画图任务保留各自的基础时限。以上值单位为毫秒，普通任务最终不超过 30 分钟，图片生成不超过 60 分钟。多轮工具与上下文压缩由 App Server 原生负责；已删除的文字预算/续轮协议不再改变时限。运行中的 QQ turn 接受追问引导或融合追问启动替代 turn 后，会重新获得一整段对应任务时限。融合替代 turn 也必须在这一整段实际时限内持续没有协议活动，Hub 才会隔离它并执行唯一一次新线程重试；这取代了原先固定 1 分钟的截断。`/详细配置`、`/api/state`、`/api/maintenance` 和 Codex 结构化日志会显示当前原生参数与任务时限。协议输出预算（Codex 8 MiB、Claude Code 64 MiB）不是环境变量：一轮同时回答多条叠加消息时，第一条之后每多一条加基础值的四分之一，最多 3 倍；原生生图画出的每张图（每轮最多 6 张、每张 24 MiB 以内）另有有限的回显额度。
+Hub 会先识别 Codex 任务类型，再把上表的任务基础时限按当前思考强度放大：`low ×1`、`medium ×1.5`、`high ×2`、`xhigh ×3`、`max ×4`、`ultra ×5`。因此普通文字回复默认从 `low` 的 2 分钟逐档增加；看图、总结、文件与画图任务保留各自的基础时限。以上值单位为毫秒，普通任务最终不超过 30 分钟，图片生成不超过 60 分钟。多轮工具与上下文压缩由 App Server 原生负责；已删除的文字预算/续轮协议不再改变时限。运行中的 QQ turn 接受追问引导或融合追问启动替代 turn 后，会重新获得一整段对应任务时限。融合替代 turn 也必须在这一整段实际时限内持续没有协议活动，Hub 才会隔离它并执行唯一一次新线程重试；这取代了原先固定 1 分钟的截断。`/详细配置`、`/api/state`、`/api/maintenance` 和 Codex 结构化日志会显示当前原生参数与任务时限。协议输出预算（Codex 8 MiB、Claude Code 64 MiB）不是环境变量：一轮同时回答多条消息时（包括被引导或融合进来的追问批次），第一条之后每多一条加基础值的四分之一，最多 3 倍；原生生图画出的每张图（每轮最多 6 张、每张 24 MiB 以内）另有有限的回显额度。
 
 ### 手动 AI 任务执行参数
 
@@ -211,7 +211,6 @@ Hub 会先识别 Codex 任务类型，再把上表的任务基础时限按当前
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT` | `mcp` | Codex 获取 Hub QQ 工具的方式：`mcp` 由本轮 MCP 服务提供（每次续接都会重新列出），`dynamic` 继续使用 App Server 动态工具。Claude Code 始终使用 MCP。两种方式都在模型搜索工具之前不加载工具定义 |
-| `CODEX_REMOTE_CONTACT_QQ_FOLLOW_UP_MODE` | `stack` | 回复生成期间新到的触发消息如何处理：`stack` 全部攒着，等当前草稿写完后带着整批消息重写一次（最多重写 2 轮，之后的消息作为下一条回复）；`steer` 沿用旧行为，每批静默 5 秒就引导进正在运行的 turn |
 | `CODEX_REMOTE_CONTACT_AGENT_LEAN_CONTEXT` | `0` | 只聊天的部署可选开启：设为 `1` 时从 Codex QQ 轮次中去掉连接器、插件、浏览器/电脑操控、子 Agent、目标、技能目录和仓库 AGENTS.md（主人/管理员文件任务保留 AGENTS.md） |
 | `CODEX_REMOTE_CONTACT_QQ_BASE_INSTRUCTIONS` | `engine` | `engine` 保留引擎自带系统提示词；`qq` 在 QQ 回复中换成精简的 QQ 基础提示 |
 

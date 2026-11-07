@@ -398,7 +398,6 @@ const detailLabelsZh = Object.freeze({
   unresolvedMentions: "未解析 @ 文本",
   memberLookupError: "群成员查询错误",
   fusionPreview: "融合内容预览",
-  fusionMode: "追问融合方式",
   pageCount: "读取页数",
   scannedCount: "扫描消息数",
   filtered: "按条件筛选",
@@ -946,7 +945,6 @@ const detailValuesZh = Object.freeze({
     "social.card": "卡片与特殊消息", "memory.bot_drawing": "Bot 画作",
     "media.update": "媒体组件更新", "history.archive": "历史消息与群文件"
   },
-  fusionMode: { stack: "攒到回复写完再合并", steer: "每批静默 5 秒补充进当前回答" },
   outcome: {
     loaded: "已加载", created: "已新建", updated: "已更新", rejected: "已拒绝", unchanged: "无变化", recorded: "已记录",
     duplicate: "重复记录", "no-match": "没有命中", completed: "已完成", kept: "已保留", deleted: "已删除",

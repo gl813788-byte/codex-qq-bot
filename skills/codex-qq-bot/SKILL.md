@@ -131,7 +131,7 @@ subsystems belong in focused modules.
 | Per-command host permission requests | `src/app/qq-host-command.js` |
 | Two-model proactive approval | `src/qq-proactive-pipeline.js` |
 | Ordinary interest cycle state | `src/qq-proactive-cycle-state.js` |
-| Follow-up fusion (stack/steer modes, rewrite bound) | `src/qq-reply-steering.js` |
+| Follow-up fusion | `src/qq-reply-steering.js` |
 | Server-side history, old files, group files (`qq_context.archive`) | `src/app/qq-archive-tool.js` |
 | App Server turn execution | `src/infrastructure/codex/` and `src/codex-app-server-turn.js` |
 | Claude Code turn execution, child env | `src/infrastructure/claude/` |
@@ -200,13 +200,8 @@ refactor with a behavior change.
   or the proactive-interest path authorizes a turn. Private messages use the
   normal reply path.
 - One scope has one lifecycle from routing through delivery and cleanup. New
-  Bot-triggering messages during generation enter the fusion buffer. Default
-  `CODEX_REMOTE_CONTACT_QQ_FOLLOW_UP_MODE=stack` (user decision 2026-11-07):
-  no time limit and no mid-turn steering; when the draft is complete it is
-  rewritten with the whole batch, at most `QQ_FOLLOW_UP_MAX_REWRITE_ROUNDS`
-  (2) times, then sent, and leftovers start the next reply. `steer` keeps the
-  old five-second quiet window: steer first, then interrupt/restart. A failed
-  reply must not promise an automatic retry that does not exist.
+  Bot-triggering messages during generation enter the quiet-window fusion path;
+  prefer steering, then interrupt/restart when steering cannot accept them.
 - `/stop` cancels only the active lifecycle and its pending fusion batch.
   `/新对话` additionally clears the conversation-scoped context and reusable
   thread mapping.
@@ -234,15 +229,21 @@ refactor with a behavior change.
   input/output paths. Ordinary file attachments must already exist under that
   output directory; rejected paths produce a warning and failed receipt even
   when the accompanying text was sent. Do not auto-import ordinary files.
-- Protocol output budgets (Codex 8 MiB, Claude 64 MiB) scale with
-  `workloadMessageCount` (+25% per extra stacked message, max 3x;
-  `scaleProtocolBytesForWorkload`). Natively generated pictures echo as base64
-  in imageGeneration items, legacy `image_generation_end` events and raw
-  `image_generation_call` items; `protocol-image-budget.js` gives each drawn
-  picture (6 per turn, 24 MiB each) a finite echo allowance, only when first
-  seen inside such an item. Never widen it to text or unlisted pictures.
-  Before this, one drawn picture failed chat replies with
-  `CODEX_APP_SERVER_OUTPUT_LIMIT`.
+- Protocol output budgets (Codex 8 MiB, Claude 64 MiB) scale with the
+  messages a turn answers (`scaleProtocolBytesForWorkload`: +25% per extra
+  message, max 3x): the starting batch via `workloadMessageCount`, steered or
+  replacement batches via `steer`/`restart(input, { messageCount })`.
+  Natively generated pictures echo as base64 in imageGeneration items, legacy
+  `image_generation_end` events and raw `image_generation_call` items;
+  `protocol-image-budget.js` gives each drawn picture (6 per turn, 24 MiB
+  each) a finite echo allowance, only when first seen inside such an item.
+  Never widen it to text or unlisted pictures. Before this, one drawn picture
+  failed chat replies with `CODEX_APP_SERVER_OUTPUT_LIMIT`. A failed reply
+  must not promise an automatic retry that does not exist.
+- A "stack until the draft is complete" follow-up mode was tried on
+  2026-11-07 and reverted the same day at the user's request: in busy groups
+  the finished draft kept being rewritten and replies were delayed for
+  minutes. Keep the five-second steer-first fusion.
 - `qq_context.history` reads only the Hub's rolling buffer.
   `qq_context.archive` (`src/app/qq-archive-tool.js`) pages/searches the
   original conversation's NapCat server history (`before` cursor, search

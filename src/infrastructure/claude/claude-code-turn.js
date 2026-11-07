@@ -412,29 +412,37 @@ function runClaudeCodeTurnOnce({
       if (message?.type === "control_request") handleControlRequest(message);
     };
 
+    // Messages steered or restarted into this turn widen its output budget.
+    let turnWorkloadMessages = normalizePositiveInteger(workloadMessageCount, 1);
+    const addWorkload = (options) => {
+      const added = Math.floor(Number(options?.messageCount));
+      if (Number.isFinite(added) && added > 0) turnWorkloadMessages += added;
+    };
     const readProtocol = createNdjsonReader({
       errors,
-      maxBytes: scaleProtocolBytesForWorkload(
+      maxBytes: () => scaleProtocolBytesForWorkload(
         normalizePositiveInteger(maxProtocolBytes, DEFAULT_MAX_PROTOCOL_BYTES),
-        workloadMessageCount
+        turnWorkloadMessages
       ),
       isClosed: () => settled,
       onMessage: handleProtocolMessage,
       onError: (error) => finish(error)
     });
 
-    const steer = async (input) => {
+    const steer = async (input, workload = {}) => {
       if (!turnActive) throw errors.inactive();
       sendUserInput(buildUserContent(input, { maxImageBytes }));
+      addWorkload(workload);
       deadlines.arm({ renewal: true });
       return { threadId, turnId, deadlineRenewalCount: deadlines.renewalCount };
     };
 
-    const restart = async (input) => {
+    const restart = async (input, workload = {}) => {
       if (!turnActive) throw errors.inactive();
       if (restartInProgress) throw errors.restarting();
       const interruptedTurnId = turnId;
       restartInProgress = true;
+      addWorkload(workload);
       deadlines.arm({ renewal: true });
       try {
         await controlRequest({ subtype: "interrupt" });
