@@ -316,3 +316,33 @@ test("sticker, message, lookup and self-state tools stay structured and bound to
   assert.equal(normalizeDynamicToolResult(inspected).contentItems.some((item) => item.type === "inputImage"), true);
   assert.equal(mapQqNativeToolToCommand("qq_sticker", "manage", { action: "inspect", selector: "x" }), "");
 });
+
+test("archive reads the original conversation's server history even under a cross-session focus", async () => {
+  const spec = buildQqNativeToolSpecs().find((item) => item.name === "qq_context").tools.find((tool) => tool.name === "archive");
+  assert.deepEqual(spec.inputSchema.properties.action.enum, ["read", "files", "download", "image", "use_image"]);
+  assert.deepEqual(spec.inputSchema.required, ["action"]);
+  const history = buildQqNativeToolSpecs().find((item) => item.name === "qq_context").tools.find((tool) => tool.name === "history");
+  assert.match(history.description, /use archive/);
+
+  const event = { isOwner: true, groupId: "10001", senderId: "90001" };
+  const focusedEvent = { isOwner: true, groupId: "20002", qqCrossSessionScopeId: "20002" };
+  const bound = [];
+  const visual = [{ type: "inputText", text: "旧图" }, { type: "inputImage", imageUrl: "data:image/png;base64,AAAA" }];
+  const dispatch = createQqNativeToolDispatcher({
+    event,
+    executeStructured: async (call, boundEvent) => {
+      if (call.namespace === "qq_session") return { ok: true, scopeId: "20002", scopeEvent: focusedEvent, reply: "已选择" };
+      bound.push(boundEvent);
+      return call.arguments.action === "image" ? { ok: true, reply: "旧图", contentItems: visual } : { ok: true, reply: "一页历史" };
+    },
+    executeCommand: async () => {
+      throw new Error("archive must not fall back to slash commands");
+    }
+  });
+  await dispatch({ callId: "s1", namespace: "qq_session", tool: "manage", arguments: { action: "select", scopeId: "group:20002" } });
+  const page = await dispatch({ callId: "a1", namespace: "qq_context", tool: "archive", arguments: { action: "read" } });
+  const picture = await dispatch({ callId: "a2", namespace: "qq_context", tool: "archive", arguments: { action: "image", selector: "hi-1" } });
+  assert.equal(page.result, "一页历史");
+  assert.ok(bound.every((boundEvent) => boundEvent === event));
+  assert.deepEqual(normalizeDynamicToolResult(picture), { success: true, contentItems: visual });
+});

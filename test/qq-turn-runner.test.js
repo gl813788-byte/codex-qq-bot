@@ -91,7 +91,12 @@ test("turn startup failures preserve the actual error and record model settings"
   });
   assert.equal(errors.length, 1);
   assert.equal(errors[0].model, "test-model");
+  assert.equal(errors[0].workloadMessageCount, undefined);
   assert.equal(state.maintenance.agent.lastOk, false);
+
+  // A reply answering a stacked batch records how many messages it carried.
+  await assert.rejects(runner("test", { cwd: "/tmp", timeout: 1000, workloadMessageCount: 4 }));
+  assert.equal(errors[1].workloadMessageCount, 4);
 });
 
 function capacityRunner({ engine = "claude", gate, logger = {} } = {}) {

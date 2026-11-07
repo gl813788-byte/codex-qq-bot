@@ -75,6 +75,7 @@
 | `src/qq-sticker-search.js` + `src/app/qq-sticker-tool.js` | 按需表情包库 | 由标签库身份生成的稳定 `#编号`、按情绪/场合/梗搜索并降低近期用过的权重，以及 `qq_sticker.manage` 的 search/inspect（真实视觉输入）/label/favorite |
 | `src/app/qq-message-tools.js` + `src/qq-sent-message-ledger.js` | 表情回应与撤回 | `qq_message.act` 给当前/被引用群消息贴表情回应，以及撤回 Bot 自己两分钟内已确认送达的消息；消息 ID 在最底层发送处只记在内存 |
 | `src/app/qq-lookup-tool.js` | 只读 QQ 资料查询 | `qq_context.lookup` 的成员/群/公告/精华信息，只限本会话出现过的人，绝不返回性别、年龄或地区 |
+| `src/app/qq-archive-tool.js` + `src/qq-history-retrieval.js` 的 `fetchQqHistoryPage` | 服务器端历史、旧文件与群文件 | `qq_context.archive` 分页读取和搜索原始会话的 NapCat 历史，按轮编号文件（`hf-N`）、图片（`hi-N`）、群文件（`gf-N`）和文件夹（`gd-N`），只下载/查看已列出的编号并走已校验的文件/图片路径，剔除本地图片路径，日志只记计数 |
 | `src/qq-bot-life-state.js` + `src/qq-bot-daily-routine.js` | Bot 的连续状态 | 跨会话延续的心情、来自结构化输出的分会话第一人称内心OS、每日作息（每个作息日一次无工具任务，05:00 换日），以及它们在提示词和工具里的呈现 |
 | `src/qq-bot-personality.js` + `src/qq-affinity-command.js` | 核心人格与关系 | 部署者设定的基本资料、性格维度、说话方式滑块、待人方式、角色资料、世界书与预设；角色卡映射与导出；有界的自主调整（工具与周期复盘）、经核实的主人指令修改、改动历史与撤销；真人化规划使用的表达偏置；每人的好感、熟悉度、称呼与历史，带每轮/每日截断、主人下限、半衰期淡化和同会话理由；回复、世界书与兴趣判断的提示词片段；`/好感度` 解析 |
 | `src/qq-character-card.js` | 角色卡格式 | 纯函数解析 Character Card V1/V2/V3、Pygmalion 与 Agnai JSON、PNG 文本块、`.charx` 压缩包和纯文字；导出 V2/V3 |
@@ -89,7 +90,7 @@
 | `src/qq-inbound-files.js` | QQ 入站文件信任与传输边界 | 提取并脱敏当前/引用文件元数据、分配本轮 selector、构造群聊/私聊 URL 查询，并把有界下载限制在活动任务 input |
 | `src/infrastructure/storage/settings-repository.js` | 原子设置 I/O | 加载或持久化 `data/settings.json`，不把文件系统逻辑塞回组合根 |
 | `src/qq-codex-turn-recovery.js` | 融合 turn 故障隔离 | 识别超过“任务类型 × 思考强度”协议静默窗口的替代 turn，并用原始 prompt 与已接收融合输入重建一次全新线程尝试 |
-| `src/qq-reply-steering.js` | QQ 追问融合调度 | 每条新追问重置的 5 秒静默窗口、单批快照消费、优先 steer 活跃 turn、拒绝时替代、已完成草稿替换、失败保留和活动轮次校验 |
+| `src/qq-reply-steering.js` | QQ 追问融合调度 | 追问融合方式（默认 `stack`：草稿写完前叠加全部触发消息、不中途引导；`steer`：每条新追问重置的 5 秒静默窗口、优先 steer 活跃 turn、拒绝时替代）、单批快照消费、已完成草稿替换（最多重写 2 轮）、失败保留和活动轮次校验 |
 | `src/qq-context-relevance.js` | 远聊天语义评分 | 缓存本地语义画像并为较早的人类/Bot 聊天片段计算相关性 |
 | `src/qq-reply-targeting.js` | 融合回复寻址策略 | 有界参与者候选、模型结构化引用/艾特/普通回复目标和安全的普通回复回退 |
 | `src/qq-delivery-receipt.js` | QQ 投递事实边界 | 成功/失败气泡回执和下一轮可见的有界失败上下文 |

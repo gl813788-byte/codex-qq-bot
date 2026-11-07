@@ -65,6 +65,57 @@ export async function fetchQqHistoryForSummary({
   };
 }
 
+// One page of the QQ server's own history for a group or private chat, ending
+// just before `before` (a cursor from a previous page; empty = newest). NapCat
+// includes the anchor message itself, so it is dropped here. Returns raw
+// OneBot messages oldest first plus the cursor for the next older page.
+export async function fetchQqHistoryPage({
+  callAction,
+  groupId = "",
+  userId = "",
+  before = "",
+  count = 40
+} = {}) {
+  const group = normalizeId(groupId);
+  const user = normalizeId(userId);
+  if (typeof callAction !== "function" || (!group && !user)) {
+    return { ok: false, messages: [], nextBefore: "", reason: "missing peer" };
+  }
+  const anchor = /^\d{1,20}$/.test(String(before || "").trim()) ? String(before).trim() : "";
+  const result = await callAction(group ? "get_group_msg_history" : "get_friend_msg_history", {
+    ...(group ? { group_id: group } : { user_id: user }),
+    message_seq: anchor || "0",
+    // One extra so the dropped anchor still leaves a full page.
+    count: Math.max(1, Math.min(100, Math.floor(Number(count) || 40))) + (anchor ? 1 : 0),
+    reverse_order: false,
+    disable_get_url: false,
+    parse_mult_msg: false
+  }).catch((error) => ({ ok: false, error: error?.message }));
+  if (!result?.ok) {
+    return {
+      ok: false,
+      messages: [],
+      nextBefore: "",
+      reason: String(result?.error || result?.body?.message || result?.body?.wording || "history request failed").slice(0, 200)
+    };
+  }
+  const seen = new Set();
+  const messages = extractOneBotHistoryMessages(result.body)
+    .filter((raw) => raw && typeof raw === "object")
+    .filter((raw) => !anchor || historyCursor(raw) !== anchor)
+    .filter((raw) => {
+      const key = String(raw.message_id ?? raw.id ?? historyCursor(raw) ?? "");
+      if (!key) return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((left, right) => Number(left.time || 0) - Number(right.time || 0)
+      || Number(historyCursor(left) || 0) - Number(historyCursor(right) || 0));
+  const nextBefore = messages.length ? findOldestHistoryCursor(messages) : "";
+  return { ok: true, messages, nextBefore: nextBefore && nextBefore !== anchor ? nextBefore : "", reason: "" };
+}
+
 export function mergeQqHistoryMessages(remote = [], local = [], { limit = 600 } = {}) {
   const merged = new Map();
   for (const entry of [...remote, ...local]) {
@@ -147,6 +198,11 @@ function formatOneBotSegments(segments) {
     if (type === "forward") return "[合并转发]";
     return "";
   }).join("");
+}
+
+function historyCursor(message) {
+  const value = message?.message_seq ?? message?.seq ?? message?.message_id ?? message?.id;
+  return value == null ? "" : String(value);
 }
 
 function findOldestHistoryCursor(messages) {

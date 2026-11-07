@@ -224,7 +224,7 @@ export function formatQqMainToolGuide({
   return [
     "【本轮工具】",
     "原生工具（文件、计划，以及部署开启时的 Web Search 和 Shell）以本轮实际提供的为准，可直接调用。Hub 的 QQ 工具按需加载：默认只有名字，用到时先用工具搜索（关键词或完整名）加载定义再调用，具体用法写在各自的工具说明里：",
-    "- qq_context：qq_context.history 读本会话记录或跨会话搜索；images 看本段对话的图和你自己画的画（也能 use 取出来发送或配说说）；download_file 下载本轮文件；lookup 查群成员资料、群公告和精华消息",
+    "- qq_context：qq_context.history 读本会话最近记录或跨会话搜索；archive 往前翻 QQ 服务器上的完整历史、找旧消息里的文件和图片、列/下载群文件；images 看本段对话的图和你自己画的画（也能 use 取出来发送或配说说）；download_file 下载本轮文件；lookup 查群成员资料、群公告和精华消息",
     "- qq_memory：短期记忆、人物印象与别称、头像特征（avatar）、第三方机器人资料",
     "- qq_knowledge：qq_knowledge.manage 长期知识；image 知识配图",
     "- qq_sticker：按情绪/场合/梗搜索、查看、标注、收藏表情包",

@@ -18,6 +18,7 @@ import {
   normalizeDynamicToolResult,
   normalizeImagePaths,
   normalizePositiveInteger,
+  scaleProtocolBytesForWorkload,
   notifyObserver,
   superviseAgentChild
 } from "./infrastructure/agent/agent-turn-process.js";
@@ -59,6 +60,7 @@ export function runCodexAppServerTurn({
   ephemeral = true,
   timeoutMs,
   maxProtocolBytes = DEFAULT_MAX_PROTOCOL_BYTES,
+  workloadMessageCount = 1,
   maxStderrBytes,
   killGraceMs,
   replacementIdleTimeoutMs,
@@ -364,7 +366,10 @@ export function runCodexAppServerTurn({
 
     const readProtocol = createNdjsonReader({
       errors,
-      maxBytes: normalizePositiveInteger(maxProtocolBytes, DEFAULT_MAX_PROTOCOL_BYTES),
+      maxBytes: scaleProtocolBytesForWorkload(
+        normalizePositiveInteger(maxProtocolBytes, DEFAULT_MAX_PROTOCOL_BYTES),
+        workloadMessageCount
+      ),
       getByteAllowance: imageBudget.remainingBytes,
       discountMessageBytes: imageBudget.discount,
       isClosed: () => settled,
