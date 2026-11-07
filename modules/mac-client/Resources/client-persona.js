@@ -972,7 +972,9 @@ function renderPersonaState(data) {
     const active = currentRoutineSegment(life.routine);
     setHtml($("#routineTimeline"), `<p class="muted small-text">${escapeHtml(life.routine.date)}${life.routineGenerating ? ` · ${escapeHtml(t("routineGenerating"))}` : ""}</p>` + life.routine.segments.map((segment) => {
       const current = active === segment;
-      return `<div class="routine-item ${current ? "current" : ""}"><time class="mono">${escapeHtml(segment.start)}–${escapeHtml(segment.end)}</time><span><strong>${escapeHtml(segment.activity)}</strong>${segment.state ? `<small>${escapeHtml(segment.state)}</small>` : ""}</span></div>`;
+      // The owner sees the concrete plan (and a planned chat's contact) under each segment.
+      const plan = segment.plan ? `${segment.kind ? `${segment.kind} · ` : ""}${segment.plan}${segment.contact ? ` → ${segment.contact}` : ""}` : "";
+      return `<div class="routine-item ${current ? "current" : ""}"><time class="mono">${escapeHtml(segment.start)}–${escapeHtml(segment.end)}</time><span><strong>${escapeHtml(segment.activity)}</strong>${segment.state ? `<small>${escapeHtml(segment.state)}</small>` : ""}${plan ? `<small class="muted">${escapeHtml(plan)}</small>` : ""}</span></div>`;
     }).join(""));
   }
   const thoughts = (life.thoughts || []).slice().reverse();

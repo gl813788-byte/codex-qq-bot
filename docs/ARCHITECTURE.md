@@ -37,9 +37,10 @@ environment + runtime paths
 | `src/app/qq-voice-transcription.js` | Automatic voice transcription | How many clips are heard before routing, deadlines, `[语音]` marker replacement |
 | `src/qq-human-action-stats.js` | Human action rates | Reaction, poke, recall, share and other counters, half-life and summaries; the action plan lives in `src/qq-human-behavior.js` |
 | `src/qq-subagents.js` + `src/app/qq-subagent-turn.js` + `src/app/qq-subagent-tool.js` | Background sub-agents | Slots and queueing, mid-run messages and follow-ups, cancellation, visibility, the sub-agent tool subset, prompts and report prompt, `qq_agent.manage` |
-| `src/qq-bot-life-activities.js` | The routine in action | Due-activity selection, daily runs and social caps, activity task prompts, real experience records and context |
+| `src/qq-bot-life-activities.js` | The routine in action | Due-activity selection, daily runs, planned-chat and social caps, activity task prompts, real experience records and context |
+| `src/qq-bot-planned-chat.js` | Planned chats | Contact candidates for the routine planner (names, relationship, timing; never message text), contact validation, hard blockers, the judge and main-model prompts, and the per-conversation privacy of chat segments |
 | `src/qq-bot-drawings.js` + `src/app/qq-drawings-tool.js` | The Bot's drawing library | Drawing index and conversation visibility, content-addressed storage and pruning, the drawing half of `qq_context.images` (the picture tool itself is `src/app/qq-image-memory-tool.js`) |
-| `src/app/qq-card-tools.js` | Cards and special messages | Music-card search, dice, rock-paper-scissors, contact shares and the per-turn cap |
+| `src/app/qq-card-tools.js` | Cards and special messages | Song cards (NetEase/QQ Music/Kugou/Kuwo from `song-N`, `music-N`, id or search), Bilibili video cards (`get_mini_app_ark`), forwarded chat-record cards written under the Bot's own account, dice, rock-paper-scissors, contact shares and the per-turn cap |
 | `src/host-memory.js` | Available-memory checks | MemAvailable reading, memory gates and command weight classes |
 | `src/channels/http/hub-http-server.js` | HTTP request dispatch and safe error boundary | changing API/asset routing or OneBot webhook limiting |
 | `src/channels/qq/` | Single QQ and OneBot message transport boundary | parsing or validating incoming QQ events |

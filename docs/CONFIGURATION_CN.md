@@ -294,6 +294,7 @@ Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 
 | `CODEX_REMOTE_CONTACT_LIFE_ACTIVITIES` | `1` | 按作息真的去做线上活动；`0` 关闭 |
 | `CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_DAILY_LIMIT` | `5` | 每天最多几次作息活动，范围 0–24 |
 | `CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_MIN_GAP_MINUTES` | `60` | 两次作息活动的最小间隔分钟，范围 10–720 |
+| `CODEX_REMOTE_CONTACT_LIFE_CHATS_PER_DAY` | `2` | 每天最多几段“主动找人聊天”作息（作息里选定的联系人或群），范围 0–3；`0` 不安排。还需要主动聊天和兴趣模型处于开启状态 |
 | `CODEX_REMOTE_CONTACT_LIFE_QZONE_POSTS_PER_DAY` | `1` | Bot 自主发说说的每日上限（主人/管理员要求不计入） |
 | `CODEX_REMOTE_CONTACT_LIFE_QZONE_COMMENTS_PER_DAY` | `3` | Bot 自主评论空间的每日上限 |
 | `CODEX_REMOTE_CONTACT_SOCIAL_FRIEND_REQUESTS_PER_DAY` | `3` | 普通对话里主动加好友的每日上限 |

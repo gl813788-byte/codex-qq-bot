@@ -109,7 +109,7 @@ test("the Bilibili client resolves short links and normalizes video facts and co
     fetchJson: async (url) => {
       calls.push(url);
       if (url.includes("/x/web-interface/view")) {
-        return { code: 0, data: { bvid: "BV1YCxq6fE6b", aid: 42, title: "标题", desc: "简介", owner: { name: "UP" }, tname: "生活", duration: 90, pages: [{ cid: 7, duration: 90 }], stat: { view: 12345, like: 10 } } };
+        return { code: 0, data: { bvid: "BV1YCxq6fE6b", aid: 42, title: "标题", desc: "简介", pic: "http://i1.hdslb.com/bfs/archive/cover.jpg", owner: { name: "UP" }, tname: "生活", duration: 90, pages: [{ cid: 7, duration: 90 }], stat: { view: 12345, like: 10 } } };
       }
       if (url.includes("/x/frontend/finger/spi")) return { code: 0, data: { b_3: "B3", b_4: "B4" } };
       if (url.includes("/x/web-interface/nav")) return { code: -101, data: { wbi_img: { img_url: "https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png", sub_url: "https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png" } } };
@@ -122,6 +122,8 @@ test("the Bilibili client resolves short links and normalizes video facts and co
   assert.equal(info.title, "标题");
   assert.equal(info.cid, "7");
   assert.equal(info.stats.views, 12345);
+  // The cover (for a shared video card) stays on Bilibili's image CDN, upgraded to https.
+  assert.equal(info.cover, "https://i1.hdslb.com/bfs/archive/cover.jpg");
   const comments = await client.hotComments(info.aid);
   assert.deepEqual(comments, [{ user: "路人", text: "笑死", likes: 9 }]);
   assert.ok(calls.every((url) => url.startsWith("https://api.bilibili.com/")));

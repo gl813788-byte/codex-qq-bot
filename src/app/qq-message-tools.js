@@ -1,5 +1,5 @@
 import { QQ_RECALL_WINDOW_MS } from "../qq-sent-message-ledger.js";
-import { executeQqCardAction } from "./qq-card-tools.js";
+import { QQ_CARD_ACTIONS, executeQqCardAction } from "./qq-card-tools.js";
 
 // Lightweight message actions a person uses instead of typing a reply:
 // an emoji reaction on a group message, and recalling one's own message.
@@ -43,7 +43,7 @@ export async function executeQqMessageTool(args = {}, {
 } = {}) {
   assertActive();
   const action = String(args.action || "");
-  if (["music", "dice", "rps", "contact"].includes(action)) {
+  if (QQ_CARD_ACTIONS.includes(action)) {
     if (!cards) return { ok: false, error: "这一轮不能发卡片。" };
     return executeQqCardAction(args, { event, callOneBotAction, assertActive, ...cards });
   }
@@ -60,7 +60,7 @@ export async function executeQqMessageTool(args = {}, {
       ].join("\n")
     };
   }
-  return { ok: false, error: "未知消息操作；只能 react、recall、recallable、music、dice、rps 或 contact。" };
+  return { ok: false, error: `未知消息操作；只能 react、recall、recallable、${QQ_CARD_ACTIONS.join("、")}。` };
 }
 
 async function reactToQqMessage(args, { event, callOneBotAction, assertActive }) {

@@ -972,9 +972,12 @@ export async function judgeQqColdGroupTopicStart(options = {}) {
       "批准 topic 的标准是：Bot 此刻有一个脱离旧句也成立、自足且不显得迟到的新分享冲动。若唯一可想到的内容只是补答、回梗或追问最后一条旧消息，应选择 silent。",
       "topic 不要求你给出题目；chatter 也不要求你写句子。你不能提供具体话题、搜索词、回复草稿或聊天风格，这些全部由主模型完成。",
       "冷群检查本身已经低频。不要因为没有现成话题就机械拒绝，也不要把每次检查都当成露面机会。",
+      options.routinePlan
+        ? "routinePlan 表示这次检查来自 Bot 自己今天作息里计划好的一次主动群聊（intention 是它早上的打算）。群里此刻可能安静也可能正在聊：计划只是倾向，不是命令；计划内容此刻仍然自然、不会打断别人正在进行的对话时才批准，群里正热聊别的、刚冷场被无视过、或时机明显不对就 silent。"
+        : null,
       "shouldStart 是最终开关；mode 必须与它一致：true 对应 topic/chatter，false 对应 silent。interest 必须是 0 到 100 的数字，reason 必须是非空字符串。",
       "完整示例：{\"shouldStart\":false,\"mode\":\"silent\",\"interest\":25,\"reason\":\"当前不适合主动出现\"}"
-    ].join("\n"),
+    ].filter(Boolean).join("\n"),
     payload: {
       scene: "cold_group_topic_start",
       generatedBotPersona: options.selfPersona || null,
@@ -988,6 +991,7 @@ export async function judgeQqColdGroupTopicStart(options = {}) {
         unansweredBotStreak: Math.max(0, Number(options.coldInterest?.unansweredBotStreak || 0)),
         interestMultiplier: Math.max(0, Math.min(1, Number(options.coldInterest?.interestMultiplier ?? 1)))
       },
+      ...(options.routinePlan ? { routinePlan: compactRoutinePlan(options.routinePlan) } : {}),
       recentMessages,
       outputPolicy: {
         topic: "值得让主模型自主探索或分享时使用。",
@@ -1043,8 +1047,11 @@ export async function judgeQqPrivateProactiveStart(options = {}) {
       options.crossSessionContext
         ? "crossSessionContext.aboutSender 是对方最近在其他会话（群聊等）的发言，每条标明来源会话；可用来判断对方近况和是否有自然的联系契机，但它不是私聊里发生的事，也不能单独构成联系理由。"
         : null,
+      options.routinePlan
+        ? "routinePlan 表示 Bot 今天的作息里本来就计划这个时段找对方聊（intention 是它早上的打算），这本身就是一个真实的联系冲动，frequencyPrior 可以放宽；但它只是倾向：对方明显在忙、刚拒绝过、最近的对话让这个打算变得不合适或显得打扰，仍然拒绝。"
+        : null,
       "interest 必须是 0 到 100 的数字，reason 必须是非空字符串。完整示例：{\"shouldStart\":false,\"interest\":20,\"reason\":\"现在联系会显得机械\"}"
-    ].join("\n"),
+    ].filter(Boolean).join("\n"),
     payload: {
       scene: "private_proactive_start",
       generatedBotPersona: options.selfPersona || null,
@@ -1060,6 +1067,7 @@ export async function judgeQqPrivateProactiveStart(options = {}) {
         probability: Math.max(0, Math.min(1, Number(options.frequencyPrior?.probability || 0))),
         roll: Math.max(0, Math.min(1, Number(options.frequencyPrior?.roll || 0)))
       },
+      ...(options.routinePlan ? { routinePlan: compactRoutinePlan(options.routinePlan) } : {}),
       recentMessages,
       ...(options.crossSessionContext ? { crossSessionContext: options.crossSessionContext } : {})
     },
@@ -1080,6 +1088,17 @@ export async function judgeQqPrivateProactiveStart(options = {}) {
       && Number(value.interest) <= 100
       && typeof value?.reason === "string"
   });
+}
+
+// The routine's intention only: activity, a short plan and its time window.
+function compactRoutinePlan(value = {}) {
+  const text = (input, max) => [...String(input ?? "").replace(/\s+/g, " ").trim()].slice(0, max).join("");
+  return {
+    source: "daily_routine",
+    activity: text(value.activity, 40),
+    intention: text(value.intention, 60),
+    window: text(value.window, 11)
+  };
 }
 
 function normalizeColdGroupStartDecision(value) {

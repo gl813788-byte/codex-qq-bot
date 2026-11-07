@@ -146,7 +146,8 @@ subsystems belong in focused modules.
 | Human action rates and the per-turn action plan | `src/qq-human-action-stats.js`, `src/qq-human-behavior.js` |
 | Background sub-agents (`qq_agent`) | `src/qq-subagents.js`, `src/app/qq-subagent-turn.js`, `src/app/qq-subagent-tool.js` |
 | Routine activities and real experiences | `src/qq-bot-life-activities.js` |
-| Cards, dice, rock-paper-scissors, contact shares | `src/app/qq-card-tools.js` |
+| Planned chats (routine decides whom to reach out to) | `src/qq-bot-planned-chat.js` |
+| Song/Bilibili/chat-record cards, dice, rock-paper-scissors, contact shares | `src/app/qq-card-tools.js` |
 | Available-memory gates | `src/host-memory.js` |
 | The Bot's own scoped language habits | `src/qq-bot-language-habits.js` |
 | Subscription (Codex/Claude) interest judgments | `src/infrastructure/agent/subscription-model-task.js` via `runQqAgentBackgroundTask` |
@@ -315,6 +316,21 @@ refactor with a behavior change.
   per day in `data/qq-bot-life.json`; owner/administrator requests are not.
   `/发动态 … | 图片=输出` attaches only pictures from this turn's output
   directory (including this thread's newly generated images), revalidated.
+- Routine variety: kinds are surf/video/music/read/browse/learn/qzone/post/
+  draw/chat; the planner gets a random day flavor, suggested kinds, yesterday's
+  kinds and recent experiences, and each segment says `online`. Spontaneous
+  cold-group/private outreach is skipped (`routine_offline`) while the current
+  segment is offline; replies are unaffected.
+- Planned chats: `kind=chat` names one `contact` (`private:QQ`/`group:ID`)
+  from the candidates offered to the planner (names, relationship labels,
+  timing, never message text); the parser drops others and caps them at
+  `CODEX_REMOTE_CONTACT_LIFE_CHATS_PER_DAY`. When due (own daily count, not
+  the sub-agent gap) the Hub applies hard blockers (two unanswered Bot
+  messages, already talking, outside usual hours), then the existing
+  private/cold-group judge with `routinePlan` must approve and the main model
+  may stay silent; requires proactive chat and the interest model enabled.
+  A chat segment's contact and plan are visible only in its target scope.
+  Logs carry kind, target type, outcome and reason only.
 - Drawings: with an engine whose `imageGeneration` capability is true,
   routines may contain `kind=draw`; the life sub-agent draws and the Hub
   stores that turn's generated pictures in `data/qq-bot-drawings/` (index in
@@ -333,7 +349,12 @@ refactor with a behavior change.
   result. Stickers are sent through the structured `sticker` field as their
   own final bubble. `qq_message.act` reacts to the current/quoted group message
   (at most two per turn) or recalls the Bot's own confirmed message from the
-  last two minutes (in-memory ledger at the lowest send layer).
+  last two minutes (in-memory ledger at the lowest send layer). Its cards
+  (two per turn): song cards pass title/singer/cover with the platform id
+  because NapCat's primary music signer rejects a bare id; Bilibili cards
+  accept only a BV/av id or b23.tv link, fetch facts from the Bilibili API and
+  sign through `get_mini_app_ark` for the canonical www.bilibili.com page;
+  chat-record cards use the Bot's own QQ id and nickname for every node.
   `qq_context.lookup` reads member/group/notice/essence facts only for people
   who appeared in the conversation and never returns sex, age or location.
   These and `qq_self.state` stay bound to the original conversation.

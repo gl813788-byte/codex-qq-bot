@@ -292,6 +292,7 @@ Self-persona thresholds use `CODEX_REMOTE_CONTACT_QQ_SELF_PERSONA_*`; account st
 | `CODEX_REMOTE_CONTACT_LIFE_ACTIVITIES` | `1` | Really carry out the online parts of the daily routine; `0` disables |
 | `CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_DAILY_LIMIT` | `5` | Routine activities per day, range 0–24 |
 | `CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_MIN_GAP_MINUTES` | `60` | Minimum minutes between routine activities, range 10–720 |
+| `CODEX_REMOTE_CONTACT_LIFE_CHATS_PER_DAY` | `2` | Planned chats per day (routine segments where the Bot reaches out to a chosen contact or group), range 0–3; `0` plans none. They also need proactive chat and the interest model enabled |
 | `CODEX_REMOTE_CONTACT_LIFE_QZONE_POSTS_PER_DAY` | `1` | Daily cap of the Bot's own Qzone posts (owner/administrator requests are not counted) |
 | `CODEX_REMOTE_CONTACT_LIFE_QZONE_COMMENTS_PER_DAY` | `3` | Daily cap of the Bot's own Qzone comments |
 | `CODEX_REMOTE_CONTACT_SOCIAL_FRIEND_REQUESTS_PER_DAY` | `3` | Daily cap of friend requests from ordinary conversations |

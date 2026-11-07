@@ -158,6 +158,42 @@ test("private proactive interest model owns the start decision while the main mo
   assert.equal(payload.frequencyPrior.roll, 0.09);
 });
 
+test("a planned routine chat reaches both judges as an intention without null prompt lines", async () => {
+  const bodies = [];
+  const fetch = (decision) => async (_url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify(decision) }, finish_reason: "stop" }]
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const common = { apiKey: "test-key", baseUrl: "https://openrouter.test/api/v1", model: "test/interest-model", timeoutMs: 1500 };
+  const routinePlan = { source: "daily_routine", activity: "找朋友聊聊天", intention: "把下午刷到的视频分享过去".repeat(5), window: "15:00-16:00" };
+  await judgeQqPrivateProactiveStart({
+    ...common,
+    routinePlan,
+    recentMessages: [{ senderId: "10000", text: "下次聊" }],
+    fetch: fetch({ shouldStart: true, interest: 70, reason: "计划内的自然分享" })
+  });
+  await judgeQqColdGroupTopicStart({
+    ...common,
+    routinePlan,
+    recentMessages: [{ senderId: "10000", text: "有人吗" }],
+    fetch: fetch({ shouldStart: false, mode: "silent", interest: 20, reason: "群里正在聊别的" })
+  });
+  for (const body of bodies) {
+    assert.doesNotMatch(body.messages[0].content, /^null$/m);
+    assert.match(body.messages[0].content, /routinePlan/);
+    const payload = JSON.parse(body.messages[1].content);
+    assert.equal(payload.routinePlan.source, "daily_routine");
+    assert.equal([...payload.routinePlan.intention].length, 60);
+  }
+  // Without a plan neither the field nor its instruction appears.
+  bodies.length = 0;
+  await judgeQqPrivateProactiveStart({ ...common, recentMessages: [], fetch: fetch({ shouldStart: false, interest: 5, reason: "没话说" }) });
+  assert.doesNotMatch(bodies[0].messages[0].content, /routinePlan|^null$/m);
+  assert.equal(JSON.parse(bodies[0].messages[1].content).routinePlan, undefined);
+});
+
 function sse(data) {
   return `data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
 }

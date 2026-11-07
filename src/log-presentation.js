@@ -66,6 +66,7 @@ const messageTranslationsZh = Object.freeze({
   "QQ bot life activity started": "Bot 按作息开始做一件事（后台子代理）",
   "QQ bot drawing saved": "Bot 的画已存进画作库",
   "QQ bot life activity finished": "Bot 作息活动结束",
+  "QQ bot planned chat finished": "Bot 按作息主动找人聊天结束",
   "QQ bot life activity could not start": "Bot 作息活动未能开始",
   "QQ media tool finished": "QQ 媒体工具调用结束（解析/看视频/听歌/听语音/逛 B站）",
   "QQ voice message heard": "QQ 语音消息已在本机转写",
@@ -269,6 +270,12 @@ const detailTranslationsZh = Object.freeze({
   private_long_candidate: "私聊长期未联系，进入主动候选",
   private_short_candidate: "私聊短期未联系，进入主动候选",
   private_too_soon: "距上次私聊联系太近",
+  routine_offline: "按作息此刻不在手机前，暂不主动找人",
+  unanswered_streak: "对方连续没回 Bot 的消息，不再打扰",
+  already_talking: "对方正在和 Bot 聊天",
+  contact_unavailable: "计划的联系对象已不可用",
+  proactive_disabled: "主动聊天或兴趣模型已关闭",
+  "planned routine chat": "按作息计划主动找人聊天",
   reply_generation_active: "当前正在生成回复",
   cold_group_time_due: "冷群检查时间已到",
   "proactive-settings-enabled": "主动设置已开启",
@@ -306,6 +313,8 @@ const detailLabelsZh = Object.freeze({
   heardCount: "已听清段数",
   activityKind: "活动类型",
   segmentStart: "作息时段开始",
+  activityKinds: "包含的活动类型",
+  plannedChatCount: "计划主动聊天次数",
   used: "今日已用",
   limit: "每日上限",
   privileged: "主人/管理员发起",
@@ -993,7 +1002,18 @@ const detailValuesZh = Object.freeze({
   safeFetchMode: { strict: "严格", "proxy-compatible": "代理兼容" },
   judgeVisionMode: { auto: "自动检测", on: "始终附图", off: "关闭" },
   hint: { "proxy-fake-ip": "代理 Fake-IP 环境需启用 proxy-compatible" },
-  kind: { slang: "黑话", note: "普通知识", symbol: "符号", kaomoji: "颜文字", phrase: "说法", unknown: "未知" },
+  kind: {
+    slang: "黑话", note: "普通知识", symbol: "符号", kaomoji: "颜文字", phrase: "说法", unknown: "未知",
+    music: "音乐卡片", bilibili: "B站视频卡片", forward: "聊天记录卡片", dice: "骰子", rps: "猜拳", contact: "名片"
+  },
+  activityKind: {
+    none: "无", surf: "上网冲浪", video: "刷B站视频", music: "听歌", read: "看文章/小说", browse: "逛感兴趣的东西",
+    learn: "查资料学习", qzone: "逛朋友空间", post: "发说说", draw: "画画", chat: "主动找人聊天"
+  },
+  activityKinds: {
+    none: "无", surf: "上网冲浪", video: "刷B站视频", music: "听歌", read: "看文章/小说", browse: "逛感兴趣的东西",
+    learn: "查资料学习", qzone: "逛朋友空间", post: "发说说", draw: "画画", chat: "主动找人聊天"
+  },
   importMode: { replace: "整体替换", merge: "合并补充" },
   cardFormat: { json: "JSON", png: "PNG", charx: "CHARX", text: "纯文本" },
   cardSpec: { v1: "TavernAI V1", v2: "Character Card V2", v3: "Character Card V3", pygmalion: "Pygmalion", agnai: "Agnai", text: "纯文本" },
@@ -1046,7 +1066,7 @@ const detailValuesZh = Object.freeze({
   },
   triggerMode: {
     message: "消息数", time: "分钟", explicit: "@ 或回复", message_count: "消息数", minute_interval: "分钟",
-    cold_time: "冷群定时", private_long: "私聊长期未联系",
+    cold_time: "冷群定时", private_long: "私聊长期未联系", routine_chat: "按作息计划聊天",
     conversation_follow_up_batch_collecting: "连续对话静默合批中",
     conversation_follow_up_batch_capped: "连续对话已达条数上限",
     conversation_follow_up_batch_closed: "连续对话批次已关闭",

@@ -1,4 +1,5 @@
 import { normalizeQqBotDrawings } from "./qq-bot-drawings.js";
+import { describeQqRoutineSegmentForScope, normalizeQqPlannedChatContact, qqPlannedChatScopeId } from "./qq-bot-planned-chat.js";
 
 // The Bot's own continuing state between turns: a short mood that follows it
 // across conversations, the first-person inner thought it formed in each
@@ -89,7 +90,7 @@ export function formatQqBotLifeContext(state, { scopeId = "", now = Date.now(), 
   const lines = [];
   const segment = selectQqBotRoutineSegment(value.routine, { now, timeZone });
   if (segment) {
-    lines.push(`- 按你今天的作息，现在（${formatClock(now, timeZone)}）大概在：${segment.activity}${segment.state ? `；状态：${segment.state}` : ""}。`);
+    lines.push(`- 按你今天的作息，现在（${formatClock(now, timeZone)}）大概在：${describeQqRoutineSegmentForScope(segment, scopeId)}${segment.state ? `；状态：${segment.state}` : ""}。`);
   }
   const mood = value.mood;
   const moodAge = mood ? now - Date.parse(mood.at) : Infinity;
@@ -124,7 +125,9 @@ export function formatQqBotLifeDetail(state, { scopeId = "", now = Date.now(), t
     const current = selectQqBotRoutineSegment(routine, { now, timeZone });
     for (const segment of routine.segments) {
       const isCurrent = current?.start === segment.start && current?.end === segment.end;
-      lines.push(`${isCurrent ? "→" : "-"} ${segment.start}-${segment.end} ${segment.activity}${segment.state ? `（${segment.state}）` : ""}`);
+      // Only the conversation a chat plan targets sees what it is about.
+      const own = segment.kind === "chat" && Boolean(scopeId) && qqPlannedChatScopeId(segment.contact) === scopeId;
+      lines.push(`${isCurrent ? "→" : "-"} ${segment.start}-${segment.end} ${describeQqRoutineSegmentForScope(segment, scopeId)}${segment.state ? `（${segment.state}）` : ""}${own && segment.plan ? `；想找这里聊：${segment.plan}` : ""}`);
     }
   } else {
     lines.push("今天还没有生成作息。");
@@ -146,8 +149,19 @@ export function normalizeQqBotRoutine(value) {
       const activity = compact(segment?.activity, 40);
       if (!start || !end || !activity || start === end) return null;
       const plan = compact(segment?.plan, 60);
-      const kind = plan ? normalizeQqLifeActivityKind(segment?.kind) : "none";
-      return { start, end, activity, state: compact(segment?.state, 20), ...(plan && kind !== "none" ? { plan, kind } : {}) };
+      let kind = plan ? normalizeQqLifeActivityKind(segment?.kind) : "none";
+      // A chat plan needs a valid contact; without one it is plain time.
+      const contact = kind === "chat" ? normalizeQqPlannedChatContact(segment?.contact) : "";
+      if (kind === "chat" && !contact) kind = "none";
+      return {
+        start,
+        end,
+        activity,
+        state: compact(segment?.state, 20),
+        ...(plan && kind !== "none" ? { plan, kind } : {}),
+        ...(contact ? { contact } : {}),
+        ...(segment?.online === false ? { online: false } : {})
+      };
     })
     .filter(Boolean)
     .slice(0, MAX_ROUTINE_SEGMENTS);
@@ -155,7 +169,7 @@ export function normalizeQqBotRoutine(value) {
   return { date, generatedAt: String(value.generatedAt || "") || null, segments };
 }
 
-export const QQ_LIFE_ACTIVITY_KINDS = Object.freeze(["none", "video", "browse", "learn", "qzone", "post", "draw"]);
+export const QQ_LIFE_ACTIVITY_KINDS = Object.freeze(["none", "surf", "video", "music", "read", "browse", "learn", "qzone", "post", "draw", "chat"]);
 const MAX_EXPERIENCES = 40;
 const EXPERIENCE_DAYS = 4;
 
@@ -196,6 +210,7 @@ export function normalizeQqLifeActivityLedger(value, { now = Date.now(), timeZon
     runs: sameDay ? Math.max(0, Math.floor(Number(raw.runs) || 0)) : 0,
     lastAt: String(raw.lastAt || "") || null,
     doneSegments: sameDay && Array.isArray(raw.doneSegments) ? raw.doneSegments.map(String).filter((item) => /^\d{2}:\d{2}$/.test(item)).slice(-16) : [],
+    chats: sameDay ? Math.max(0, Math.floor(Number(raw.chats) || 0)) : 0,
     qzonePosts: sameDay ? Math.max(0, Math.floor(Number(raw.qzonePosts) || 0)) : 0,
     qzoneComments: sameDay ? Math.max(0, Math.floor(Number(raw.qzoneComments) || 0)) : 0,
     friendRequests: sameDay ? Math.max(0, Math.floor(Number(raw.friendRequests) || 0)) : 0
@@ -225,6 +240,13 @@ export function selectQqBotRoutineSegment(routine, { now = Date.now(), timeZone 
     const end = toMinutes(segment.end);
     return start < end ? minute >= start && minute < end : minute >= start || minute < end;
   }) || null;
+}
+
+// True while the current routine segment says the Bot is away from the
+// phone (asleep, in class, commuting). Spontaneous outreach waits; replies
+// to people who message it are unaffected.
+export function isQqBotRoutineOffline(routine, { now = Date.now(), timeZone = "Asia/Shanghai" } = {}) {
+  return selectQqBotRoutineSegment(routine, { now, timeZone })?.online === false;
 }
 
 export function formatLocalDate(value = Date.now(), timeZone = "Asia/Shanghai") {

@@ -76,7 +76,7 @@ test("the routine task is due once per day after the night rollover and parses s
   assert.equal(isQqBotRoutineDue({ date: "2026-10-26", segments: [{ start: "00:00", end: "12:00", activity: "x" }] }, { now }), false);
   // 02:00 local still belongs to the previous evening.
   assert.equal(isQqBotRoutineDue(null, { now: Date.parse("2026-10-25T18:00:00.000Z") }), false);
-  assert.deepEqual(qqBotRoutineOutputSchema.properties.segments.items.required, ["start", "end", "activity", "state", "kind", "plan"]);
+  assert.deepEqual(qqBotRoutineOutputSchema.properties.segments.items.required, ["start", "end", "activity", "state", "kind", "plan", "contact", "online"]);
   const prompt = buildQqBotRoutinePrompt({ selfPersonaContext: "喜欢猫和音游", assistantName: "麦麦", now });
   assert.match(prompt, /2026-10-26（星期一）/);
   assert.match(prompt, /不要编造会误导别人的现实细节/);
