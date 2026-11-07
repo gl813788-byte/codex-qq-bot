@@ -10,6 +10,7 @@ import {
   createTurnDeadlines,
   normalizeImagePaths,
   normalizePositiveInteger,
+  scaleProtocolBytesForWorkload,
   notifyObserver,
   superviseAgentChild
 } from "../agent/agent-turn-process.js";
@@ -176,6 +177,7 @@ function runClaudeCodeTurnOnce({
   ephemeral = true,
   timeoutMs,
   maxProtocolBytes = DEFAULT_MAX_PROTOCOL_BYTES,
+  workloadMessageCount = 1,
   maxStderrBytes,
   maxImageBytes = DEFAULT_MAX_IMAGE_BYTES,
   killGraceMs,
@@ -412,7 +414,10 @@ function runClaudeCodeTurnOnce({
 
     const readProtocol = createNdjsonReader({
       errors,
-      maxBytes: normalizePositiveInteger(maxProtocolBytes, DEFAULT_MAX_PROTOCOL_BYTES),
+      maxBytes: scaleProtocolBytesForWorkload(
+        normalizePositiveInteger(maxProtocolBytes, DEFAULT_MAX_PROTOCOL_BYTES),
+        workloadMessageCount
+      ),
       isClosed: () => settled,
       onMessage: handleProtocolMessage,
       onError: (error) => finish(error)

@@ -100,6 +100,18 @@ export function createTurnDeadlines({
   return deadlines;
 }
 
+// A turn that must answer several QQ messages at once (a stacked follow-up
+// batch) produces more protocol output than a single reply. Each message
+// after the first widens the base budget by a quarter, up to three times it.
+export const MAX_WORKLOAD_BUDGET_MULTIPLIER = 3;
+
+export function scaleProtocolBytesForWorkload(baseBytes, messageCount = 1) {
+  const base = normalizePositiveInteger(baseBytes, 1);
+  const extraMessages = Math.max(0, normalizePositiveInteger(messageCount, 1) - 1);
+  const multiplier = Math.min(MAX_WORKLOAD_BUDGET_MULTIPLIER, 1 + extraMessages / 4);
+  return Math.floor(base * multiplier);
+}
+
 // Splits child stdout into JSON lines under a total byte budget. Optional
 // credits cover known binary echoes while keeping both unfinished frames and
 // ordinary output bounded. Both budget callbacks default to no allowance.

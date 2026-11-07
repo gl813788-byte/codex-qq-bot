@@ -154,3 +154,9 @@ test("planned routine chats per day default to two and stay within three", () =>
   assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_LIFE_CHATS_PER_DAY: "0" }).lifeChatsPerDay, 0);
   assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_LIFE_CHATS_PER_DAY: "9" }).lifeChatsPerDay, 3);
 });
+
+test("QQ follow-ups stack until the reply's draft is complete unless steering is chosen", () => {
+  assert.equal(createEnvironmentConfig({}).qqFollowUpMode, "stack");
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_QQ_FOLLOW_UP_MODE: " Steer " }).qqFollowUpMode, "steer");
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_QQ_FOLLOW_UP_MODE: "later" }).qqFollowUpMode, "stack");
+});

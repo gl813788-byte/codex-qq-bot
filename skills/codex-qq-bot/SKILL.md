@@ -131,7 +131,8 @@ subsystems belong in focused modules.
 | Per-command host permission requests | `src/app/qq-host-command.js` |
 | Two-model proactive approval | `src/qq-proactive-pipeline.js` |
 | Ordinary interest cycle state | `src/qq-proactive-cycle-state.js` |
-| Follow-up fusion | `src/qq-reply-steering.js` |
+| Follow-up fusion (stack/steer modes, rewrite bound) | `src/qq-reply-steering.js` |
+| Server-side history, old files, group files (`qq_context.archive`) | `src/app/qq-archive-tool.js` |
 | App Server turn execution | `src/infrastructure/codex/` and `src/codex-app-server-turn.js` |
 | Claude Code turn execution, child env | `src/infrastructure/claude/` |
 | Engine-neutral turn deadlines, framing, child supervision, env helpers, QQ MCP tool server and bridge | `src/infrastructure/agent/` |
@@ -199,8 +200,13 @@ refactor with a behavior change.
   or the proactive-interest path authorizes a turn. Private messages use the
   normal reply path.
 - One scope has one lifecycle from routing through delivery and cleanup. New
-  Bot-triggering messages during generation enter the quiet-window fusion path;
-  prefer steering, then interrupt/restart when steering cannot accept them.
+  Bot-triggering messages during generation enter the fusion buffer. Default
+  `CODEX_REMOTE_CONTACT_QQ_FOLLOW_UP_MODE=stack` (user decision 2026-11-07):
+  no time limit and no mid-turn steering; when the draft is complete it is
+  rewritten with the whole batch, at most `QQ_FOLLOW_UP_MAX_REWRITE_ROUNDS`
+  (2) times, then sent, and leftovers start the next reply. `steer` keeps the
+  old five-second quiet window: steer first, then interrupt/restart. A failed
+  reply must not promise an automatic retry that does not exist.
 - `/stop` cancels only the active lifecycle and its pending fusion batch.
   `/新对话` additionally clears the conversation-scoped context and reusable
   thread mapping.
@@ -228,6 +234,24 @@ refactor with a behavior change.
   input/output paths. Ordinary file attachments must already exist under that
   output directory; rejected paths produce a warning and failed receipt even
   when the accompanying text was sent. Do not auto-import ordinary files.
+- Protocol output budgets (Codex 8 MiB, Claude 64 MiB) scale with
+  `workloadMessageCount` (+25% per extra stacked message, max 3x;
+  `scaleProtocolBytesForWorkload`). Natively generated pictures echo as base64
+  in imageGeneration items, legacy `image_generation_end` events and raw
+  `image_generation_call` items; `protocol-image-budget.js` gives each drawn
+  picture (6 per turn, 24 MiB each) a finite echo allowance, only when first
+  seen inside such an item. Never widen it to text or unlisted pictures.
+  Before this, one drawn picture failed chat replies with
+  `CODEX_APP_SERVER_OUTPUT_LIMIT`.
+- `qq_context.history` reads only the Hub's rolling buffer.
+  `qq_context.archive` (`src/app/qq-archive-tool.js`) pages/searches the
+  original conversation's NapCat server history (`before` cursor, search
+  scans at most 500), numbers files `hf-N`, pictures `hi-N`, group files
+  `gf-N` and folders `gd-N` per turn, and downloads/inspects only listed
+  selectors through `downloadQqInboundFile` and `executeQqImageMemoryTool`.
+  It never follows cross-session focus, keeps only bare file names and
+  http(s) URLs for archived pictures (no local paths), and logs counts only
+  (`history.archive`).
 - `qq_context.history` keyword or `userId` searches also cover other sessions.
   Every cross-session hit must name its session, selector, line, time and
   sender. Ordinary requesters reach groups and their own private chat; other
@@ -441,8 +465,8 @@ refactor with a behavior change.
   `memory.bot_routine`, `memory.relationship`, `memory.language_habit`,
   `memory.persona_self_edit`, `interest.model_test`, `media.tool`,
   `media.voice`, `agent.subagent`, `memory.life_activity`,
-  `social.qzone_self`, `social.card`, `friend.add`, `memory.bot_drawing` and
-  `media.update`.
+  `social.qzone_self`, `social.card`, `friend.add`, `memory.bot_drawing`,
+  `media.update` and `history.archive`.
   Language-statistics logs are low-noise checkpoints, contain counts/ratios rather than copied chat
   or inferred meaning, and fire when frequent candidates change or every 25
   text messages. Preserve stable English `message` values for JSON/API

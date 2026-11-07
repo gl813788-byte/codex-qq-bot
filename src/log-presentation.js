@@ -115,6 +115,7 @@ const messageTranslationsZh = Object.freeze({
   "QQ native Agent tool completed": "QQ 原生 Agent 工具调用完成",
   "QQ cross-session message completed": "QQ 跨会话消息发送完成",
   "QQ chat-history search completed": "QQ 聊天记录搜索完成",
+  "QQ archive tool used": "QQ 服务器历史/群文件工具已调用",
   "QQ Bot administrator changed": "QQ Bot 管理员变更已保存",
   "QQ Bot administrator change failed": "QQ Bot 管理员变更失败",
   "Settings persistence completed": "配置持久化完成",
@@ -397,6 +398,14 @@ const detailLabelsZh = Object.freeze({
   unresolvedMentions: "未解析 @ 文本",
   memberLookupError: "群成员查询错误",
   fusionPreview: "融合内容预览",
+  fusionMode: "追问融合方式",
+  pageCount: "读取页数",
+  scannedCount: "扫描消息数",
+  filtered: "按条件筛选",
+  termCount: "关键词数",
+  folderCount: "文件夹数",
+  nested: "在子文件夹内",
+  bytes: "字节数",
   fusionDelayMs: "融合静默窗口",
   fusionMaxDelayMs: "融合最长等待",
   fusionRound: "发送前融合轮次",
@@ -624,6 +633,7 @@ const detailLabelsZh = Object.freeze({
   closeMode: "关闭方式",
   timeoutMs: "时限",
   deadlineRenewalCount: "截止时间续期次数",
+  workloadMessageCount: "本轮处理消息数",
   grantedMinutes: "批准增加分钟数",
   grantedRounds: "批准增加轮数",
   roundLimit: "任务循环轮数上限",
@@ -934,8 +944,9 @@ const detailValuesZh = Object.freeze({
     "media.tool": "媒体工具", "media.voice": "语音识别", "agent.subagent": "子代理",
     "memory.life_activity": "Bot 作息活动", "social.qzone_self": "Bot 自主空间动态",
     "social.card": "卡片与特殊消息", "memory.bot_drawing": "Bot 画作",
-    "media.update": "媒体组件更新"
+    "media.update": "媒体组件更新", "history.archive": "历史消息与群文件"
   },
+  fusionMode: { stack: "攒到回复写完再合并", steer: "每批静默 5 秒补充进当前回答" },
   outcome: {
     loaded: "已加载", created: "已新建", updated: "已更新", rejected: "已拒绝", unchanged: "无变化", recorded: "已记录",
     duplicate: "重复记录", "no-match": "没有命中", completed: "已完成", kept: "已保留", deleted: "已删除",
@@ -1136,7 +1147,7 @@ const categoryLabels = Object.freeze({
 // collapsed row. Categories without an entry use the default list.
 const defaultLogKeyFields = Object.freeze([
   "operation", "action", "outcome", "status", "code", "errorCode", "error", "reason", "source", "url",
-  "durationMs", "totalDurationMs", "modelDurationMs", "modelTemperature", "deadlineRenewalCount", "resultCount",
+  "durationMs", "totalDurationMs", "modelDurationMs", "modelTemperature", "deadlineRenewalCount", "workloadMessageCount", "resultCount",
   "scopeType", "scopeId", "sourceScopeId", "targetScopeId", "targetType", "actorRole", "actorUserId",
   "toolNamespace", "toolName", "toolAction", "toolCallId", "toolRound",
   "entryId", "variantId", "title", "titles", "matchedTerms",

@@ -1,4 +1,17 @@
 export const QQ_FOLLOW_UP_WINDOW_MS = 5_000;
+// "stack" keeps every Bot-triggering message that arrives during a reply in
+// one pending batch until that reply's draft is complete, then rewrites the
+// draft once with the whole batch. "steer" is the earlier behavior: each
+// five-second quiet batch is steered into the running turn.
+export const QQ_FOLLOW_UP_MODES = Object.freeze(["stack", "steer"]);
+// A busy scope must still get an answer: after this many rewrites the reply
+// is sent and newer follow-ups become the next reply.
+export const QQ_FOLLOW_UP_MAX_REWRITE_ROUNDS = 2;
+
+export function normalizeQqFollowUpMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  return QQ_FOLLOW_UP_MODES.includes(mode) ? mode : "stack";
+}
 
 export async function fuseCompletedQqReplyFollowUps({
   scopeId,
@@ -6,16 +19,22 @@ export async function fuseCompletedQqReplyFollowUps({
   handoff,
   takePendingEntries,
   restorePendingEntries,
-  replaceReply
+  replaceReply,
+  maxRounds = QQ_FOLLOW_UP_MAX_REWRITE_ROUNDS
 } = {}) {
   const key = String(scopeId || "").trim();
   let reply = String(initialReply || "");
   let fusedCount = 0;
   let fusionRounds = 0;
+  const roundLimit = Number.isFinite(Number(maxRounds)) && Number(maxRounds) >= 0
+    ? Math.floor(Number(maxRounds))
+    : QQ_FOLLOW_UP_MAX_REWRITE_ROUNDS;
   if (!key) return { reply, fusedCount, fusionRounds };
 
   while (true) {
     await handoff?.(key);
+    // Entries left here stay pending and start the scope's next reply.
+    if (fusionRounds >= roundLimit) break;
     const entries = [...(takePendingEntries?.(key) || [])];
     if (entries.length === 0) break;
     fusionRounds += 1;
@@ -40,6 +59,7 @@ export async function fuseCompletedQqReplyFollowUps({
 }
 
 export function createQqReplySteeringCoordinator({
+  mode = "stack",
   delayMs = QQ_FOLLOW_UP_WINDOW_MS,
   maxDelayMs = null,
   getActiveGeneration,
@@ -49,6 +69,7 @@ export function createQqReplySteeringCoordinator({
   onResult
 } = {}) {
   const scheduled = new Map();
+  const followUpMode = normalizeQqFollowUpMode(mode);
   let closed = false;
 
   const report = (result) => {
@@ -130,6 +151,10 @@ export function createQqReplySteeringCoordinator({
     const key = String(scopeId || "").trim();
     if (closed || !key) {
       return Promise.resolve({ ok: false, scopeId: key, reason: closed ? "closed" : "missing_scope", consumedCount: 0 });
+    }
+    // Stacked follow-ups wait for the reply's send boundary or the next reply.
+    if (followUpMode === "stack") {
+      return Promise.resolve({ ok: false, scopeId: key, reason: "stacked", consumedCount: 0 });
     }
     const existing = scheduled.get(key);
     if (existing) {
@@ -238,6 +263,7 @@ export function createQqReplySteeringCoordinator({
 
     snapshot() {
       return {
+        mode: followUpMode,
         scheduled: scheduled.size,
         closed,
         delayMs: normalizeDelay(delayMs),

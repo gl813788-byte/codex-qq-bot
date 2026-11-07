@@ -335,6 +335,93 @@ test("large image tool echoes do not consume the ordinary protocol output budget
   assert.equal((await resultPromise).finalResponse, "images inspected");
 });
 
+test("a picture the model drew does not exhaust the protocol budget through its echoes", async () => {
+  // Production failure: one ~2.5 MB generated PNG echoed as base64 in the
+  // imageGeneration item, the legacy end event and the raw response item
+  // pushed a QQ reply past the fixed 8 MiB budget.
+  const server = createFakeAppServer();
+  const drawn = `iVBORw0KGgo${"A".repeat(5_000)}`;
+  let ready;
+  const readyPromise = new Promise((resolve) => { ready = resolve; });
+  const resultPromise = runCodexAppServerTurn({
+    prompt: "draw a cat",
+    maxProtocolBytes: 4_000,
+    timeoutMs: 5_000,
+    spawnProcess: server.spawn,
+    onReady: ready
+  });
+  await readyPromise;
+  server.notify({ method: "item/completed", params: { item: {
+    id: "ig-1", type: "imageGeneration", status: "completed", revisedPrompt: "a cat", result: drawn, savedPath: "/tmp/x.png"
+  } } });
+  server.notify({ method: "codex/event/image_generation_end", params: { msg: {
+    type: "image_generation_end", call_id: "ig-1", result: drawn
+  } } });
+  server.notify({ method: "rawResponseItem/completed", params: { item: {
+    type: "image_generation_call", id: "ig-1", result: drawn
+  } } });
+  server.complete("drew it");
+  assert.equal((await resultPromise).finalResponse, "drew it");
+});
+
+test("generated-picture allowance is finite and never covers text or unrelated pictures", async () => {
+  const drawn = `iVBORw0KGgo${"A".repeat(5_000)}`;
+  for (const mode of ["text", "outside-generation", "replayed", "slots"]) {
+    const server = createFakeAppServer();
+    let ready;
+    const readyPromise = new Promise((resolve) => { ready = resolve; });
+    const resultPromise = runCodexAppServerTurn({
+      prompt: "bounded drawing output",
+      maxProtocolBytes: 4_000,
+      timeoutMs: 5_000,
+      spawnProcess: server.spawn,
+      onReady: ready
+    });
+    const rejected = assert.rejects(resultPromise, (error) => error.code === "CODEX_APP_SERVER_OUTPUT_LIMIT");
+    await readyPromise;
+    if (mode === "text") {
+      server.notify({ method: "item/completed", params: { item: { type: "agentMessage", text: drawn } } });
+    } else if (mode === "outside-generation") {
+      server.notify({ method: "item/completed", params: { item: { type: "commandExecution", aggregatedOutput: drawn } } });
+    } else if (mode === "replayed") {
+      for (let index = 0; index < 5; index += 1) {
+        server.notify({ method: "item/completed", params: { item: { type: "imageGeneration", result: drawn } } });
+      }
+    } else {
+      for (let index = 0; index < 7; index += 1) {
+        server.notify({ method: "item/completed", params: { item: {
+          type: "imageGeneration", result: `iVBORw0KGgo${String(index).repeat(5_000)}`
+        } } });
+      }
+    }
+    await rejected;
+  }
+});
+
+test("a turn answering several stacked QQ messages gets a proportionally larger protocol budget", async () => {
+  for (const [workloadMessageCount, succeeds] of [[1, false], [5, true]]) {
+    const server = createFakeAppServer();
+    let ready;
+    const readyPromise = new Promise((resolve) => { ready = resolve; });
+    const resultPromise = runCodexAppServerTurn({
+      prompt: "answer the batch",
+      maxProtocolBytes: 4_000,
+      workloadMessageCount,
+      timeoutMs: 5_000,
+      spawnProcess: server.spawn,
+      onReady: ready
+    });
+    const settled = succeeds
+      ? resultPromise
+      : assert.rejects(resultPromise, (error) => error.code === "CODEX_APP_SERVER_OUTPUT_LIMIT");
+    await readyPromise;
+    server.notify({ method: "item/agentMessage/delta", params: { delta: "x".repeat(5_000) } });
+    if (succeeds) server.complete("all answered");
+    const result = await settled;
+    if (succeeds) assert.equal(result.finalResponse, "all answered");
+  }
+});
+
 test("image allowance cannot be spent on text, unknown images or unlimited replay", async () => {
   const imageUrl = `data:image/png;base64,${"A".repeat(5_000)}`;
   for (const mode of ["text", "unknown-image", "replayed-image"]) {

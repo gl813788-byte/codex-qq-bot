@@ -197,6 +197,7 @@ export function createQqCodexTurnRunner({
           shellAccess: Boolean(options.shellAccess),
           timeoutMs: options.timeout,
           replacementIdleTimeoutMs: options.replacementIdleTimeoutMs,
+          workloadMessageCount: normalizedWorkloadMessageCount(options),
           signal: replyScope?.signal,
           onDynamicToolCall: typeof options.onDynamicToolCall === "function"
             ? (...args) => runAgentToolCall(() => options.onDynamicToolCall(...args))
@@ -375,7 +376,10 @@ function buildQqTurnOperationLogDetails(options, outcome, agent) {
       groupId: event?.groupId || null,
       senderId: event?.senderId || null
     }),
-    engine: agent.id
+    engine: agent.id,
+    ...(normalizedWorkloadMessageCount(options) > 1
+      ? { workloadMessageCount: normalizedWorkloadMessageCount(options) }
+      : {})
   };
 }
 
@@ -385,6 +389,12 @@ function diagnosticFields(diagnostics) {
     diagnosticLines: diagnostics.lines,
     diagnosticOmittedLines: diagnostics.omittedLineCount
   } : {};
+}
+
+// How many QQ messages this turn answers at once; widens the protocol budget.
+function normalizedWorkloadMessageCount(options) {
+  const value = Number(options?.workloadMessageCount);
+  return Number.isFinite(value) && value >= 1 ? Math.min(100, Math.floor(value)) : 1;
 }
 
 function normalizedReplacementIdleTimeout(options) {

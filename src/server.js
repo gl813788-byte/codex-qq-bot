@@ -579,6 +579,7 @@ import {
   snapshotQqContextImages
 } from "./qq-enhancer/context-images.js";
 import { executeQqImageMemoryTool } from "./app/qq-image-memory-tool.js";
+import { executeQqArchiveTool } from "./app/qq-archive-tool.js";
 import {
   createQqInterestVisionCapabilityCache,
   selectQqInterestJudgeImages
@@ -663,6 +664,7 @@ const {
   agentToolTransport,
   agentLeanContext,
   qqBaseInstructionsMode,
+  qqFollowUpMode,
   claudeCliPath,
   claudeModel,
   claudeReasoningEffort,
@@ -1181,6 +1183,7 @@ const backgroundTasks = new Set();
 const shutdownController = new AbortController();
 const qqReplyScheduler = createScopedReplyScheduler();
 const qqReplySteering = createQqReplySteeringCoordinator({
+  mode: qqFollowUpMode,
   delayMs: QQ_FOLLOW_UP_WINDOW_MS,
   maxDelayMs: null,
   getActiveGeneration: getSteerableQqGeneration,
@@ -1217,7 +1220,8 @@ const qqOutgoingMentionResolver = createQqOutgoingMentionResolver({
 });
 const codexRunLimiter = createConcurrencyLimiter(codexMaxConcurrency, { maxPending: codexMaxPending });
 const oneBotWebhookLimiter = createConcurrencyLimiter(oneBotMaxConcurrency, { maxPending: oneBotMaxPending });
-  const qqPendingReplyLimit = 16;
+// Stacked follow-ups can span a whole reply, so the batch holds more of them.
+const qqPendingReplyLimit = 32;
 const qqPendingReplyMaxTextLength = 1200;
 const qqStateScopeLimit = Math.max(50, Math.min(5_000, Number(process.env.CODEX_REMOTE_CONTACT_QQ_SCOPE_LIMIT || 500) || 500));
 const qqPersonaMemberLimit = Math.max(50, Math.min(2_000, Number(process.env.CODEX_REMOTE_CONTACT_QQ_PERSONA_MEMBER_LIMIT || 500) || 500));
@@ -2078,7 +2082,8 @@ function queueQqPendingReplyEvent(event, source, decision) {
     triggerKind: getQqFusionTriggerKind({ event, decision }),
     decisionReason: decision?.reason || null,
     triggerMessageCount: pending.events.length,
-    fusionDelayMs: QQ_FOLLOW_UP_WINDOW_MS,
+    fusionMode: qqFollowUpMode,
+    fusionDelayMs: qqFollowUpMode === "steer" ? QQ_FOLLOW_UP_WINDOW_MS : null,
     fusionMaxDelayMs: null
   }, "qq", qqLogContext(event));
   trackBackgroundTask(qqReplySteering.schedule(scopeId), () => null);
@@ -2271,7 +2276,9 @@ async function buildQqPendingSteeringInput(entries, generation) {
     type: "text",
     text: [
       `你处理当前 QQ 回复期间又收到了 ${aggregate.queuedMessageCount || entries.length} 条新消息。Hub 已沿用连续消息合并规则，把相邻重复内容压成一条并标出总次数。`,
-      "5 秒静默窗口已经结束。Hub 会优先把本批新消息引导进当前活跃任务；若活跃 turn 已不接受引导，才会中断旧 turn 并开启替代轮次。无论采用哪种方式，都要把追加消息与正在进行的多轮任务融合成一份统一回复，不要先发过时答案，也不要逐条机械回复“消息一/消息二”。",
+      qqFollowUpMode === "stack"
+        ? "这些消息是在上一版回答生成期间陆续到达的，Hub 把它们全部攒成了这一批，没有中途打断你。把它们与上一版的工作融合成一份统一回复，不要先发过时答案，也不要逐条机械回复“消息一/消息二”。"
+        : "5 秒静默窗口已经结束。Hub 会优先把本批新消息引导进当前活跃任务；若活跃 turn 已不接受引导，才会中断旧 turn 并开启替代轮次。无论采用哪种方式，都要把追加消息与正在进行的多轮任务融合成一份统一回复，不要先发过时答案，也不要逐条机械回复“消息一/消息二”。",
       replyTargetInstruction || null,
       semanticRecall.context || null,
       semanticRecall.context ? "" : null,
@@ -8302,6 +8309,9 @@ async function executeQqStructuredNativeTool(call, event, context = {}) {
       }
     });
   }
+  if (call?.namespace === "qq_context" && call?.tool === "archive") {
+    return executeQqArchiveNativeTool(call, context.rootEvent || event, context.replyScope);
+  }
   if (call?.namespace === "qq_runtime" && call?.tool === "host_command") {
     const rootEvent = context.rootEvent || event;
     const replyScope = context.replyScope;
@@ -8675,6 +8685,50 @@ function executeQqRobotProfileNativeTool(call, event, { rootEvent = event } = {}
     ok: true,
     reply: `${candidate.displayName || `QQ ${userId}`}(${userId}) 的机器人资料更新已暂存；只有本轮最终 QQ 回复成功投递后才会持久化。`
   };
+}
+
+// qq_context.archive: server-side history, files and pictures of the original
+// conversation. Downloads and pictures reuse the validated file/image paths.
+async function executeQqArchiveNativeTool(call, event, replyScope) {
+  if (!isQqToolReplyScopeActive(event, replyScope)) return { ok: false, error: "本轮任务已结束，不能翻历史。" };
+  const action = String(call?.arguments?.action || "");
+  if (["download", "image", "use_image"].includes(action) && !event.qqTaskWorkspace?.inputDir) {
+    return { ok: false, error: "本轮 QQ 任务工作区不可用，无法安全下载。" };
+  }
+  const assertActive = () => assertQqReplyScopeActive(replyScope);
+  return executeQqArchiveTool(call.arguments || {}, {
+    event,
+    callAction: callOneBotAction,
+    maxFileBytes: qqFileMaxBytes,
+    assertActive,
+    downloadFile: async (candidate) => {
+      const saved = await downloadQqInboundFile(candidate, {
+        inputDir: event.qqTaskWorkspace.inputDir,
+        maxBytes: qqFileMaxBytes,
+        resolveDownloadUrl: resolveOneBotInboundFileUrl,
+        fetchDownload: fetchQqInboundFileUrl
+      });
+      event.qqToolFilePaths = [...new Set([...(event.qqToolFilePaths || []), saved.path])];
+      return saved;
+    },
+    inspectImage: (args, candidates) => executeQqImageMemoryTool(args, {
+      candidates,
+      conversation: true,
+      drawings: null,
+      taskWorkspace: event.qqTaskWorkspace,
+      prepareImage: (image, options) => prepareSingleQqModelImage(image, { ...options, fetchOneBotImage }),
+      maxBytes: qqImageMaxBytes,
+      compressedMaxEdge: qqCompressedImageMaxEdge,
+      signal: replyScope.signal,
+      assertActive
+    }),
+    onLog: (details) => logger.info("QQ archive tool used", buildQqOperationLogDetails(event, {
+      operation: "history.archive",
+      sourceScopeId: getQqMemoryScopeId(event),
+      targetScopeId: getQqMemoryScopeId(event),
+      ...details
+    }), "qq", qqLogContext(event))
+  });
 }
 
 // One detected QQ file (file-N) of this turn, downloaded once into the task
@@ -11189,6 +11243,9 @@ async function buildModelReply(event, { replyScope = null } = {}) {
           additionalActivityCount: event.proactiveDecision.additionalActivityCount
         })
         : "";
+  // Every QQ message this reply must answer (the triggering batch plus each
+  // stacked follow-up fused before send) widens the turn's protocol budget.
+  let replyWorkloadMessageCount = Math.max(1, Number(event.queuedMessageCount) || 1);
   const runReplyPrompt = async (prompt, resumePrompt = prompt) => {
     assertQqReplyScopeActive(replyScope);
     const turnStartedAt = Date.now();
@@ -11211,6 +11268,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       taskType,
       timeout: currentTaskPolicy.maximumMs,
       replacementIdleTimeoutMs: currentTaskPolicy.timeoutMs,
+      workloadMessageCount: replyWorkloadMessageCount,
       imagePaths: currentImagePaths,
       env: {
         ...process.env,
@@ -11501,6 +11559,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
           triggerKinds: candidate?.triggerKinds || [],
           fusionPreview: candidate?.fusionPreview || null
         }, "qq", qqLogContext(event));
+        replyWorkloadMessageCount += entries.length;
         const replacement = await runReplyPrompt(fullPrompt, resumePrompt);
         logger.success("QQ pending follow-ups fused before send", {
           outcome: "completed",
@@ -11550,11 +11609,9 @@ async function buildModelReply(event, { replyScope = null } = {}) {
 
   try {
     let baseReply = await runBuiltReplyPrompt(memoryContext, 0);
-    let fusion = await fuseQueuedFollowUpsBeforeSend(baseReply);
-    baseReply = fusion.reply;
-    if (fusion.fusedCount > 0) {
-      baseReply = (await fuseQueuedFollowUpsBeforeSend(baseReply)).reply;
-    }
+    // Stacked follow-ups rewrite the finished draft at most
+    // QQ_FOLLOW_UP_MAX_REWRITE_ROUNDS times; later ones start the next reply.
+    baseReply = (await fuseQueuedFollowUpsBeforeSend(baseReply)).reply;
     assertQqReplyScopeActive(replyScope);
     if (isQqSilentReply(baseReply)) {
       event.qqModelDeclinedReply = true;
@@ -13085,7 +13142,8 @@ async function processQqReplyEvent(event, options = {}) {
         ? null
         : ["QQ_GENERATION_STOPPED", "QQ_REPLY_STOPPED", "QQ_FOLLOW_UP_FUSION_RETRY", "HUB_SHUTTING_DOWN"].includes(caught.code)
           ? null
-          : "这边刚刚卡了一下，等我再试一次。";
+          // Nothing retries a failed reply automatically, so never promise one.
+          : "这边刚刚卡了一下，这条没弄出来，麻烦再叫我一次。";
     } finally {
       timings.generationDurationMs = Date.now() - generationStartedAt;
     }

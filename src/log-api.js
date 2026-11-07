@@ -87,7 +87,7 @@ function compactEntry(entry) {
   const allowedKeys = new Set([
     "engine", "model", "reasoningEffort",
     "durationMs", "totalDurationMs", "rememberDurationMs", "decisionDurationMs", "generationDurationMs", "sendDurationMs", "memoryDurationMs", "timeoutMs",
-    "deadlineRenewalCount",
+    "deadlineRenewalCount", "workloadMessageCount",
     "resultCount", "status", "outcome", "code", "error", "reason", "decisionReason", "url", "diagnostic", "diagnosticOmittedLines",
     "groupId", "senderId", "messageId", "messageType", "proactive", "triggerMode", "taskType", "queuedCount", "bubbleCount", "replyChars", "sendStatus",
     "source", "action", "operation", "scopeType", "scopeId", "sourceScopeId", "targetScopeId", "targetType",

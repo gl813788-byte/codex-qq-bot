@@ -8,6 +8,7 @@ import {
   createTurnDeadlines,
   normalizeDynamicToolResult,
   normalizeImagePaths,
+  scaleProtocolBytesForWorkload,
   superviseAgentChild
 } from "../src/infrastructure/agent/agent-turn-process.js";
 
@@ -196,4 +197,16 @@ test("dynamic tool results normalize to the shared Codex content shape", () => {
     success: false
   });
   assert.deepEqual(normalizeImagePaths([" /a.png ", "/a.png", "", null]), [{ type: "localImage", path: "/a.png" }]);
+});
+
+test("protocol budget grows a quarter per extra stacked QQ message, up to three times", () => {
+  const base = 8 * 1024 * 1024;
+  assert.equal(scaleProtocolBytesForWorkload(base), base);
+  assert.equal(scaleProtocolBytesForWorkload(base, 1), base);
+  assert.equal(scaleProtocolBytesForWorkload(base, 0), base);
+  assert.equal(scaleProtocolBytesForWorkload(base, "bad"), base);
+  assert.equal(scaleProtocolBytesForWorkload(base, 2), base * 1.25);
+  assert.equal(scaleProtocolBytesForWorkload(base, 5), base * 2);
+  assert.equal(scaleProtocolBytesForWorkload(base, 9), base * 3);
+  assert.equal(scaleProtocolBytesForWorkload(base, 500), base * 3);
 });

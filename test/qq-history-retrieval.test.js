@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   fetchQqHistoryForSummary,
+  fetchQqHistoryPage,
   mergeQqHistoryMessages,
   normalizeOneBotHistoryMessage
 } from "../src/qq-history-retrieval.js";
@@ -68,4 +69,39 @@ test("history text folds animated stickers whose summary has brackets", () => {
     raw_message: "[CQ:image,summary=[动画表情],file=8DD.jpg,sub_type=1,url=https://m.test/d?appid=1407&rkey=abc]哈哈"
   });
   assert.equal(entry.text, "[图片]哈哈");
+});
+
+test("one server history page ends before its cursor, oldest first, with the next older cursor", async () => {
+  const requests = [];
+  const page = await fetchQqHistoryPage({
+    groupId: "10001",
+    before: "50",
+    count: 2,
+    callAction: async (endpoint, payload) => {
+      requests.push({ endpoint, payload });
+      return { ok: true, body: { data: { messages: [
+        historyMessage("50", 500, "20002", "anchor already shown"),
+        historyMessage("48", 480, "20002", "older"),
+        historyMessage("49", 490, "30003", "newer"),
+        historyMessage("49", 490, "30003", "newer")
+      ] } } };
+    }
+  });
+  assert.equal(requests[0].endpoint, "get_group_msg_history");
+  assert.equal(requests[0].payload.message_seq, "50");
+  assert.equal(requests[0].payload.count, 3);
+  assert.deepEqual(page.messages.map((raw) => raw.message_seq), ["48", "49"]);
+  assert.equal(page.nextBefore, "48");
+
+  const privatePage = await fetchQqHistoryPage({
+    userId: "20002",
+    callAction: async (endpoint, payload) => {
+      assert.equal(endpoint, "get_friend_msg_history");
+      assert.equal(payload.message_seq, "0");
+      return { ok: false, error: "offline" };
+    }
+  });
+  assert.equal(privatePage.ok, false);
+  assert.equal(privatePage.reason, "offline");
+  assert.equal((await fetchQqHistoryPage({ callAction: async () => ({ ok: true }) })).ok, false);
 });
