@@ -96,7 +96,8 @@ test("cards: dice, music search and contact shares are bounded real sends", asyn
   assert.equal((await executeQqCardAction({ action: "dice" }, deps)).ok, true);
   const music = await executeQqCardAction({ action: "music", query: "晴天 周杰伦" }, deps);
   assert.match(music.reply, /《晴天》- 周杰伦/);
-  assert.deepEqual(sent[1].segments, [{ type: "music", data: { type: "163", id: "186016" } }]);
+  // The signing service needs the title; sending it keeps the card on the found song.
+  assert.deepEqual(sent[1].segments, [{ type: "music", data: { type: "163", id: "186016", title: "晴天", singer: "周杰伦" } }]);
   assert.equal((await executeQqCardAction({ action: "contact", target: "22222" }, deps)).ok, false);
   assert.equal(event.qqCardCount, 2);
   const fresh = { ...deps, event: {} };

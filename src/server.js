@@ -194,6 +194,7 @@ import {
   createEmptyQqBotLifeState,
   formatQqBotLifeContext,
   formatQqBotLifeDetail,
+  isQqBotRoutineOffline,
   normalizeQqBotLifeState,
   recordQqBotLifeTurn,
   setQqBotRoutine
@@ -202,8 +203,19 @@ import {
   buildQqBotRoutinePrompt,
   isQqBotRoutineDue,
   parseQqBotRoutineOutput,
+  pickQqRoutineVariety,
   qqBotRoutineOutputSchema
 } from "./qq-bot-daily-routine.js";
+import {
+  collectQqPlannedChatCandidates,
+  formatQqPlannedChatCandidates,
+  formatQqPlannedChatPrompt,
+  getQqPlannedChatBlocker,
+  listQqPlannedChatContacts,
+  normalizeQqPlannedChatContact,
+  qqPlannedChatScopeId,
+  summarizeQqPlannedChatForJudge
+} from "./qq-bot-planned-chat.js";
 import {
   findQqStickerBySelector,
   formatQqStickerLibraryHint,
@@ -496,7 +508,7 @@ import {
 } from "./app/qq-voice-transcription.js";
 import { createQqSubagentManager } from "./qq-subagents.js";
 import { executeQqSubagentTool } from "./app/qq-subagent-tool.js";
-import { createNeteaseMusicSearch } from "./app/qq-card-tools.js";
+import { QQ_CARD_ACTIONS, createNeteaseMusicSearch } from "./app/qq-card-tools.js";
 import {
   buildQqSubagentTurn,
   filterQqSubagentToolSpecs,
@@ -719,6 +731,7 @@ const {
   lifeActivitiesEnabled,
   lifeActivityDailyLimit,
   lifeActivityMinGapMinutes,
+  lifeChatsPerDay,
   lifeQzonePostsPerDay,
   lifeQzoneCommentsPerDay,
   socialFriendRequestsPerDay,
@@ -1838,6 +1851,12 @@ function isQqBotAdministratorId(userId) {
 
 function hasQqPrivilegedAccess(event) {
   return Boolean(event?.isOwner || event?.isBotAdmin);
+}
+
+// Timer-based private outreach writes one message without tools; a planned
+// routine chat is a normal turn with the full tool set (cards, state, media).
+function qqTurnToolsEnabled(event) {
+  return !event?.qqPrivateProactive || Boolean(event?.qqRoutineChat);
 }
 
 function getQqAuthorityLabel(event) {
@@ -3142,6 +3161,14 @@ function maybeRefreshQqBotRoutine() {
 async function refreshQqBotRoutine() {
   const now = Date.now();
   await ensureCodexReplyWorkspace();
+  // Planned chats need the proactive path; without it the planner gets no
+  // candidates and plans none.
+  const maxChats = lifeActivitiesEnabled && state.qq.enhancer.enabled && state.qq.proactive.enabled && state.qq.proactive.judge.enabled
+    ? lifeChatsPerDay
+    : 0;
+  const chatCandidates = maxChats > 0 ? collectQqRoutineChatCandidates(now) : { privates: [], groups: [] };
+  const canDraw = qqAgentCanDraw && lifeActivitiesEnabled;
+  const candidateText = formatQqPlannedChatCandidates(chatCandidates, { now });
   const result = await runSteerableQqCodexTurn(buildQqBotRoutinePrompt({
     selfPersonaContext: formatQqSelfPersonaContext(state.qq.selfPersona, { interestOnly: true }),
     corePersonality: formatQqPersonalityCoreContext(state.qq.personality, {
@@ -3150,7 +3177,11 @@ async function refreshQqBotRoutine() {
     assistantName: state.qq.selfPersona.account.nickname || state.qq.selfPersona.persona.name || assistantName,
     now,
     previousRoutine: state.qq.botLife.routine,
-    canDraw: qqAgentCanDraw && lifeActivitiesEnabled
+    canDraw,
+    chatCandidates: candidateText,
+    maxChats,
+    variety: pickQqRoutineVariety({ previousRoutine: state.qq.botLife.routine, canDraw, canChat: maxChats > 0 && Boolean(candidateText) }),
+    recentExperiences: state.qq.botLife.experiences.slice(-5)
   }), {
     cwd: codexTmpDir,
     taskType: CODEX_TASK_TYPES.QQ_SELF_PERSONA,
@@ -3162,7 +3193,11 @@ async function refreshQqBotRoutine() {
     webSearchMode: "disabled",
     sandbox: "read-only"
   });
-  const routine = parseQqBotRoutineOutput(result.finalResponse, { now });
+  const routine = parseQqBotRoutineOutput(result.finalResponse, {
+    now,
+    allowedContacts: listQqPlannedChatContacts(chatCandidates),
+    maxChats
+  });
   if (!routine) throw new Error("routine output did not match the schema");
   state.qq.botLife = setQqBotRoutine(state.qq.botLife, routine);
   await saveQqBotLife();
@@ -3170,8 +3205,41 @@ async function refreshQqBotRoutine() {
     operation: "memory.bot_routine",
     outcome: "updated",
     routineDate: routine.date,
-    segmentCount: routine.segments.length
+    segmentCount: routine.segments.length,
+    activityKinds: [...new Set(routine.segments.map((segment) => segment.kind).filter(Boolean))],
+    plannedChatCount: routine.segments.filter((segment) => segment.kind === "chat").length
   }, "learning");
+}
+
+// Whom the planner may choose to reach out to: recent private contacts and
+// allowed groups, with relationship labels and usual hours, never message text.
+function collectQqRoutineChatCandidates(now = Date.now()) {
+  pruneExpiredQqBans();
+  return collectQqPlannedChatCandidates({
+    recentMessages: state.qq.memory.recentMessages,
+    allowedGroups: state.qq.allowedGroups,
+    bannedUserIds: state.qq.bannedUserIds,
+    groupName: (groupId) => getQqKnowledgeGroupName(state.qq.knowledgeBase, groupId),
+    relationship: (userId) => describeQqPersonRelationship(state.qq.personality, userId, {
+      now,
+      isOwner: state.qq.ownerUserIds.includes(userId)
+    }),
+    activeHours: (scopeId) => getQqScopeSocialHoursLabel(scopeId),
+    now
+  });
+}
+
+function getQqScopeSocialHoursLabel(scopeId) {
+  try {
+    const container = getQqPersonaGroup(scopeId);
+    const signals = buildQqAdaptiveLearningSignals(container, null);
+    const plan = scopeId.startsWith("private:")
+      ? getQqAdaptivePrivateProactivePlan(signals, {})
+      : getQqAdaptiveColdProactivePlan(signals, {});
+    return plan?.socialHours?.source === "learned" ? String(plan.socialHours.label || "") : "";
+  } catch {
+    return "";
+  }
 }
 
 const qqConversationMemoryWriter = createCoalescingWriter(async () => {
@@ -5834,127 +5902,145 @@ async function runQqColdGroupInterestCheck() {
   for (const groupId of qqColdInterestStatusByGroupId.keys()) {
     if (!state.qq.allowedGroups.includes(groupId)) qqColdInterestStatusByGroupId.delete(groupId);
   }
+  // The routine says the Bot is away from the phone: no spontaneous outreach.
+  const routineOffline = qqDailyRoutine && isQqBotRoutineOffline(state.qq.botLife.routine);
   for (const groupId of state.qq.allowedGroups) {
     const entries = state.qq.memory.recentMessages[groupId] || [];
     const lastHumanEntry = [...entries].reverse().find((entry) => !entry?.isAssistant && entry?.senderId !== "assistant");
     const latestEntry = entries.at(-1);
     if (!lastHumanEntry || !latestEntry) continue;
 
-    const event = {
-      type: "group_message",
-      groupId,
-      senderId: "0",
-      senderName: "群聊定时观察",
-      senderLabel: "群聊定时观察",
-      text: "",
-      atTargets: [],
-      images: [],
-      isOwner: false,
-      qqColdProactive: true,
-      proactiveObservedAtMs: Date.now(),
-      proactiveSource: "cold_interest_timer",
-      groupActivityVersion: Number(qqGroupActivityVersionByGroupId.get(groupId) || 0),
-      raw: {
-        message_id: `cold-interest-${Date.now()}-${groupId}`,
-        time: Math.floor(Date.now() / 1000)
-      }
-    };
-
+    const event = buildQqColdGroupOutreachEvent(groupId);
     const group = getQqPersonaGroup(groupId);
     const signals = buildQqAdaptiveLearningSignals(group, null);
     const adaptivePlan = getQqAdaptiveColdProactivePlan(signals, { lastActivityAt: latestEntry.at });
-    const plan = applyQqColdGroupInterestRuntimeBlocker(groupId, adaptivePlan, event);
+    let plan = applyQqColdGroupInterestRuntimeBlocker(groupId, adaptivePlan, event);
+    if (plan.eligible && routineOffline) plan = { ...plan, eligible: false, reason: "routine_offline" };
     logQqColdGroupInterestStatus(event, plan, signals.group);
     if (!plan.eligible) continue;
-    ensureQqTraceId(event);
-    const activeInterestModel = getActiveQqInterestModelConfig();
-    const topicStartJudge = state.qq.proactive.judge.enabled
-      ? await judgeQqColdGroupTopicStart({
-        provider: activeInterestModel.provider,
-        apiKey: activeInterestModel.apiKey,
-        baseUrl: activeInterestModel.baseUrl,
-        model: activeInterestModel.model,
-        agent: activeInterestModel.agent,
-        botPersonality: summarizeQqPersonalityForJudge(state.qq.personality),
-        timeoutMs: state.qq.proactive.judge.timeoutMs,
-        maxRecentMessages: state.qq.proactive.judge.maxRecentMessages,
-        selfPersona: summarizeQqSelfPersona(state.qq.selfPersona).persona,
-        coldInterest: {
-          ...plan,
-          activityLevel: signals.group.activityLevel,
-          sampleSize: signals.group.sampleSize
-        },
-        recentMessages: entries
-      })
-      : { ok: false, reason: "interest model judge is disabled", fallback: false };
-    logQqColdGroupTopicStartJudge(event, topicStartJudge, plan);
-    if (!topicStartJudge.ok || topicStartJudge.value?.shouldStart !== true) {
-      markQqAdaptiveColdProactiveCheck(group, { at: Date.now(), sent: false, lastHumanAt: plan.lastHumanAt });
-      await saveQqPersonas();
-      return;
+    await startQqColdGroupOutreach({ groupId, entries, event, group, signals, plan });
+    return;
+  }
+}
+
+function buildQqColdGroupOutreachEvent(groupId) {
+  return {
+    type: "group_message",
+    groupId,
+    senderId: "0",
+    senderName: "群聊定时观察",
+    senderLabel: "群聊定时观察",
+    text: "",
+    atTargets: [],
+    images: [],
+    isOwner: false,
+    qqColdProactive: true,
+    proactiveObservedAtMs: Date.now(),
+    proactiveSource: "cold_interest_timer",
+    groupActivityVersion: Number(qqGroupActivityVersionByGroupId.get(groupId) || 0),
+    raw: {
+      message_id: `cold-interest-${Date.now()}-${groupId}`,
+      time: Math.floor(Date.now() / 1000)
     }
-    const decision = {
-      ok: true,
-      proactive: true,
-      coldProactive: true,
-      triggerMode: "cold_time",
-      reason: "cold group interest time due",
+  };
+}
+
+// One cold-group (or planned group) outreach: the interest model confirms,
+// then the main model reads the group and may still stay silent.
+async function startQqColdGroupOutreach({ groupId, entries, event, group, signals, plan, routineSegment = null }) {
+  ensureQqTraceId(event);
+  const activeInterestModel = getActiveQqInterestModelConfig();
+  const topicStartJudge = state.qq.proactive.judge.enabled
+    ? await judgeQqColdGroupTopicStart({
+      provider: activeInterestModel.provider,
+      apiKey: activeInterestModel.apiKey,
+      baseUrl: activeInterestModel.baseUrl,
+      model: activeInterestModel.model,
+      agent: activeInterestModel.agent,
+      botPersonality: summarizeQqPersonalityForJudge(state.qq.personality),
+      timeoutMs: state.qq.proactive.judge.timeoutMs,
+      maxRecentMessages: state.qq.proactive.judge.maxRecentMessages,
+      selfPersona: summarizeQqSelfPersona(state.qq.selfPersona).persona,
       coldInterest: {
         ...plan,
         activityLevel: signals.group.activityLevel,
         sampleSize: signals.group.sampleSize
       },
-      coldTopicStart: {
-        shouldStart: true,
-        mode: topicStartJudge.value.mode === "chatter" ? "chatter" : "topic",
-        interest: Number(topicStartJudge.value.interest || 0),
-        reason: String(topicStartJudge.value.reason || "").slice(0, 600),
-        provider: topicStartJudge.provider || state.qq.proactive.judge.provider,
-        model: topicStartJudge.model || state.qq.proactive.judge.model,
-        durationMs: topicStartJudge.durationMs || 0
-      },
-      promptHint: formatQqColdProactivePrompt({
-        mode: topicStartJudge.value.mode
-      }),
-      replyContext: compactConsecutiveQqMessages(entries).slice(-10).map((entry) => ({
-        at: entry.at || null,
-        sender: entry.isAssistant ? assistantName : entry.senderLabel || "群友",
-        text: appendQqConsecutiveRepeatSuffix(entry.text || "（非文字消息）", entry),
-        imageCount: Array.isArray(entry.images) ? entry.images.length : 0,
-        replyToBot: Boolean(entry.replyContext?.isSelf)
-      })),
-      ...createQqTwoModelProactiveApproval({
-        kind: topicStartJudge.value.mode === "chatter"
-          ? QQ_AUTONOMOUS_PROACTIVE_KINDS.COLD_GROUP_CHATTER
-          : QQ_AUTONOMOUS_PROACTIVE_KINDS.COLD_GROUP_TOPIC,
-        provider: topicStartJudge.provider || state.qq.proactive.judge.provider,
-        model: topicStartJudge.model || state.qq.proactive.judge.model,
-        task: "qq_cold_group_topic_start",
-        interest: topicStartJudge.value.interest,
-        reason: topicStartJudge.value.reason,
-        durationMs: topicStartJudge.durationMs,
-        temperature: topicStartJudge.temperature
-      })
-    };
-    const record = await processQqReplyEvent(event, {
-      source: "onebot",
-      alreadyRemembered: true,
-      decisionOverride: decision
-    });
-    markQqAdaptiveColdProactiveCheck(group, {
-      at: Date.now(),
-      lastHumanAt: plan.lastHumanAt,
-      sent: Boolean(record.reply && record.send?.ok !== false && !record.error && !record.decision?.superseded)
-    });
+      ...(routineSegment ? { routinePlan: summarizeQqPlannedChatForJudge(routineSegment) } : {}),
+      recentMessages: entries
+    })
+    : { ok: false, reason: "interest model judge is disabled", fallback: false };
+  logQqColdGroupTopicStartJudge(event, topicStartJudge, plan);
+  if (!topicStartJudge.ok || topicStartJudge.value?.shouldStart !== true) {
+    markQqAdaptiveColdProactiveCheck(group, { at: Date.now(), sent: false, lastHumanAt: plan.lastHumanAt });
     await saveQqPersonas();
-    return;
+    return { outcome: "declined" };
   }
+  const idleMinutes = Math.max(0, (Date.now() - (Date.parse(entries.at(-1)?.at || "") || 0)) / 60_000);
+  const decision = {
+    ok: true,
+    proactive: true,
+    coldProactive: true,
+    triggerMode: routineSegment ? "routine_chat" : "cold_time",
+    reason: routineSegment ? "planned routine chat" : "cold group interest time due",
+    ...(routineSegment ? { routineChat: { segmentStart: routineSegment.start } } : {}),
+    coldInterest: {
+      ...plan,
+      activityLevel: signals.group.activityLevel,
+      sampleSize: signals.group.sampleSize
+    },
+    coldTopicStart: {
+      shouldStart: true,
+      mode: topicStartJudge.value.mode === "chatter" ? "chatter" : "topic",
+      interest: Number(topicStartJudge.value.interest || 0),
+      reason: String(topicStartJudge.value.reason || "").slice(0, 600),
+      provider: topicStartJudge.provider || state.qq.proactive.judge.provider,
+      model: topicStartJudge.model || state.qq.proactive.judge.model,
+      durationMs: topicStartJudge.durationMs || 0
+    },
+    promptHint: routineSegment
+      ? formatQqPlannedChatPrompt({ segment: routineSegment, type: "group", groupActive: idleMinutes < 15 })
+      : formatQqColdProactivePrompt({ mode: topicStartJudge.value.mode }),
+    replyContext: compactConsecutiveQqMessages(entries).slice(-10).map((entry) => ({
+      at: entry.at || null,
+      sender: entry.isAssistant ? assistantName : entry.senderLabel || "群友",
+      text: appendQqConsecutiveRepeatSuffix(entry.text || "（非文字消息）", entry),
+      imageCount: Array.isArray(entry.images) ? entry.images.length : 0,
+      replyToBot: Boolean(entry.replyContext?.isSelf)
+    })),
+    ...createQqTwoModelProactiveApproval({
+      kind: topicStartJudge.value.mode === "chatter"
+        ? QQ_AUTONOMOUS_PROACTIVE_KINDS.COLD_GROUP_CHATTER
+        : QQ_AUTONOMOUS_PROACTIVE_KINDS.COLD_GROUP_TOPIC,
+      provider: topicStartJudge.provider || state.qq.proactive.judge.provider,
+      model: topicStartJudge.model || state.qq.proactive.judge.model,
+      task: "qq_cold_group_topic_start",
+      interest: topicStartJudge.value.interest,
+      reason: topicStartJudge.value.reason,
+      durationMs: topicStartJudge.durationMs,
+      temperature: topicStartJudge.temperature
+    })
+  };
+  const record = await processQqReplyEvent(event, {
+    source: "onebot",
+    alreadyRemembered: true,
+    decisionOverride: decision
+  });
+  const sent = Boolean(record.reply && record.send?.ok !== false && !record.error && !record.decision?.superseded);
+  markQqAdaptiveColdProactiveCheck(group, {
+    at: Date.now(),
+    lastHumanAt: plan.lastHumanAt,
+    sent
+  });
+  await saveQqPersonas();
+  return { outcome: sent ? "sent" : record.error ? "failed" : "silent" };
 }
 
 async function runQqPrivateInterestCheck() {
   for (const userId of qqPrivateInterestStatusByUserId.keys()) {
     if (!state.qq.memory.recentMessages[`private:${userId}`]) qqPrivateInterestStatusByUserId.delete(userId);
   }
+  const routineOffline = qqDailyRoutine && isQqBotRoutineOffline(state.qq.botLife.routine);
   for (const [scopeId, entries] of Object.entries(state.qq.memory.recentMessages)) {
     if (!scopeId.startsWith("private:") || !Array.isArray(entries) || entries.length === 0) continue;
     const userId = normalizeQqIdentifier(scopeId.slice("private:".length));
@@ -5968,113 +6054,183 @@ async function runQqPrivateInterestCheck() {
     const member = getQqPersonaMember(scopeId, userId, lastHumanEntry.senderLabel);
     const signals = buildQqAdaptiveLearningSignals(contact, member);
     let plan = getQqAdaptivePrivateProactivePlan(signals, { lastActivityAt: latestEntry.at });
-    if (qqReplyScheduler.get(scopeId) || state.qq.activeGenerations[scopeId]
-      || Array.isArray(state.qq.pendingReplies[scopeId]?.events) && state.qq.pendingReplies[scopeId].events.length > 0) {
+    if (isQqPrivateScopeBusy(scopeId)) {
       plan = { ...plan, eligible: false, reason: "reply_generation_active" };
     }
+    if (plan.eligible && routineOffline) plan = { ...plan, eligible: false, reason: "routine_offline" };
     logQqPrivateInterestStatus(userId, plan, signals.group);
     if (!plan.eligible) continue;
-
-    const spontaneityRoll = Math.random();
-    const event = {
-      type: "private_message",
-      senderId: userId,
-      senderName: lastHumanEntry.senderLabel || `QQ ${userId}`,
-      senderLabel: lastHumanEntry.senderLabel || `QQ ${userId}`,
-      text: "",
-      images: [],
-      atTargets: [],
-      isOwner: state.qq.ownerUserIds.includes(userId),
-      isBotAdmin: !state.qq.ownerUserIds.includes(userId) && isQqBotAdministratorId(userId),
-      qqPrivateProactive: true,
-      proactiveObservedAtMs: Date.now(),
-      proactiveSource: "private_interest_timer",
-      qqScopeActivityVersion: Number(qqGroupActivityVersionByGroupId.get(scopeId) || 0),
-      raw: {
-        message_id: `private-interest-${Date.now()}-${userId}`,
-        time: Math.floor(Date.now() / 1000)
-      }
-    };
-    ensureQqTraceId(event);
-    const activeInterestModel = getActiveQqInterestModelConfig();
-    const privateStartJudge = state.qq.proactive.judge.enabled
-      ? await judgeQqPrivateProactiveStart({
-        provider: activeInterestModel.provider,
-        apiKey: activeInterestModel.apiKey,
-        baseUrl: activeInterestModel.baseUrl,
-        model: activeInterestModel.model,
-        agent: activeInterestModel.agent,
-        botPersonality: summarizeQqPersonalityForJudge(state.qq.personality, {
-          userId: event.senderId,
-          isOwner: Boolean(event.isOwner)
-        }),
-        timeoutMs: state.qq.proactive.judge.timeoutMs,
-        maxRecentMessages: state.qq.proactive.judge.maxRecentMessages,
-        selfPersona: summarizeQqSelfPersona(state.qq.selfPersona).persona,
-        privateInterest: plan,
-        frequencyPrior: {
-          probability: plan.probability,
-          roll: spontaneityRoll
-        },
-        recentMessages: entries,
-        crossSessionContext: await buildQqInterestCrossSessionContext(getQqCrossSessionSource(event), event, {
-          currentScopeId: getQqMemoryScopeId(event)
-        }).catch(() => null)
-      })
-      : { ok: false, reason: "interest model judge is disabled", fallback: false };
-    logQqPrivateProactiveStartJudge(event, privateStartJudge, plan, spontaneityRoll);
-    if (!privateStartJudge.ok || privateStartJudge.value?.shouldStart !== true) {
-      markQqAdaptivePrivateProactiveCheck(contact, { at: Date.now(), lastHumanAt: plan.lastHumanAt });
-      await saveQqPersonas();
-      return;
-    }
-    const decision = {
-      ok: true,
-      proactive: true,
-      privateProactive: true,
-      triggerMode: `private_${plan.phase}`,
-      reason: `private ${plan.phase} interest candidate`,
-      privateInterest: { ...plan, sampleSize: signals.group.sampleSize },
-      privateStart: {
-        shouldStart: true,
-        interest: Number(privateStartJudge.value.interest || 0),
-        reason: String(privateStartJudge.value.reason || "").slice(0, 600),
-        provider: privateStartJudge.provider || state.qq.proactive.judge.provider,
-        model: privateStartJudge.model || state.qq.proactive.judge.model,
-        durationMs: privateStartJudge.durationMs || 0,
-        spontaneityRoll
-      },
-      promptHint: formatQqApprovedProactivePrompt({ kind: "private" }),
-      replyContext: compactConsecutiveQqMessages(entries).slice(-12).map((entry) => ({
-        sender: entry.isAssistant ? (state.qq.selfPersona.account.nickname || assistantName) : "contact",
-        text: appendQqConsecutiveRepeatSuffix(entry.text || "（非文字消息）", entry),
-        imageCount: Array.isArray(entry.images) ? entry.images.length : 0,
-        replyToBot: Boolean(entry.replyContext?.isSelf)
-      })),
-      ...createQqTwoModelProactiveApproval({
-        kind: QQ_AUTONOMOUS_PROACTIVE_KINDS.PRIVATE_CONTACT,
-        provider: privateStartJudge.provider || state.qq.proactive.judge.provider,
-        model: privateStartJudge.model || state.qq.proactive.judge.model,
-        task: "qq_private_proactive_start",
-        interest: privateStartJudge.value.interest,
-        reason: privateStartJudge.value.reason,
-        durationMs: privateStartJudge.durationMs,
-        temperature: privateStartJudge.temperature
-      })
-    };
-    const record = await processQqReplyEvent(event, {
-      source: "onebot",
-      alreadyRemembered: true,
-      decisionOverride: decision
-    });
-    markQqAdaptivePrivateProactiveCheck(contact, {
-      at: Date.now(),
-      lastHumanAt: plan.lastHumanAt,
-      sent: Boolean(record.reply && record.send?.ok !== false && !record.error && !record.decision?.superseded)
-    });
-    await saveQqPersonas();
+    await startQqPrivateOutreach({ userId, entries, lastHumanEntry, contact, signals, plan });
     return;
   }
+}
+
+function isQqPrivateScopeBusy(scopeId) {
+  return Boolean(qqReplyScheduler.get(scopeId) || state.qq.activeGenerations[scopeId]
+    || Array.isArray(state.qq.pendingReplies[scopeId]?.events) && state.qq.pendingReplies[scopeId].events.length > 0);
+}
+
+// One private outreach (timer or planned): the interest model confirms, then
+// the main model reads the private chat and may still stay silent.
+async function startQqPrivateOutreach({ userId, entries, lastHumanEntry, contact, signals, plan, routineSegment = null }) {
+  const scopeId = `private:${userId}`;
+  const spontaneityRoll = Math.random();
+  const event = {
+    type: "private_message",
+    senderId: userId,
+    senderName: lastHumanEntry.senderLabel || `QQ ${userId}`,
+    senderLabel: lastHumanEntry.senderLabel || `QQ ${userId}`,
+    text: "",
+    images: [],
+    atTargets: [],
+    isOwner: state.qq.ownerUserIds.includes(userId),
+    isBotAdmin: !state.qq.ownerUserIds.includes(userId) && isQqBotAdministratorId(userId),
+    qqPrivateProactive: true,
+    ...(routineSegment ? { qqRoutineChat: true } : {}),
+    proactiveObservedAtMs: Date.now(),
+    proactiveSource: routineSegment ? "routine_chat" : "private_interest_timer",
+    qqScopeActivityVersion: Number(qqGroupActivityVersionByGroupId.get(scopeId) || 0),
+    raw: {
+      message_id: `private-interest-${Date.now()}-${userId}`,
+      time: Math.floor(Date.now() / 1000)
+    }
+  };
+  ensureQqTraceId(event);
+  const activeInterestModel = getActiveQqInterestModelConfig();
+  const privateStartJudge = state.qq.proactive.judge.enabled
+    ? await judgeQqPrivateProactiveStart({
+      provider: activeInterestModel.provider,
+      apiKey: activeInterestModel.apiKey,
+      baseUrl: activeInterestModel.baseUrl,
+      model: activeInterestModel.model,
+      agent: activeInterestModel.agent,
+      botPersonality: summarizeQqPersonalityForJudge(state.qq.personality, {
+        userId: event.senderId,
+        isOwner: Boolean(event.isOwner)
+      }),
+      timeoutMs: state.qq.proactive.judge.timeoutMs,
+      maxRecentMessages: state.qq.proactive.judge.maxRecentMessages,
+      selfPersona: summarizeQqSelfPersona(state.qq.selfPersona).persona,
+      privateInterest: plan,
+      frequencyPrior: {
+        probability: plan.probability,
+        roll: spontaneityRoll
+      },
+      ...(routineSegment ? { routinePlan: summarizeQqPlannedChatForJudge(routineSegment) } : {}),
+      recentMessages: entries,
+      crossSessionContext: await buildQqInterestCrossSessionContext(getQqCrossSessionSource(event), event, {
+        currentScopeId: getQqMemoryScopeId(event)
+      }).catch(() => null)
+    })
+    : { ok: false, reason: "interest model judge is disabled", fallback: false };
+  logQqPrivateProactiveStartJudge(event, privateStartJudge, plan, spontaneityRoll);
+  if (!privateStartJudge.ok || privateStartJudge.value?.shouldStart !== true) {
+    markQqAdaptivePrivateProactiveCheck(contact, { at: Date.now(), lastHumanAt: plan.lastHumanAt });
+    await saveQqPersonas();
+    return { outcome: "declined" };
+  }
+  const decision = {
+    ok: true,
+    proactive: true,
+    privateProactive: true,
+    triggerMode: routineSegment ? "routine_chat" : `private_${plan.phase}`,
+    reason: routineSegment ? "planned routine chat" : `private ${plan.phase} interest candidate`,
+    ...(routineSegment ? { routineChat: { segmentStart: routineSegment.start } } : {}),
+    privateInterest: { ...plan, sampleSize: signals.group.sampleSize },
+    privateStart: {
+      shouldStart: true,
+      interest: Number(privateStartJudge.value.interest || 0),
+      reason: String(privateStartJudge.value.reason || "").slice(0, 600),
+      provider: privateStartJudge.provider || state.qq.proactive.judge.provider,
+      model: privateStartJudge.model || state.qq.proactive.judge.model,
+      durationMs: privateStartJudge.durationMs || 0,
+      spontaneityRoll
+    },
+    promptHint: routineSegment
+      ? formatQqPlannedChatPrompt({ segment: routineSegment, type: "private" })
+      : formatQqApprovedProactivePrompt({ kind: "private" }),
+    replyContext: compactConsecutiveQqMessages(entries).slice(-12).map((entry) => ({
+      sender: entry.isAssistant ? (state.qq.selfPersona.account.nickname || assistantName) : "contact",
+      text: appendQqConsecutiveRepeatSuffix(entry.text || "（非文字消息）", entry),
+      imageCount: Array.isArray(entry.images) ? entry.images.length : 0,
+      replyToBot: Boolean(entry.replyContext?.isSelf)
+    })),
+    ...createQqTwoModelProactiveApproval({
+      kind: QQ_AUTONOMOUS_PROACTIVE_KINDS.PRIVATE_CONTACT,
+      provider: privateStartJudge.provider || state.qq.proactive.judge.provider,
+      model: privateStartJudge.model || state.qq.proactive.judge.model,
+      task: "qq_private_proactive_start",
+      interest: privateStartJudge.value.interest,
+      reason: privateStartJudge.value.reason,
+      durationMs: privateStartJudge.durationMs,
+      temperature: privateStartJudge.temperature
+    })
+  };
+  const record = await processQqReplyEvent(event, {
+    source: "onebot",
+    alreadyRemembered: true,
+    decisionOverride: decision
+  });
+  const sent = Boolean(record.reply && record.send?.ok !== false && !record.error && !record.decision?.superseded);
+  markQqAdaptivePrivateProactiveCheck(contact, {
+    at: Date.now(),
+    lastHumanAt: plan.lastHumanAt,
+    sent
+  });
+  await saveQqPersonas();
+  return { outcome: sent ? "sent" : record.error ? "failed" : "silent" };
+}
+
+// A routine chat segment came due: reach out to the planned contact through
+// the same proactive path, after the hard blockers. Outcome is logged with
+// kind and result only, never the plan text.
+async function runQqPlannedChat(segment) {
+  const contactKey = normalizeQqPlannedChatContact(segment?.contact);
+  const type = contactKey.startsWith("group:") ? "group" : "private";
+  const finish = (outcome, reason = null) => {
+    logger.info("QQ bot planned chat finished", {
+      operation: "memory.life_activity",
+      outcome,
+      activityKind: "chat",
+      targetType: type,
+      segmentStart: segment?.start || null,
+      reason
+    }, "learning");
+    return outcome;
+  };
+  if (!contactKey) return finish("skipped", "contact_unavailable");
+  if (!state.channels.qq || !state.qq.enhancer.enabled || !state.qq.proactive.enabled) return finish("skipped", "proactive_disabled");
+  if (!state.qq.proactive.judge.enabled) return finish("skipped", "proactive_disabled");
+  const scopeId = qqPlannedChatScopeId(contactKey);
+  const entries = state.qq.memory.recentMessages[scopeId] || [];
+  const lastHumanEntry = [...entries].reverse().find((entry) => !entry?.isAssistant && entry?.senderId !== "assistant");
+  const latestEntry = entries.at(-1);
+  if (!lastHumanEntry || !latestEntry) return finish("skipped", "contact_unavailable");
+  if (type === "group") {
+    const groupId = scopeId;
+    if (!state.qq.allowedGroups.includes(groupId)) return finish("skipped", "contact_unavailable");
+    if (qqReplyScheduler.get(groupId) || state.qq.activeGenerations[groupId]) return finish("skipped", "reply_generation_active");
+    const group = getQqPersonaGroup(groupId);
+    const signals = buildQqAdaptiveLearningSignals(group, null);
+    const plan = getQqAdaptiveColdProactivePlan(signals, { lastActivityAt: latestEntry.at });
+    const blocker = getQqPlannedChatBlocker({ type, adaptivePlan: plan });
+    if (blocker) return finish("skipped", blocker);
+    const event = { ...buildQqColdGroupOutreachEvent(groupId), proactiveSource: "routine_chat", qqRoutineChat: true };
+    const result = await startQqColdGroupOutreach({ groupId, entries, event, group, signals, plan, routineSegment: segment });
+    return finish(result.outcome);
+  }
+  const userId = scopeId.slice("private:".length);
+  pruneExpiredQqBans();
+  if (state.qq.bannedUserIds.includes(userId)) return finish("skipped", "contact_unavailable");
+  if (isQqPrivateScopeBusy(scopeId)) return finish("skipped", "reply_generation_active");
+  const contact = getQqPersonaGroup(scopeId);
+  const member = getQqPersonaMember(scopeId, userId, lastHumanEntry.senderLabel);
+  const signals = buildQqAdaptiveLearningSignals(contact, member);
+  const plan = getQqAdaptivePrivateProactivePlan(signals, { lastActivityAt: latestEntry.at });
+  const blocker = getQqPlannedChatBlocker({ type, adaptivePlan: plan });
+  if (blocker) return finish("skipped", blocker);
+  const result = await startQqPrivateOutreach({ userId, entries, lastHumanEntry, contact, signals, plan, routineSegment: segment });
+  return finish(result.outcome);
 }
 
 function applyQqColdGroupInterestRuntimeBlocker(groupId, adaptivePlan, event = null) {
@@ -8275,12 +8431,22 @@ async function executeQqMessageNativeTool(call, event, replyScope) {
     cards: {
       sendSegments: (segments, options) => sendQqSpecialSegments(event, segments, options),
       searchMusic: qqMusicSearch,
+      // Song facts (title, singer, cover) for the card come from the
+      // platform itself; a missing music component only drops the cover.
+      describeSong: (candidate) => qqMediaServices.music.resolve(candidate, { withLyrics: false, signal: replyScope?.signal }),
+      bilibili: qqMediaServices.bilibili,
+      mediaCandidates: getQqMediaCandidatesForEvent(event),
+      self: {
+        userId: String(state.maintenance.oneBot.selfId || ""),
+        nickname: state.qq.selfPersona.account?.nickname || assistantName
+      },
+      cleanText: stripLocalQqMediaMarkers,
       allowedContactIds: new Set([...collectQqLookupUserIds(event), String(state.maintenance.oneBot.selfId || "")].filter(Boolean))
     },
     assertActive: () => assertQqReplyScopeActive(replyScope)
   });
   const action = String(call.arguments?.action || "");
-  if (["music", "dice", "rps", "contact"].includes(action)) {
+  if (QQ_CARD_ACTIONS.includes(action)) {
     logger.info("QQ special message sent", {
       operation: "social.card",
       kind: action,
@@ -8294,10 +8460,14 @@ const qqMusicSearch = createNeteaseMusicSearch({ fetchJson: (url, options) => qq
 
 // A card, dice or contact share in the original conversation; confirmed
 // sends enter the recall ledger and the conversation memory like a bubble.
-async function sendQqSpecialSegments(event, segments, { label = "" } = {}) {
+async function sendQqSpecialSegments(event, segments, { label = "", extra = null } = {}) {
+  // extra carries only a forwarded-record card's display fields.
+  const display = extra && typeof extra === "object"
+    ? Object.fromEntries(["source", "prompt", "summary", "news"].filter((key) => extra[key] != null).map((key) => [key, extra[key]]))
+    : {};
   const payload = event.groupId
-    ? { group_id: Number(event.groupId), message: segments }
-    : { user_id: Number(event.senderId), message: segments };
+    ? { group_id: Number(event.groupId), message: segments, ...display }
+    : { user_id: Number(event.senderId), message: segments, ...display };
   const result = await callOneBotAction(event.groupId ? "send_group_msg" : "send_private_msg", payload);
   if (result.ok) {
     rememberQqSentMessage(event, result, label);
@@ -10730,7 +10900,7 @@ async function buildAssistantInstructions(event) {
     isAdministrator: Boolean(event.isBotAdmin),
     senderId: event.senderId,
     enhancerEnabled: Boolean(state.qq.enhancer.enabled),
-    toolsEnabled: !event.qqPrivateProactive,
+    toolsEnabled: qqTurnToolsEnabled(event),
     canGenerateImages: qqAgentCanDraw,
     assistantProfile: assistantSkillBrief
   });
@@ -10922,7 +11092,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       scopeSlang: selectQqScopeSlangCandidates(state.qq.knowledgeBase, isQqPrivateEvent(event)
         ? { privateUserId: event.senderId }
         : { groupId: event.groupId }),
-      toolsEnabled: !event.qqPrivateProactive
+      toolsEnabled: qqTurnToolsEnabled(event)
     })
     : "";
   const personaLoreContext = formatQqPersonaLoreContext(state.qq.personality, {
@@ -10976,7 +11146,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   const botToolContext = event.qqPrivateProactive ? "" : formatQqBotInternalToolContext(event);
   const nativeToolSpecs = buildQqNativeToolSpecs({
     isOwner: hasQqPrivilegedAccess(event),
-    toolsEnabled: !event.qqPrivateProactive,
+    toolsEnabled: qqTurnToolsEnabled(event),
     canUseSubagents: subagentMaxConcurrency > 0 && !event.qqColdProactive && !event.qqSubagentReport,
     hasStickerCandidates: replyStickerCandidates.length > 0 || stickerCatalog.length > 0,
     hasMemoryPeople: event.qqMemoryPeople.length > 0,
@@ -11010,7 +11180,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       mode: event.proactiveDecision?.coldTopicStart?.mode
     }))
       : event.qqPrivateProactive
-      ? formatQqApprovedProactivePrompt({ kind: "private" })
+      ? (event.proactiveDecision?.promptHint || formatQqApprovedProactivePrompt({ kind: "private" }))
       : event.proactiveDecision?.proactive
         ? formatQqApprovedProactivePrompt({
           kind: "ordinary",
@@ -14274,17 +14444,32 @@ let qqLifeActivityStarting = false;
 
 async function maybeStartQqLifeActivity() {
   if (!lifeActivitiesEnabled || !qqDailyRoutine || qqLifeActivityStarting || shuttingDown) return;
-  if (subagentMaxConcurrency <= 0 || !state.channels.qq || !state.maintenance.oneBot?.ok) return;
+  if (!state.channels.qq || !state.maintenance.oneBot?.ok) return;
   const due = selectQqLifeActivityDue(state.qq.botLife, {
     enabled: true,
     dailyLimit: lifeActivityDailyLimit,
     minGapMinutes: lifeActivityMinGapMinutes,
-    canDraw: qqAgentCanDraw
+    canDraw: qqAgentCanDraw,
+    chatLimit: lifeChatsPerDay
   });
   if (!due) return;
   // A person does their own thing when nobody is waiting on them, and the
   // phone has room for one more agent process.
   if (Object.keys(state.qq.activeGenerations || {}).length > 0) return;
+  if (due.chat) {
+    // Tried once: the segment is marked before the attempt, so a decline or
+    // failure does not repeat it every minute.
+    qqLifeActivityStarting = true;
+    try {
+      state.qq.botLife = markQqLifeActivityStarted(state.qq.botLife, due.segment);
+      await saveQqBotLife();
+      await runQqPlannedChat(due.segment);
+    } finally {
+      qqLifeActivityStarting = false;
+    }
+    return;
+  }
+  if (subagentMaxConcurrency <= 0) return;
   const jobs = qqSubagentManager.stats();
   if (jobs.running + jobs.queued > 0) return;
   if (!(await checkQqSubagentMemory()).ok) return;

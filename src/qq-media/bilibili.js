@@ -118,6 +118,7 @@ export function createBilibiliClient({ fetchJson, resolveRedirect, now = Date.no
       description: compact(data?.desc, 400),
       owner: compact(data?.owner?.name, 40),
       category: compact(data?.tname, 20),
+      cover: coverUrl(data?.pic),
       durationSeconds: Number(page.duration || data?.duration || 0) || 0,
       pageCount: pages.length || 1,
       pageTitle: pages.length > 1 ? compact(page.part, 60) : "",
@@ -232,6 +233,17 @@ export function formatBilibiliDuration(seconds) {
   const minutes = Math.floor((total % 3600) / 60);
   const rest = total % 60;
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}` : `${minutes}:${String(rest).padStart(2, "0")}`;
+}
+
+// Video covers live on Bilibili's own image CDN; anything else is dropped.
+function coverUrl(value) {
+  const text = String(value || "").trim().replace(/^\/\//, "https://").replace(/^http:\/\//i, "https://");
+  try {
+    const url = new URL(text);
+    return url.protocol === "https:" && /(?:^|\.)hdslb\.com$/i.test(url.hostname) ? url.href : "";
+  } catch {
+    return "";
+  }
 }
 
 function compact(value, max) {

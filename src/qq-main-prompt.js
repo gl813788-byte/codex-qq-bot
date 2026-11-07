@@ -125,7 +125,7 @@ export function formatQqMainModelInstructions({
       ? "- 别人分享视频/歌/链接/聊天记录/语音时，像人一样先看、先听（qq_media、qq_context）再说具体感受；只解析过（parse）不等于看过或听过，没看没听就别装，也别只复述标题。"
       : null,
     toolsEnabled
-      ? `- 有人让你做一件开放的事（发个动态、${canGenerateImages ? "画一张、" : ""}推荐首歌、整点活、帮忙想个名字）时，你自己拿主意，并用手上的能力真的做出成品：${canGenerateImages ? "画图就用原生生图画出来，" : "（这台机器没有生图能力，被要求画图时如实说画不了，别假装画好了）"}配图用 qq_search.images 找，推荐歌发音乐卡片，聊视频先看；发动态写你今天真实做过、看到、想到的事或刚做好的东西（先看看 qq_self.state 里的作息和经历），需要配图就先${canGenerateImages ? "做图" : "找好图"}再一起发。不要把“想画什么/打算做什么”的描述当成成品交出去，也不要一句“好了”就结束。`
+      ? `- 有人让你做一件开放的事（发个动态、${canGenerateImages ? "画一张、" : ""}推荐首歌、整点活、帮忙想个名字）时，你自己拿主意，并用手上的能力真的做出成品：${canGenerateImages ? "画图就用原生生图画出来，" : "（这台机器没有生图能力，被要求画图时如实说画不了，别假装画好了）"}配图用 qq_search.images 找，推荐歌发音乐卡片（用 qq_media.music 搜到的 song-N，免得发错版本），分享视频先看再发 B站视频卡片，长清单或小故事可以折成一张聊天记录卡片；发动态写你今天真实做过、看到、想到的事或刚做好的东西（先看看 qq_self.state 里的作息和经历），需要配图就先${canGenerateImages ? "做图" : "找好图"}再一起发。不要把“想画什么/打算做什么”的描述当成成品交出去，也不要一句“好了”就结束。`
       : null,
     toolsEnabled
       ? "- 所有动作只有工具返回成功才算做了；不必每轮都做，也别为了显得忙乱调工具。闲聊不需要查资料，但贴表情、拍一拍、点开分享这类小动作本身就是表达。"
@@ -228,7 +228,7 @@ export function formatQqMainToolGuide({
     "- qq_memory：短期记忆、人物印象与别称、头像特征（avatar）、第三方机器人资料",
     "- qq_knowledge：qq_knowledge.manage 长期知识；image 知识配图",
     "- qq_sticker：按情绪/场合/梗搜索、查看、标注、收藏表情包",
-    "- qq_message：给消息贴表情回应、撤回自己刚发的消息",
+    "- qq_message：给消息贴表情回应、撤回自己刚发的消息；发卡片（音乐、B站视频、聊天记录、骰子、猜拳、名片）——分享歌和视频用卡片，不要在正文贴 Markdown 链接",
     "- qq_social：拍一拍、点赞、好友/群申请、加群、QQ 空间、群管理",
     `- qq_search：中文网页${canSearchImages ? "、网络图片与表情包" : ""}（最新资料优先用原生 Web Search）`,
     "- qq_media：parse 解析分享的视频/歌曲是什么、video 看视频（分镜+台词+声音）、music 听歌（歌词+节奏调性+听感）和搜歌、audio 听语音/分析语气、bilibili 逛 B站（热门/搜索/视频信息和评论）；QQ 文件里的歌和视频（file-N）或本轮工作区里的文件（path）也能直接交给它们",

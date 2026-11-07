@@ -37,9 +37,10 @@
 | `src/app/qq-voice-transcription.js` | 语音消息自动转写 | 路由前听语音的数量与时限、`[语音]` 标记替换 |
 | `src/qq-human-action-stats.js` | 群友互动频率统计 | 贴表情、拍一拍、撤回、分享等计数、半衰期与汇总；动作规划在 `src/qq-human-behavior.js` |
 | `src/qq-subagents.js` + `src/app/qq-subagent-turn.js` + `src/app/qq-subagent-tool.js` | 后台子代理 | 槽位与排队、中途消息与续做、取消、可见范围、子代理工具子集、提示词与汇报提示、`qq_agent.manage` |
-| `src/qq-bot-life-activities.js` | 按作息做事 | 作息活动到期选择、每日次数与社交上限、活动任务提示词、真实经历记录与上下文 |
+| `src/qq-bot-life-activities.js` | 按作息做事 | 作息活动到期选择、每日次数、计划聊天与社交上限、活动任务提示词、真实经历记录与上下文 |
+| `src/qq-bot-planned-chat.js` | 按作息主动聊天 | 给作息规划的联系人候选（名字、关系、时间，绝不含消息内容）、联系人校验、硬性阻止条件、兴趣模型与主模型提示，以及聊天时段在各会话里的隐私呈现 |
 | `src/qq-bot-drawings.js` + `src/app/qq-drawings-tool.js` | Bot 的画作库 | 画作索引与会话可见范围、按内容哈希存储与清理、`qq_context.images` 中画作部分的查看与取出（图片工具本身在 `src/app/qq-image-memory-tool.js`） |
-| `src/app/qq-card-tools.js` | 卡片与特殊消息 | 音乐卡片搜歌、骰子、猜拳、名片分享与每轮上限 |
+| `src/app/qq-card-tools.js` | 卡片与特殊消息 | 音乐卡片（网易云/QQ音乐/酷狗/酷我，来自 `song-N`、`music-N`、ID 或搜索）、B站视频卡片（`get_mini_app_ark`）、以 Bot 自己账号写的聊天记录卡片、骰子、猜拳、名片分享与每轮上限 |
 | `src/host-memory.js` | 可用内存检查 | MemAvailable 读取、内存闸门和命令轻重分级 |
 | `src/channels/http/hub-http-server.js` | HTTP 请求分发与安全错误边界 | API/资源路由或 OneBot webhook 限流 |
 | `src/channels/qq/` | 唯一的 QQ / OneBot 消息传输边界 | 解析、校验和归一化 QQ 事件 |

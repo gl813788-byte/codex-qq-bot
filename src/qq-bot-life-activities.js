@@ -22,13 +22,17 @@ const CONTEXT_HOURS = 14;
 
 // The segment whose plan is due now, or null. A plan starts a stable
 // 8-35 minutes into its segment so the Bot does not act on the minute.
+// A planned chat (kind=chat) is not a sub-agent run: it has its own daily
+// cap and is not spaced by the activity gap; the caller routes it to the
+// proactive path (result.chat is true).
 export function selectQqLifeActivityDue(lifeState, {
   now = Date.now(),
   timeZone = "Asia/Shanghai",
   enabled = true,
   dailyLimit = 6,
   minGapMinutes = 60,
-  canDraw = false
+  canDraw = false,
+  chatLimit = 0
 } = {}) {
   if (!enabled) return null;
   const life = normalizeQqBotLifeState(lifeState);
@@ -36,21 +40,30 @@ export function selectQqLifeActivityDue(lifeState, {
   if (!segment || segment.kind === "none" || !segment.plan) return null;
   if (segment.kind === "draw" && !canDraw) return null;
   const ledger = normalizeQqLifeActivityLedger(life.activity, { now, timeZone });
-  if (ledger.runs >= Math.max(0, dailyLimit)) return null;
   if (ledger.doneSegments.includes(segment.start)) return null;
-  const last = Date.parse(ledger.lastAt || "");
-  if (Number.isFinite(last) && now - last < minGapMinutes * 60_000) return null;
+  const chat = segment.kind === "chat";
+  if (chat) {
+    if (!segment.contact || ledger.chats >= Math.max(0, chatLimit)) return null;
+  } else {
+    if (ledger.runs >= Math.max(0, dailyLimit)) return null;
+    const last = Date.parse(ledger.lastAt || "");
+    if (Number.isFinite(last) && now - last < minGapMinutes * 60_000) return null;
+  }
   const minutesIn = minutesSinceSegmentStart(segment, now, timeZone);
   const offset = 8 + Math.floor(stableFraction(`${life.routine.date}:${segment.start}`) * 28);
   if (minutesIn < offset) return null;
-  return { segment, ledger };
+  return { segment, ledger, chat };
 }
 
 export function markQqLifeActivityStarted(lifeState, segment, { now = Date.now(), timeZone = "Asia/Shanghai" } = {}) {
   const life = normalizeQqBotLifeState(lifeState);
   const ledger = normalizeQqLifeActivityLedger(life.activity, { now, timeZone });
-  ledger.runs += 1;
-  ledger.lastAt = new Date(now).toISOString();
+  if (segment?.kind === "chat") {
+    ledger.chats += 1;
+  } else {
+    ledger.runs += 1;
+    ledger.lastAt = new Date(now).toISOString();
+  }
   if (segment?.start && !ledger.doneSegments.includes(segment.start)) ledger.doneSegments.push(segment.start);
   return { ...life, activity: ledger };
 }
@@ -76,7 +89,10 @@ export function consumeQqLifeSocialAllowance(lifeState, kind, { limits = {}, now
 }
 
 const kindGuides = Object.freeze({
+  surf: "像平时上网冲浪一样随手逛：先看看 B站热门（qq_media.bilibili popular），再用原生 Web Search 或 qq_search 看看今天大家在聊什么（热搜、新闻、新番新游戏、有意思的帖子），跟着好奇心点开 2-4 个真的看完；真想看的视频可以用 qq_media.video 点开。记下好玩的发现和你的反应。",
   video: "用 qq_media.bilibili（popular 看热门，或 search 搜你计划里的主题）挑 1-2 个你真感兴趣的，用 qq_media.video 真的看；记下看了什么、哪里好笑/有意思/无聊。",
+  music: "用 qq_media.music(action=search) 找计划里的歌、歌手或风格，挑 1-2 首用 qq_media.music(action=listen, selector=song-N) 真的听；记下歌名、歌手、平台和听感（哪段好听、像什么心情）。",
+  read: "用原生 Web Search 或 qq_search 找计划里想读的东西（一篇长文、科普、网络小说或漫画的介绍和评价、百科词条），真的读完 1-2 个来源，记下读了什么、哪里有意思、你怎么想。",
   browse: "用原生 Web Search 或 qq_search 找你计划里的东西，读 1-3 个真实来源，记下看到了什么、你怎么想。",
   learn: "认真查一个你好奇的问题，读原始资料，弄懂后用自己的话记下来；值得长期记住的事实可以写进 qq_knowledge（标题稳定、写清来源和日期）。",
   qzone: "用 qq_social.act(action=qzone_recent, target=QQ号) 看看下面几位朋友最近的空间动态；真有想说的就挑一条评论（qzone_comment，target=QQ号，value=tid 评论内容），没有就只是看看。",
@@ -107,7 +123,7 @@ export function buildQqLifeActivityTask({
       ? `今天你自己发说说还剩 ${Math.max(0, Number(limits.postsLeft) || 0)} 次、评论还剩 ${Math.max(0, Number(limits.commentsLeft) || 0)} 次；用完就只看不写。评论和说说要像你本人，短、自然、不营销、不刷屏，不写别人的隐私。`
       : "这次不要发说说或评论。",
     experiences.length ? `你今天已经做过的事：\n${experiences.map((item) => `- ${item.summary}`).join("\n")}` : null,
-    "最后在 summary 里用第一人称写一句日记式的话（不超过 40 字，例如“刷到一个讲猫咪迷惑行为的视频，笑死”），report 里写清楚具体看了/读了/做了什么（标题、UP主或来源、链接、你的真实感受），以后跟人聊天时会用到。没做成就如实写没做成。"
+    "最后在 summary 里用第一人称写一句日记式的话（不超过 40 字，例如“刷到一个讲猫咪迷惑行为的视频，笑死”），report 里写清楚具体看了/读了/听了/做了什么（标题、UP主或歌手、来源、链接或 BV 号、你的真实感受），以后跟人聊天或把它分享给朋友时会用到（B站视频凭 BV 号就能发视频卡片）。没做成就如实写没做成。"
   ].filter(Boolean).join("\n");
 }
 
@@ -127,7 +143,14 @@ export function formatQqLifeExperienceDetail(lifeState, { now = Date.now() } = {
   const life = normalizeQqBotLifeState(lifeState);
   const recent = life.experiences.slice(-6);
   if (!recent.length) return "最近还没有记录到真实经历。";
-  return ["最近真实做过的事：", ...recent.map((entry) => `- ${formatAge(now - Date.parse(entry.at))}：${entry.summary}${entry.detail ? `\n  ${entry.detail.slice(0, 400)}` : ""}`)].join("\n");
+  return ["最近真实做过的事：", ...recent.map((entry) => `- ${formatAge(now - Date.parse(entry.at))}：${entry.summary}${entry.detail ? `\n  ${entry.detail.slice(0, 400)}` : ""}${formatSharedVideoIds(entry.detail)}`)].join("\n");
+}
+
+// Bilibili videos named anywhere in the report, so a long report still
+// leaves the ids needed to share a video card later.
+function formatSharedVideoIds(detail) {
+  const ids = [...new Set(String(detail || "").match(/\bBV[0-9A-Za-z]{10}\b/g) || [])].slice(0, 4);
+  return ids.length ? `\n  提到的 B站视频：${ids.join("、")}` : "";
 }
 
 function minutesSinceSegmentStart(segment, now, timeZone) {

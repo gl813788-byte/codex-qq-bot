@@ -281,14 +281,19 @@ export function buildQqNativeToolSpecs({
       description: "React to, recall or send special messages in the original QQ conversation, the way a person does instead of typing.",
       tools: [fn(
         "act",
-        "react: put one emoji reaction on the current triggering group message (target=current) or the message it quotes (target=quoted); good for acknowledging without words, at most 2 per turn, group chats only. recallable: list your own messages from the last two minutes that QQ still lets you recall. recall: recall one of them (index 1 = newest), e.g. a mistaken or regretted message. music: share a NetEase Cloud Music song card found by query (song and singer) or songId, e.g. when recommending a song. dice / rps: throw a QQ dice or rock-paper-scissors (QQ picks the result; you cannot see it). contact: recommend a contact card of someone in this conversation (target=QQ number) or this group's card (target=group). Cards go out immediately, before your text reply; at most 2 per turn. All are real QQ writes; report them only after success. Never follows cross-session focus.",
+        "react: put one emoji reaction on the current triggering group message (target=current) or the message it quotes (target=quoted); good for acknowledging without words, at most 2 per turn, group chats only. recallable: list your own messages from the last two minutes that QQ still lets you recall. recall: recall one of them (index 1 = newest), e.g. a mistaken or regretted message. Cards are how people share things on QQ, so prefer a card over pasting a link: music shares a song card (NetEase, QQ Music, Kugou or Kuwo); best pass selector=song-N from qq_media.music search (the exact version you found, so it is never a different song) or music-N from this conversation, else platform+songId, else query (NetEase search by song and singer). bilibili shares a Bilibili video card: selector=bili-N from qq_media.bilibili, video-N from this conversation, or url=a Bilibili video link or BV id (for example one from your own life experiences in qq_self.state). forward sends a chat-record card (合并转发) of items written by you: a list, a little story, notes or anything long that reads better folded; title names the card. dice / rps: throw a QQ dice or rock-paper-scissors (QQ picks the result; you cannot see it). contact: recommend a contact card of someone in this conversation (target=QQ number) or this group's card (target=group). Cards go out immediately, before your text reply, and already carry the title and link, so do not paste the link again; at most 2 per turn. All are real QQ writes; report them only after success. Never follows cross-session focus.",
         objectSchema({
-          action: { type: "string", enum: ["react", "recallable", "recall", "music", "dice", "rps", "contact"] },
+          action: { type: "string", enum: ["react", "recallable", "recall", "music", "bilibili", "forward", "dice", "rps", "contact"] },
           target: string("react: current (default) or quoted; contact: a QQ number from this conversation, or group."),
           emoji: string("react: a QQ face name such as 赞, 笑哭, doge, 吃瓜, 捂脸, 问号脸, 比心, 庆祝, 汪汪, 喵喵, a single emoji such as 👍 or 😂, or a numeric face id."),
-          index: { type: "integer", minimum: 1, maximum: 10, description: "recall: position in the recallable list, default 1 (newest); music: which search result, default 1." },
-          query: string("music: song name and singer; otherwise empty."),
-          songId: string("music: a NetEase song id when already known; otherwise empty.")
+          index: { type: "integer", minimum: 1, maximum: 10, description: "recall: position in the recallable list, default 1 (newest); music with query: which search result, default 1." },
+          selector: string("music: song-N or music-N; bilibili: bili-N or video-N; otherwise empty."),
+          url: string("bilibili: a Bilibili video link or BV id when there is no selector; otherwise empty."),
+          query: string("music: song name and singer when there is no selector; otherwise empty."),
+          platform: { type: "string", enum: ["netease", "qq", "kugou", "kuwo"], description: "music with songId: the platform, default netease." },
+          songId: string("music: a song id on that platform when already known (QQ Music uses the songmid, Kugou the hash); otherwise empty."),
+          title: string("forward: the card title, within 20 characters; otherwise empty."),
+          items: { type: "array", items: { type: "string" }, maxItems: 12, description: "forward: the messages inside the card, one paragraph each, written by you; otherwise empty." }
         }, ["action"]),
         qqWrite
       )]

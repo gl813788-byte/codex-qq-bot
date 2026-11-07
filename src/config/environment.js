@@ -387,6 +387,7 @@ export function createEnvironmentConfig(env = process.env) {
     lifeActivitiesEnabled: env.CODEX_REMOTE_CONTACT_LIFE_ACTIVITIES !== "0",
     lifeActivityDailyLimit: boundedInteger(env.CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_DAILY_LIMIT, { defaultValue: 5, min: 0, max: 24 }),
     lifeActivityMinGapMinutes: boundedInteger(env.CODEX_REMOTE_CONTACT_LIFE_ACTIVITY_MIN_GAP_MINUTES, { defaultValue: 60, min: 10, max: 720 }),
+    lifeChatsPerDay: boundedInteger(env.CODEX_REMOTE_CONTACT_LIFE_CHATS_PER_DAY, { defaultValue: 2, min: 0, max: 3 }),
     lifeQzonePostsPerDay: boundedInteger(env.CODEX_REMOTE_CONTACT_LIFE_QZONE_POSTS_PER_DAY, { defaultValue: 1, min: 0, max: 10 }),
     lifeQzoneCommentsPerDay: boundedInteger(env.CODEX_REMOTE_CONTACT_LIFE_QZONE_COMMENTS_PER_DAY, { defaultValue: 3, min: 0, max: 30 }),
     socialFriendRequestsPerDay: boundedInteger(env.CODEX_REMOTE_CONTACT_SOCIAL_FRIEND_REQUESTS_PER_DAY, { defaultValue: 3, min: 0, max: 10 }),

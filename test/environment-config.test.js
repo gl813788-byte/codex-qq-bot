@@ -148,3 +148,9 @@ test("agent host capacity gate settings default to auto and stay bounded", () =>
   assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_AGENT_PROCESS_LIMIT: "AUTO" }).agentProcessLimit, "auto");
   assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_AGENT_PROCESS_LIMIT: "many" }).agentProcessLimit, "auto");
 });
+
+test("planned routine chats per day default to two and stay within three", () => {
+  assert.equal(createEnvironmentConfig({}).lifeChatsPerDay, 2);
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_LIFE_CHATS_PER_DAY: "0" }).lifeChatsPerDay, 0);
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_LIFE_CHATS_PER_DAY: "9" }).lifeChatsPerDay, 3);
+});

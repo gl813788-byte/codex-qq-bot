@@ -1481,7 +1481,8 @@ function formatAdaptiveReason(value) {
     reply_queue_pending: "回复队列处理中", reply_generation_active: "正在生成回复", activity_high: "群当前高活跃",
     activity_typical: "群当前一般活跃", activity_low: "群当前低活跃", activity_unknown: "活跃度仍在学习",
     private_too_soon: "距离上次互动太近", private_check_cooldown: "私聊判断冷却中", private_short_candidate: "短期兴趣候选",
-    private_middle_candidate: "中期低概率候选", private_long_candidate: "长期兴趣回升候选"
+    private_middle_candidate: "中期低概率候选", private_long_candidate: "长期兴趣回升候选",
+    routine_offline: "按作息不在手机前"
   };
   const en = {
     learning_sample_low: "learning sample is low", outside_social_hours: "outside allowed hours", no_human_context: "no human context",
@@ -1491,7 +1492,8 @@ function formatAdaptiveReason(value) {
     reply_queue_pending: "reply queue pending", reply_generation_active: "reply generation active", activity_high: "high activity now",
     activity_typical: "typical activity now", activity_low: "low activity now", activity_unknown: "activity still learning",
     private_too_soon: "too soon since the last interaction", private_check_cooldown: "private decision cooldown", private_short_candidate: "short-term candidate",
-    private_middle_candidate: "middle low-probability candidate", private_long_candidate: "long-term rising candidate"
+    private_middle_candidate: "middle low-probability candidate", private_long_candidate: "long-term rising candidate",
+    routine_offline: "away from the phone in the routine"
   };
   return (app.language === "en" ? en : zh)[value] || value || "—";
 }
