@@ -90,7 +90,7 @@
 | `src/qq-inbound-files.js` | QQ 入站文件信任与传输边界 | 提取并脱敏当前/引用文件元数据、分配本轮 selector、构造群聊/私聊 URL 查询，并把有界下载限制在活动任务 input |
 | `src/infrastructure/storage/settings-repository.js` | 原子设置 I/O | 加载或持久化 `data/settings.json`，不把文件系统逻辑塞回组合根 |
 | `src/qq-codex-turn-recovery.js` | 融合 turn 故障隔离 | 识别超过“任务类型 × 思考强度”协议静默窗口的替代 turn，并用原始 prompt 与已接收融合输入重建一次全新线程尝试 |
-| `src/qq-reply-steering.js` | QQ 追问融合调度 | 追问融合方式（默认 `stack`：草稿写完前叠加全部触发消息、不中途引导；`steer`：每条新追问重置的 5 秒静默窗口、优先 steer 活跃 turn、拒绝时替代）、单批快照消费、已完成草稿替换（最多重写 2 轮）、失败保留和活动轮次校验 |
+| `src/qq-reply-steering.js` | QQ 追问融合调度 | 每条新追问重置的 5 秒静默窗口、单批快照消费、优先 steer 活跃 turn、拒绝时替代、已完成草稿替换、失败保留和活动轮次校验 |
 | `src/qq-context-relevance.js` | 远聊天语义评分 | 缓存本地语义画像并为较早的人类/Bot 聊天片段计算相关性 |
 | `src/qq-reply-targeting.js` | 融合回复寻址策略 | 有界参与者候选、模型结构化引用/艾特/普通回复目标和安全的普通回复回退 |
 | `src/qq-delivery-receipt.js` | QQ 投递事实边界 | 成功/失败气泡回执和下一轮可见的有界失败上下文 |

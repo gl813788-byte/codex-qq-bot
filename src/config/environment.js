@@ -114,14 +114,6 @@ export function createEnvironmentConfig(env = process.env) {
       ["mcp", "dynamic"],
       "mcp"
     ),
-    // "stack" holds Bot-triggering messages that arrive during a reply until
-    // its draft is complete, then rewrites it once with all of them; "steer"
-    // steers each five-second quiet batch into the running turn instead.
-    qqFollowUpMode: enumValue(
-      String(env.CODEX_REMOTE_CONTACT_QQ_FOLLOW_UP_MODE || "").trim().toLowerCase(),
-      ["stack", "steer"],
-      "stack"
-    ),
     // The QQ bot is also a working Agent, so Codex keeps every native feature
     // and its own base instructions unless a deployment opts into trimming.
     agentLeanContext: env.CODEX_REMOTE_CONTACT_AGENT_LEAN_CONTEXT === "1",

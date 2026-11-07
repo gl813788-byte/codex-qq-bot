@@ -3,16 +3,13 @@ import test from "node:test";
 import {
   createQqReplySteeringCoordinator,
   fuseCompletedQqReplyFollowUps,
-  normalizeQqFollowUpMode,
-  QQ_FOLLOW_UP_MAX_REWRITE_ROUNDS,
   QQ_FOLLOW_UP_WINDOW_MS
 } from "../src/qq-reply-steering.js";
 
 test("uses a resettable five-second follow-up quiet window without a fixed maximum", () => {
-  const coordinator = createQqReplySteeringCoordinator({ mode: "steer" });
+  const coordinator = createQqReplySteeringCoordinator();
   assert.equal(QQ_FOLLOW_UP_WINDOW_MS, 5_000);
   assert.deepEqual(coordinator.snapshot(), {
-    mode: "steer",
     scheduled: 0,
     closed: false,
     delayMs: 5_000,
@@ -38,7 +35,6 @@ test("coalesces pending entries into one replacement and consumes only the accep
     }
   };
   const coordinator = createQqReplySteeringCoordinator({
-    mode: "steer",
     delayMs: 0,
     getActiveGeneration: () => generation,
     getPendingEntries: (scopeId) => pending[scopeId] || [],
@@ -74,7 +70,6 @@ test("keeps pending entries when the active turn cannot restart", async () => {
     }
   };
   const coordinator = createQqReplySteeringCoordinator({
-    mode: "steer",
     delayMs: 0,
     getActiveGeneration: () => generation,
     getPendingEntries: (scopeId) => pending[scopeId] || [],
@@ -111,7 +106,6 @@ test("prefers steering new messages into the active turn without interrupting it
     }
   };
   const coordinator = createQqReplySteeringCoordinator({
-    mode: "steer",
     delayMs: 0,
     getActiveGeneration: () => generation,
     getPendingEntries: (scopeId) => pending[scopeId] || [],
@@ -152,7 +146,6 @@ test("falls back to a replacement turn when active steering is rejected", async 
     }
   };
   const coordinator = createQqReplySteeringCoordinator({
-    mode: "steer",
     delayMs: 0,
     getActiveGeneration: () => generation,
     getPendingEntries: (scopeId) => pending[scopeId] || [],
@@ -195,7 +188,6 @@ test("cuts the active turn directly after the quiet window and starts a replacem
     }
   };
   const coordinator = createQqReplySteeringCoordinator({
-    mode: "steer",
     delayMs: 0,
     getActiveGeneration: () => generation,
     getPendingEntries: (scopeId) => pending[scopeId] || [],
@@ -232,7 +224,6 @@ test("resets the fusion window so bursty triggers reach the model as one replace
     }
   };
   const coordinator = createQqReplySteeringCoordinator({
-    mode: "steer",
     delayMs: 30,
     maxDelayMs: 100,
     getActiveGeneration: () => generation,
@@ -263,7 +254,6 @@ test("resets the fusion window so bursty triggers reach the model as one replace
 test("waits for the resettable fusion window when scheduled work is explicitly drained", async () => {
   const pending = { group: [{ id: "one", text: "first" }] };
   const coordinator = createQqReplySteeringCoordinator({
-    mode: "steer",
     delayMs: 25,
     getActiveGeneration: () => null,
     getPendingEntries: (scopeId) => pending[scopeId] || []
@@ -285,7 +275,6 @@ test("waits for the resettable fusion window when scheduled work is explicitly d
 test("hands a pending quiet-window batch to completed-reply fusion before send", async () => {
   const pending = { group: [{ id: "one", text: "first" }] };
   const coordinator = createQqReplySteeringCoordinator({
-    mode: "steer",
     delayMs: 5_000,
     getActiveGeneration: () => null,
     getPendingEntries: (scopeId) => pending[scopeId] || []
@@ -367,81 +356,39 @@ test("restores a completed-reply fusion batch when the replacement turn fails", 
   assert.deepEqual(pending.group, [{ id: "one", text: "follow-up" }]);
 });
 
-test("stack mode never steers or interrupts the running reply; follow-ups wait for its draft", async () => {
-  const pending = { group: [{ id: "one", text: "first" }, { id: "two", text: "second" }] };
-  const calls = [];
-  const generation = {
-    id: "generation-1",
-    steer: async (input) => calls.push(["steer", input]),
-    restart: async (input) => calls.push(["restart", input])
-  };
-  const coordinator = createQqReplySteeringCoordinator({
-    delayMs: 0,
-    getActiveGeneration: () => generation,
-    getPendingEntries: (scopeId) => pending[scopeId] || [],
-    buildSteeringInput: (entries) => entries.map((entry) => entry.text).join("\n"),
-    consumeEntries: () => assert.fail("stacked entries must not be consumed by steering")
-  });
-  assert.equal(coordinator.snapshot().mode, "stack");
-  const result = await coordinator.schedule("group");
-  assert.deepEqual(result, { ok: false, scopeId: "group", reason: "stacked", consumedCount: 0 });
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.deepEqual(calls, []);
-  assert.equal(coordinator.snapshot().scheduled, 0);
-  assert.equal(pending.group.length, 2);
-
-  // The send boundary then rewrites the finished draft once with the whole batch.
-  const rewrites = [];
-  const fused = await fuseCompletedQqReplyFollowUps({
-    scopeId: "group",
-    initialReply: "draft",
-    handoff: (key) => coordinator.handoff(key),
-    takePendingEntries: (scopeId) => {
-      const entries = pending[scopeId];
-      pending[scopeId] = [];
-      return entries;
-    },
-    replaceReply: async ({ draft, entries }) => {
-      rewrites.push({ draft, texts: entries.map((entry) => entry.text) });
-      return "one answer for everything";
-    }
-  });
-  assert.deepEqual(rewrites, [{ draft: "draft", texts: ["first", "second"] }]);
-  assert.deepEqual(fused, { reply: "one answer for everything", fusedCount: 2, fusionRounds: 1 });
-  coordinator.close();
-});
-
-test("follow-up mode falls back to stacking for unknown values", () => {
-  assert.equal(normalizeQqFollowUpMode("steer"), "steer");
-  assert.equal(normalizeQqFollowUpMode(" STACK "), "stack");
-  assert.equal(normalizeQqFollowUpMode("whenever"), "stack");
-  assert.equal(normalizeQqFollowUpMode(undefined), "stack");
-});
-
-test("a busy scope still gets its reply: rewrites stop after the round limit and the rest waits", async () => {
-  assert.equal(QQ_FOLLOW_UP_MAX_REWRITE_ROUNDS, 2);
-  const pending = { group: [{ id: "one" }] };
-  let next = 2;
-  const rounds = [];
-  const result = await fuseCompletedQqReplyFollowUps({
-    scopeId: "group",
-    initialReply: "draft",
-    takePendingEntries: (scopeId) => {
-      const entries = pending[scopeId];
-      pending[scopeId] = [];
-      return entries;
-    },
-    replaceReply: async ({ fusionRound }) => {
-      rounds.push(fusionRound);
-      // Someone always asks something new while the Bot is rewriting.
-      pending.group.push({ id: `msg-${next++}` });
-      return `rewrite ${fusionRound}`;
-    }
-  });
-  assert.deepEqual(rounds, [1, 2]);
-  assert.deepEqual(result, { reply: "rewrite 2", fusedCount: 2, fusionRounds: 2 });
-  // The newest follow-up stays pending for the scope's next reply.
-  assert.deepEqual(pending.group, [{ id: "msg-3" }]);
+test("tells the running turn how many messages each steered or replacement batch carries", async () => {
+  for (const steerFails of [false, true]) {
+    const pending = { group: [{ id: "one", text: "first" }, { id: "two", text: "second" }, { id: "three", text: "third" }] };
+    const calls = [];
+    const generation = {
+      id: "generation-1",
+      steer: async (input, workload) => {
+        calls.push(["steer", workload]);
+        if (steerFails) throw Object.assign(new Error("not steerable"), { code: "CODEX_TURN_NOT_ACTIVE" });
+        return { threadId: "thread-1", turnId: "turn-1" };
+      },
+      restart: async (input, workload) => {
+        calls.push(["restart", workload]);
+        return { threadId: "thread-1", turnId: "turn-2" };
+      }
+    };
+    const coordinator = createQqReplySteeringCoordinator({
+      delayMs: 0,
+      getActiveGeneration: () => generation,
+      getPendingEntries: (scopeId) => pending[scopeId] || [],
+      buildSteeringInput: (entries) => entries.map((entry) => entry.text).join("\n"),
+      consumeEntries: (scopeId, entries) => {
+        pending[scopeId] = [];
+        return entries.length;
+      }
+    });
+    const result = await coordinator.schedule("group");
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls, steerFails
+      ? [["steer", { messageCount: 3 }], ["restart", { messageCount: 3 }]]
+      : [["steer", { messageCount: 3 }]]);
+    coordinator.close();
+  }
 });
 
 async function waitFor(predicate, timeoutMs = 1_000) {

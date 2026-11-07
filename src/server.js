@@ -664,7 +664,6 @@ const {
   agentToolTransport,
   agentLeanContext,
   qqBaseInstructionsMode,
-  qqFollowUpMode,
   claudeCliPath,
   claudeModel,
   claudeReasoningEffort,
@@ -1183,7 +1182,6 @@ const backgroundTasks = new Set();
 const shutdownController = new AbortController();
 const qqReplyScheduler = createScopedReplyScheduler();
 const qqReplySteering = createQqReplySteeringCoordinator({
-  mode: qqFollowUpMode,
   delayMs: QQ_FOLLOW_UP_WINDOW_MS,
   maxDelayMs: null,
   getActiveGeneration: getSteerableQqGeneration,
@@ -1220,8 +1218,7 @@ const qqOutgoingMentionResolver = createQqOutgoingMentionResolver({
 });
 const codexRunLimiter = createConcurrencyLimiter(codexMaxConcurrency, { maxPending: codexMaxPending });
 const oneBotWebhookLimiter = createConcurrencyLimiter(oneBotMaxConcurrency, { maxPending: oneBotMaxPending });
-// Stacked follow-ups can span a whole reply, so the batch holds more of them.
-const qqPendingReplyLimit = 32;
+  const qqPendingReplyLimit = 16;
 const qqPendingReplyMaxTextLength = 1200;
 const qqStateScopeLimit = Math.max(50, Math.min(5_000, Number(process.env.CODEX_REMOTE_CONTACT_QQ_SCOPE_LIMIT || 500) || 500));
 const qqPersonaMemberLimit = Math.max(50, Math.min(2_000, Number(process.env.CODEX_REMOTE_CONTACT_QQ_PERSONA_MEMBER_LIMIT || 500) || 500));
@@ -2082,8 +2079,7 @@ function queueQqPendingReplyEvent(event, source, decision) {
     triggerKind: getQqFusionTriggerKind({ event, decision }),
     decisionReason: decision?.reason || null,
     triggerMessageCount: pending.events.length,
-    fusionMode: qqFollowUpMode,
-    fusionDelayMs: qqFollowUpMode === "steer" ? QQ_FOLLOW_UP_WINDOW_MS : null,
+    fusionDelayMs: QQ_FOLLOW_UP_WINDOW_MS,
     fusionMaxDelayMs: null
   }, "qq", qqLogContext(event));
   trackBackgroundTask(qqReplySteering.schedule(scopeId), () => null);
@@ -2276,9 +2272,7 @@ async function buildQqPendingSteeringInput(entries, generation) {
     type: "text",
     text: [
       `你处理当前 QQ 回复期间又收到了 ${aggregate.queuedMessageCount || entries.length} 条新消息。Hub 已沿用连续消息合并规则，把相邻重复内容压成一条并标出总次数。`,
-      qqFollowUpMode === "stack"
-        ? "这些消息是在上一版回答生成期间陆续到达的，Hub 把它们全部攒成了这一批，没有中途打断你。把它们与上一版的工作融合成一份统一回复，不要先发过时答案，也不要逐条机械回复“消息一/消息二”。"
-        : "5 秒静默窗口已经结束。Hub 会优先把本批新消息引导进当前活跃任务；若活跃 turn 已不接受引导，才会中断旧 turn 并开启替代轮次。无论采用哪种方式，都要把追加消息与正在进行的多轮任务融合成一份统一回复，不要先发过时答案，也不要逐条机械回复“消息一/消息二”。",
+      "5 秒静默窗口已经结束。Hub 会优先把本批新消息引导进当前活跃任务；若活跃 turn 已不接受引导，才会中断旧 turn 并开启替代轮次。无论采用哪种方式，都要把追加消息与正在进行的多轮任务融合成一份统一回复，不要先发过时答案，也不要逐条机械回复“消息一/消息二”。",
       replyTargetInstruction || null,
       semanticRecall.context || null,
       semanticRecall.context ? "" : null,
@@ -11244,7 +11238,8 @@ async function buildModelReply(event, { replyScope = null } = {}) {
         })
         : "";
   // Every QQ message this reply must answer (the triggering batch plus each
-  // stacked follow-up fused before send) widens the turn's protocol budget.
+  // follow-up fused before send) widens the turn's protocol budget; follow-ups
+  // steered into a running turn widen it inside the engine adapter.
   let replyWorkloadMessageCount = Math.max(1, Number(event.queuedMessageCount) || 1);
   const runReplyPrompt = async (prompt, resumePrompt = prompt) => {
     assertQqReplyScopeActive(replyScope);
@@ -11609,9 +11604,11 @@ async function buildModelReply(event, { replyScope = null } = {}) {
 
   try {
     let baseReply = await runBuiltReplyPrompt(memoryContext, 0);
-    // Stacked follow-ups rewrite the finished draft at most
-    // QQ_FOLLOW_UP_MAX_REWRITE_ROUNDS times; later ones start the next reply.
-    baseReply = (await fuseQueuedFollowUpsBeforeSend(baseReply)).reply;
+    let fusion = await fuseQueuedFollowUpsBeforeSend(baseReply);
+    baseReply = fusion.reply;
+    if (fusion.fusedCount > 0) {
+      baseReply = (await fuseQueuedFollowUpsBeforeSend(baseReply)).reply;
+    }
     assertQqReplyScopeActive(replyScope);
     if (isQqSilentReply(baseReply)) {
       event.qqModelDeclinedReply = true;
