@@ -78,3 +78,13 @@ test("the image directory stays in the turn prompt and drawing follows the engin
   const drawing = buildQqFileAgentTurn({ isOwner: true, projectDir: "/project", taskWorkspace });
   assert.match(drawing.developerInstructions, /交给原生图像能力/);
 });
+
+test("image tasks hand drawn pictures to the Hub by their saved path", () => {
+  const publicTurn = buildQqFileAgentTurn({ isOwner: false, taskWorkspace, isImageGeneration: true });
+  assert.match(publicTurn.developerInstructions, /保存路径原样填进 attachments/);
+  assert.match(publicTurn.developerInstructions, /不要把图片编码成 base64、HTML 或其他文本写进文件/);
+  assert.match(publicTurn.prompt, /直接把生图保存路径填进 attachments/);
+  const noDrawing = buildQqFileAgentTurn({ isOwner: false, taskWorkspace, canGenerateImages: false });
+  assert.doesNotMatch(noDrawing.developerInstructions, /保存路径/);
+  assert.doesNotMatch(noDrawing.prompt, /生图/);
+});

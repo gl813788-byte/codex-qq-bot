@@ -209,6 +209,27 @@ test("drawing guidance follows the engine's image-generation capability", () => 
   assert.match(noDrawing, /没有生图能力，被要求画图时如实说画不了/);
 });
 
+// Production failure (2026-11-07/08): an ordinary member's drawing turn could
+// not copy the picture out of generated_images (the sandboxed shell failed),
+// so the model wrote the picture's base64 through apply_patch; each attempt
+// echoed megabytes of non-image text and the reply died with
+// CODEX_APP_SERVER_OUTPUT_LIMIT. Drawn pictures are delivered by their saved
+// path, which the Hub imports itself.
+test("drawn pictures are delivered by their saved path, never copied or encoded as text", () => {
+  const drawing = formatQqMainModelInstructions({ canGenerateImages: true });
+  assert.match(drawing, /保存路径原样填进 attachments/);
+  assert.match(drawing, /不要用 Shell、apply_patch、脚本或其他工具去复制、转格式/);
+  assert.match(drawing, /不要把图片编码成 base64、HTML 或其他文本写进文件/);
+  assert.match(drawing, /除本轮原生生图的保存路径外，不得返回工作区外路径/);
+  const noDrawing = formatQqMainModelInstructions({ canGenerateImages: false });
+  assert.doesNotMatch(noDrawing, /保存路径|apply_patch/);
+  assert.match(noDrawing, /不得返回工作区外路径/);
+
+  const workspace = { root: "/tasks/a", inputDir: "/tasks/a/input", outputDir: "/tasks/a/output" };
+  assert.match(formatQqTaskWorkspaceContext(workspace, { canGenerateImages: true }), /原生生图画好的图不要复制或转码，直接把生图保存路径填进 attachments/);
+  assert.doesNotMatch(formatQqTaskWorkspaceContext(workspace), /生图/);
+});
+
 test("humanlike chat rules leave room for structured task deliverables", () => {
   const prompt = formatQqMainModelInstructions();
   const rules = prompt.slice(prompt.indexOf("【活人感】"));

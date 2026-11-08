@@ -240,6 +240,16 @@ refactor with a behavior change.
   Never widen it to text or unlisted pictures. Before this, one drawn picture
   failed chat replies with `CODEX_APP_SERVER_OUTPUT_LIMIT`. A failed reply
   must not promise an automatic retry that does not exist.
+- Drawn pictures are delivered by their saved path: prompts
+  (`QQ_GENERATED_IMAGE_DELIVERY_RULE`) tell the model to list the
+  `generated_images` path in `attachments`, which the Hub validates and
+  imports, and never to copy, convert or encode the picture as text. On this
+  PRoot host the non-owner sandbox fails every shell command (bubblewrap:
+  "unsupported host mount at /tmp/codex-daemon-0/…") and file edits, so
+  models used to retry writing the picture's base64 through `apply_patch`;
+  each `fileChange` echo carries the whole text twice and failed the reply
+  with `CODEX_APP_SERVER_OUTPUT_LIMIT` (2026-11-07/08). Never widen the image
+  budget to text to hide that.
 - A "stack until the draft is complete" follow-up mode was tried on
   2026-11-07 and reverted the same day at the user's request: in busy groups
   the finished draft kept being rewritten and replies were delayed for
