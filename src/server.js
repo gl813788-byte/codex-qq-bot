@@ -11331,7 +11331,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       persistentResume
         ? "你正在继续同一个 QQ 长期会话。沿用线程中已经建立的身份、关系、稳定规则和前文，不要要求重新介绍背景。"
         : "下面是本轮由 Hub 归一化并按权限裁剪后的 QQ 上下文。",
-      formatQqTaskWorkspaceContext(taskWorkspace),
+      formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages: qqAgentCanDraw }),
       persistentResume
         ? "本轮仍使用与临时会话完全相同的融合式追问规则：所有触发 Bot 回复的新消息作为一个批次处理，最终只输出一份统一回复。"
         : null,

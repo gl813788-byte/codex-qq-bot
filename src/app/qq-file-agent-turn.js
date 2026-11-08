@@ -1,4 +1,4 @@
-import { formatQqTaskWorkspaceContext } from "../qq-main-prompt.js";
+import { formatQqTaskWorkspaceContext, QQ_GENERATED_IMAGE_DELIVERY_RULE } from "../qq-main-prompt.js";
 
 export function buildQqFileAgentTurn({
   isOwner,
@@ -46,11 +46,12 @@ export function buildQqFileAgentTurn({
     canGenerateImages
       ? "需要修改用户提供的图片时，把收到的本地图片作为参考输入交给原生图像能力；接口失败就如实说明，不能假装成功。"
       : "这台机器没有原生生图/改图能力：被要求生成或修改图片时如实说明做不到，不能假装成功；本轮有 Shell 时可以做格式转换、裁剪等确定性处理。",
+    canGenerateImages ? QQ_GENERATED_IMAGE_DELIVERY_RULE : null,
     "本段对话含图时，可从本轮上下文里的图片目录选择原图，用 qq_context.images 的 inspect 动作重新获得视觉输入；不要把配文或旧回答当作已经看过图片。需要修改时可用本轮输入目录中的已下载图片。",
     "最终只提交输出 Schema 要求的 JSON 对象。"
   ].filter(Boolean).join("\n");
   const prompt = [
-    formatQqTaskWorkspaceContext(taskWorkspace),
+    formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages }),
     privileged ? `当前项目：${projectDir}` : null,
     quotedContext || null,
     imagePaths.length ? `收到的 QQ 图片：\n${imagePaths.join("\n")}` : null,
