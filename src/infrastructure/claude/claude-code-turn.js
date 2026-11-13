@@ -22,6 +22,8 @@ import {
   toMcpToolResult
 } from "../agent/qq-mcp-tools.js";
 
+import { QQ_CHAT_SEND_NAMESPACE, QQ_CHAT_SEND_TOOL } from "../codex/qq-native-tools.js";
+
 export { flattenQqDynamicTools, toMcpToolResult };
 
 // Claude Code adapter with the same contract as runCodexAppServerTurn: one
@@ -44,14 +46,35 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const claudeEfforts = new Set(["low", "medium", "high", "xhigh", "max"]);
 const errors = createAgentTurnErrors("Claude Code");
 
-// Text Claude writes right before a tool call becomes QQ-visible progress, the
-// same way Codex commentary does, so the adapter tells the model about it.
-const CLAUDE_ADAPTER_INSTRUCTIONS = [
-  "运行环境说明：你通过 Claude Code 为 QQ Bot 执行本轮任务。",
-  "Hub 提供的 QQ 工具以 mcp__qq__<命名空间>__<工具名> 的 MCP 工具出现，默认只列名字；需要时先用 ToolSearch 按关键词或 select:<完整名> 加载定义，再按工具说明调用。",
-  "在工具调用之前写出的可见文字会作为任务进度发给 QQ 用户；不要写过渡性旁白，只在长任务取得阶段性结果时写一句自然中文进度。",
-  "最终答案必须通过结构化输出提交，不要在结构化输出之外重复最终回复。"
-].join("\n");
+const QQ_CHAT_SEND_MCP_TOOL = `${QQ_CHAT_SEND_NAMESPACE}__${QQ_CHAT_SEND_TOOL}`;
+const QQ_MCP_TOOL_TIMEOUT_MS = 15 * 60_000;
+
+// How this turn reaches QQ, told to the model in the engine's own words:
+// - with qq_chat.send, only that tool speaks; text between tool calls is
+//   private narration and the structured output is private state;
+// - other tool turns return one final reply, and text written right before a
+//   tool call becomes QQ-visible progress, the way Codex commentary does;
+// - tool-free background turns only submit their structured output.
+export function formatClaudeAdapterInstructions({ toolNames = [], structuredOutput = true } = {}) {
+  const names = new Set(toolNames.map((name) => String(name || "")));
+  const speaksThroughTool = names.has(QQ_CHAT_SEND_MCP_TOOL);
+  return [
+    "运行环境说明：你通过 Claude Code 为 QQ Bot 执行本轮任务。",
+    names.size
+      ? "Hub 提供的 QQ 工具以 mcp__qq__<命名空间>__<工具名> 的 MCP 工具出现，默认只列名字；需要时先用 ToolSearch 按关键词或 select:<完整名> 加载定义，再按工具说明调用。"
+      : null,
+    speaksThroughTool
+      ? `对 QQ 说话只能调用 mcp__${MCP_SERVER_NAME}__${QQ_CHAT_SEND_MCP_TOOL}（已加载，可直接调用）：它发出的才会被看到。工具调用之间写的文字不会发给任何人，结构化输出也只是私有记录。`
+      : names.size
+        ? "在工具调用之前写出的可见文字会作为任务进度发给 QQ 用户；不要写过渡性旁白，只在长任务取得阶段性结果时写一句自然中文进度。"
+        : null,
+    structuredOutput
+      ? speaksThroughTool
+        ? "说完、做完后通过结构化输出提交本轮的私有状态，结束本轮。"
+        : "最终答案必须通过结构化输出提交，不要在结构化输出之外重复最终回复。"
+      : null
+  ].filter(Boolean).join("\n");
+}
 
 export function toClaudeThreadId(sessionId) {
   return sessionId ? `${THREAD_ID_PREFIX}${sessionId}` : null;
@@ -206,6 +229,7 @@ function runClaudeCodeTurnOnce({
     const pendingInputIds = new Set();
     const pendingControls = new Map();
     const completedItems = [];
+    const pendingToolCalls = new Map();
     let workDir = null;
     let bridge = null;
     let child = null;
@@ -332,10 +356,32 @@ function runClaudeCodeTurnOnce({
             continue;
           }
           flushCommentary();
-          const item = { type: "claudeToolCall", tool: block.name, arguments: block.input ?? null };
-          completedItems.push(item);
-          notifyObserver(onItem, { method: "item/completed", threadId, turnId, item });
+          const item = { type: "claudeToolCall", id: block.id || null, tool: block.name, arguments: block.input ?? null };
+          if (block.id) pendingToolCalls.set(block.id, { item, startedAt: Date.now() });
+          notifyObserver(onItem, { method: "item/started", threadId, turnId, item });
+          if (!block.id) {
+            completedItems.push(item);
+            notifyObserver(onItem, { method: "item/completed", threadId, turnId, item });
+          }
         }
+      }
+    };
+
+    // A tool call completes when its tool_result comes back, so the item
+    // carries whether it worked and how long it took.
+    const handleToolResults = (message) => {
+      for (const block of Array.isArray(message.message?.content) ? message.message.content : []) {
+        if (block?.type !== "tool_result" || !pendingToolCalls.has(block.tool_use_id)) continue;
+        const pending = pendingToolCalls.get(block.tool_use_id);
+        pendingToolCalls.delete(block.tool_use_id);
+        const item = {
+          ...pending.item,
+          ok: block.is_error !== true,
+          durationMs: Math.max(0, Date.now() - pending.startedAt),
+          ...(block.is_error === true ? { errorText: toolResultText(block.content).slice(0, 300) } : {})
+        };
+        completedItems.push(item);
+        notifyObserver(onItem, { method: "item/completed", threadId, turnId, item });
       }
     };
 
@@ -388,6 +434,7 @@ function runClaudeCodeTurnOnce({
 
     const handleProtocolMessage = (message) => {
       notifyObserver(onNotification, message);
+      if (message?.type === "user" && pendingToolCalls.size > 0) handleToolResults(message);
       if (message?.type === "user" && message.isReplay && message.uuid) {
         pendingInputIds.delete(message.uuid);
         return;
@@ -489,7 +536,7 @@ function runClaudeCodeTurnOnce({
       const systemPrompt = [
         baseInstructions ? String(baseInstructions) : null,
         developerInstructions ? String(developerInstructions) : null,
-        CLAUDE_ADAPTER_INSTRUCTIONS
+        formatClaudeAdapterInstructions({ toolNames: tools.map((tool) => tool.name), structuredOutput: Boolean(outputSchema) })
       ].filter(Boolean).join("\n\n");
       const systemPromptPath = join(workDir, "system-prompt.md");
       writeFileSync(systemPromptPath, systemPrompt, { mode: 0o600 });
@@ -512,7 +559,11 @@ function runClaudeCodeTurnOnce({
         resume: resumed,
         ephemeral
       });
-      const childEnv = tools.length ? { ...env, ENABLE_TOOL_SEARCH: "true" } : env;
+      // Slow QQ tools (watching a video, a Codex drawing that waits its turn)
+      // are bounded by the Hub and the turn deadline, not by Claude's MCP client.
+      const childEnv = tools.length
+        ? { ...env, ENABLE_TOOL_SEARCH: "true", MCP_TOOL_TIMEOUT: env?.MCP_TOOL_TIMEOUT || String(QQ_MCP_TOOL_TIMEOUT_MS) }
+        : env;
       child = spawnProcess(claudePath, args, { cwd, env: childEnv, stdio: ["pipe", "pipe", "pipe"] });
       supervisor = superviseAgentChild(child, {
         maxStderrBytes,
@@ -593,4 +644,10 @@ export function sniffImageMediaType(data) {
   if (data.subarray(0, 4).toString("latin1") === "GIF8") return "image/gif";
   if (data.subarray(0, 4).toString("latin1") === "RIFF" && data.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
   return null;
+}
+
+function toolResultText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((part) => (part?.type === "text" ? String(part.text || "") : "")).filter(Boolean).join("\n");
 }

@@ -2083,7 +2083,16 @@ function renderLogFacts(entry) {
     const who = speaker ? valueOf(speaker) : String(entry.details?.senderId || "");
     chips.push(`<span class="log-fact is-speech">${who ? `<b>${escapeHtml(who)}${english ? ":" : "："}</b>` : ""}${escapeHtml(valueOf(said))}</span>`);
   }
+  // What the Bot did with a tool comes first, with its result after an arrow.
+  const activity = highlights.find((item) => item.key === "activity");
+  const activityResult = highlights.find((item) => item.key === "activityResult");
+  if (activity) {
+    const result = activityResult ? valueOf(activityResult) : "";
+    const failed = /失败|没发出|被拒绝|fail|refus/i.test(result) || entry.level === "warn" || entry.level === "error";
+    chips.push(`<span class="log-fact is-activity${failed ? " is-failed" : ""}"><b>▶</b>${escapeHtml(valueOf(activity))}${result ? `<span class="log-activity-result">→ ${escapeHtml(result)}</span>` : ""}</span>`);
+  }
   for (const item of highlights) {
+    if (item.key === "activity" || item.key === "activityResult") continue;
     if (said && (item.key === "text" || item.key === "senderName" || (!speaker && item.key === "senderId"))) continue;
     const label = english ? item.key : item.label;
     chips.push(`<span class="log-fact ${logFactClass(item)}"><b>${escapeHtml(label)}</b>${escapeHtml(valueOf(item))}</span>`);

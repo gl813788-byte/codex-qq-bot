@@ -284,3 +284,20 @@ test("a turn that speaks through qq_chat.send is told its final output is never 
   assert.match(guide, /qq_chat\.send：说话用的工具/);
   assert.doesNotMatch(formatQqMainToolGuide({}), /qq_chat/);
 });
+
+test("an engine that draws through Codex is told to use qq_draw.image instead of native drawing", () => {
+  const text = formatQqMainModelInstructions({ toolsEnabled: true, canGenerateImages: true, drawsWithTool: true, replyDelivery: "tool" });
+  assert.match(text, /qq_draw\.image/);
+  assert.match(text, /画图就用 qq_draw\.image 画出来/);
+  assert.doesNotMatch(text, /原生生图画好的图不用自己搬|画图就用原生生图画出来/);
+  const native = formatQqMainModelInstructions({ toolsEnabled: true, canGenerateImages: true });
+  assert.match(native, /画图就用原生生图画出来/);
+  assert.doesNotMatch(native, /qq_draw/);
+  const none = formatQqMainModelInstructions({ toolsEnabled: true, canGenerateImages: false });
+  assert.match(none, /没有生图能力/);
+  const workspace = { root: "/w", inputDir: "/w/input", outputDir: "/w/output" };
+  assert.match(formatQqTaskWorkspaceContext(workspace, { canGenerateImages: true, drawsWithTool: true }), /qq_draw\.image 画好的图已经在输出目录里/);
+  assert.doesNotMatch(formatQqTaskWorkspaceContext(workspace, { canGenerateImages: true, drawsWithTool: true }), /原生生图/);
+  assert.match(formatQqMainToolGuide({ drawsWithTool: true }), /qq_draw\.image：画图、改图/);
+  assert.doesNotMatch(formatQqMainToolGuide({}), /qq_draw/);
+});

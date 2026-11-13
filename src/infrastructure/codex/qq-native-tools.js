@@ -1,4 +1,5 @@
 import { parseQqManualAiTaskCommand } from "../../qq-manual-ai-task.js";
+import { describeQqToolActivity } from "../agent/agent-tool-activity.js";
 
 const objectSchema = (properties, required = Object.keys(properties)) => ({
   type: "object",
@@ -27,6 +28,13 @@ const fn = (name, description, inputSchema, annotations, extra = {}) => ({ type:
 export const QQ_CHAT_SEND_NAMESPACE = "qq_chat";
 export const QQ_CHAT_SEND_TOOL = "send";
 export const QQ_CHAT_SEND_MAX_BUBBLES = 12;
+
+export const QQ_DRAW_NAMESPACE = "qq_draw";
+export const QQ_DRAW_TOOL = "image";
+
+export function isQqDrawCall(call = {}) {
+  return call?.namespace === QQ_DRAW_NAMESPACE && call?.tool === QQ_DRAW_TOOL;
+}
 
 export function isQqChatSendCall(call = {}) {
   return call?.namespace === QQ_CHAT_SEND_NAMESPACE && call?.tool === QQ_CHAT_SEND_TOOL;
@@ -97,6 +105,7 @@ export function buildQqNativeToolSpecs({
   canSearchImages = false,
   canUseSubagents = false,
   canSendMessages = false,
+  canDraw = false,
   privateChat = false
 } = {}) {
   if (!toolsEnabled) return [];
@@ -377,6 +386,25 @@ export function buildQqNativeToolSpecs({
         qqWrite
       )]
     },
+    ...(canDraw ? [{
+      type: "namespace",
+      name: QQ_DRAW_NAMESPACE,
+      description: "Draw or edit pictures (this engine cannot draw by itself; Codex draws for it).",
+      tools: [fn(
+        QQ_DRAW_TOOL,
+        "Draw a picture, or edit/restyle reference pictures, with Codex's image generation, and save it in this turn's task output directory. Use it whenever someone wants a picture made or changed, or you want to draw one yourself. Write prompt as a complete visual description (subject, style, composition, colours, mood, any text in the picture). A drawing takes about one to two minutes, so in chat say you are on it first. The result returns the saved path and shows you the picture: check it, then send it by putting that path in attachments (kind image); never claim a picture is done before this tool succeeds. At most 2 per turn, one drawing at a time on this machine.",
+        objectSchema({
+          prompt: string("The full visual description of the picture to draw, or of the change to make to the references."),
+          references: {
+            type: "array",
+            maxItems: 3,
+            items: { type: "string" },
+            description: "Optional absolute paths of reference pictures already in this turn's task input or output directory (for example from qq_context.images use); empty for a new picture."
+          }
+        }, ["prompt"]),
+        localWrite
+      )]
+    }] : []),
     ...(canUseSubagents ? [{
       type: "namespace",
       name: "qq_agent",
@@ -516,6 +544,7 @@ export function createQqNativeToolDispatcher({
         namespace: String(call.namespace || ""),
         tool: String(call.tool || ""),
         toolAction: String(call.arguments?.action || "") || null,
+        activity: describeQqToolActivity(call, { ok: false, error: result.error }),
         callId: callId || null,
         toolRound: callCount,
         durationMs: 0,
@@ -538,6 +567,7 @@ export function createQqNativeToolDispatcher({
       || (call.namespace === "qq_knowledge" && call.tool === "image")
       || (call.namespace === "qq_search" && call.tool === "images")
       || (call.namespace === "qq_sticker" && call.tool === "manage")
+      || isQqDrawCall(call)
       || call.namespace === "qq_media";
     // Reactions, recalls, profile lookups and the Bot's own state always
     // describe the original conversation, never a cross-session focus.
@@ -599,6 +629,8 @@ export function createQqNativeToolDispatcher({
         namespace: String(call.namespace || ""),
         tool: String(call.tool || ""),
         toolAction: String(call.arguments?.action || "") || null,
+        // Raw arguments never leave the dispatcher; only the privacy-filtered summary does.
+        activity: describeQqToolActivity(call, { ok: result.ok !== false, text: result.result, error: result.error }),
         callId: callId || null,
         toolRound,
         durationMs: Math.max(0, Date.now() - startedAt),

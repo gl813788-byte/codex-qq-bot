@@ -123,6 +123,19 @@ export function createEnvironmentConfig(env = process.env) {
       ["tool", "final"],
       "tool"
     ),
+    // Engines without native image generation (Claude Code) draw through a
+    // qq_draw.image tool that runs one Codex image-generation turn on the
+    // machine's Codex login. "auto" offers it when the codex CLI is present.
+    codexDrawing: enumValue(
+      String(env.CODEX_REMOTE_CONTACT_CODEX_DRAWING || "").trim().toLowerCase(),
+      ["auto", "off"],
+      "auto"
+    ),
+    codexDrawingTimeoutMs: boundedInteger(env.CODEX_REMOTE_CONTACT_CODEX_DRAWING_TIMEOUT_MS, {
+      defaultValue: 240_000,
+      min: 30_000,
+      max: 600_000
+    }),
     // The QQ bot is also a working Agent, so Codex keeps every native feature
     // and its own base instructions unless a deployment opts into trimming.
     agentLeanContext: env.CODEX_REMOTE_CONTACT_AGENT_LEAN_CONTEXT === "1",

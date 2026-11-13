@@ -21,9 +21,10 @@ export const qqSubagentOutputSchema = Object.freeze({
 
 // Sub-agents read and research; they never act in QQ, change settings or
 // reach the host. Reading chat history keeps the requester's permissions.
+// qq_draw exists only on engines that draw through Codex.
 const SUBAGENT_TOOLS = Object.freeze({
-  task: { qq_context: ["history"], qq_search: ["chinese_web"], qq_media: "*", qq_knowledge: ["manage"] },
-  life: { qq_context: ["images"], qq_search: ["chinese_web"], qq_media: "*", qq_knowledge: ["manage"], qq_social: ["act"], qq_self: ["state"] }
+  task: { qq_context: ["history"], qq_search: ["chinese_web"], qq_media: "*", qq_knowledge: ["manage"], qq_draw: ["image"] },
+  life: { qq_context: ["images"], qq_search: ["chinese_web"], qq_media: "*", qq_knowledge: ["manage"], qq_social: ["act"], qq_self: ["state"], qq_draw: ["image"] }
 });
 
 export function filterQqSubagentToolSpecs(specs = [], { kind = "task" } = {}) {

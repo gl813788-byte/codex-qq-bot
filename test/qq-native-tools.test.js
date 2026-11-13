@@ -389,3 +389,27 @@ test("qq_chat.send is offered only to turns that speak through it and always rea
   await dispatch({ namespace: "qq_chat", tool: "send", arguments: { bubbles: ["在"] }, callId: "send-1" });
   assert.equal(sent.length, 2);
 });
+
+test("qq_draw.image is offered only to engines that draw through Codex and returns the picture", async () => {
+  assert.equal(buildQqNativeToolSpecs({ isOwner: true }).some((namespace) => namespace.name === "qq_draw"), false);
+  const draw = buildQqNativeToolSpecs({ canDraw: true }).find((namespace) => namespace.name === "qq_draw");
+  assert.deepEqual(draw.tools.map((tool) => tool.name), ["image"]);
+  assert.deepEqual(draw.tools[0].inputSchema.required, ["prompt"]);
+  assert.match(draw.tools[0].description, /Codex/);
+  const toolEvents = [];
+  const dispatch = createQqNativeToolDispatcher({
+    event: { senderId: "10001" },
+    executeCommand: async () => ({ ok: false }),
+    executeStructured: async (call) => ({
+      ok: true,
+      reply: `画好了 ${call.arguments.prompt}`,
+      contentItems: [{ type: "inputText", text: "画好了" }, { type: "inputImage", imageUrl: "data:image/png;base64,AAAA" }]
+    }),
+    onToolEvent: (toolEvent) => toolEvents.push(toolEvent)
+  });
+  const result = await dispatch({ callId: "d1", namespace: "qq_draw", tool: "image", arguments: { prompt: "猫" } });
+  assert.equal(result.ok, true);
+  assert.equal(result.contentItems[1].type, "inputImage");
+  assert.equal(toolEvents[0].activity.verb, "画图（Codex 代画）");
+  assert.match(toolEvents[0].activity.target, /「猫」/);
+});

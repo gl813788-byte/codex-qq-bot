@@ -1,4 +1,5 @@
 import { QQ_CHAT_SEND_MAX_BUBBLES } from "../infrastructure/codex/qq-native-tools.js";
+import { QQ_CHAT_SEND_FAILURE_NOTICE } from "../qq-reply-delivery-prompt.js";
 
 // qq_chat.send: the main model speaks through a tool, the way chat agents on
 // other platforms do, instead of packing its one reply into the final
@@ -7,8 +8,22 @@ import { QQ_CHAT_SEND_MAX_BUBBLES } from "../infrastructure/codex/qq-native-tool
 // (per-turn limit, exact repeats of delivered content, calls after the turn
 // ended) and keeps the receipts the reply lifecycle later turns into memory.
 // Delivery itself (reply guards, OneBot writes, interest reset) is injected.
+//
+// Lifecycle of one session:
+//   send() ...      while the turn runs (serialized, receipted)
+//   finalize()      when the turn ends or fails: later calls are refused and
+//                   the receipts fold into one reply/send pair (memoized)
+//   appendNotice()  at most once, after a turn that already spoke failed
+// The reply lifecycle reads `summary` to record what was delivered and never
+// sends it again.
 
 export const QQ_CHAT_SEND_MAX_PER_TURN = 12;
+
+// Which way a reply turn speaks. The tool needs QQ tools in the turn and a
+// OneBot conversation to talk in; every other turn returns one final reply.
+export function resolveQqReplyDelivery({ configured = "tool", toolsEnabled = false, oneBotConversation = false } = {}) {
+  return configured === "tool" && toolsEnabled && oneBotConversation ? "tool" : "final";
+}
 const STOP_CODES = new Set(["QQ_REPLY_STOPPED", "HUB_SHUTTING_DOWN", "QQ_GENERATION_STOPPED"]);
 const MAX_ATTACHMENTS = 8;
 const REPLY_MODES = new Set(["automatic", "plain", "quote", "mention"]);
@@ -65,6 +80,7 @@ export function toQqAgentOutputValue(message) {
 export function createQqChatSendSession({
   deliver,
   maxSends = QQ_CHAT_SEND_MAX_PER_TURN,
+  bubbleSeparator = "|||",
   onEvent = null
 } = {}) {
   if (typeof deliver !== "function") throw new TypeError("deliver must be a function");
@@ -74,6 +90,9 @@ export function createQqChatSendSession({
   let attempts = 0;
   let closed = false;
   let queue = Promise.resolve();
+  let summary = null;
+  let noticeSent = false;
+  const summarize = () => summarizeQqChatSendDeliveries(deliveries, { bubbleSeparator });
 
   const report = (payload) => {
     try {
@@ -165,11 +184,60 @@ export function createQqChatSendSession({
       closed = true;
       await queue;
     },
+    // Ends the session and folds its receipts into the lifecycle's
+    // reply/send pair; repeated calls return the same summary.
+    async finalize() {
+      closed = true;
+      await queue;
+      summary ||= summarize();
+      return summary;
+    },
+    // After a turn that already spoke fails, one plain notice says the rest
+    // did not finish. It is recorded with the turn's other sends.
+    async appendNotice(text = QQ_CHAT_SEND_FAILURE_NOTICE) {
+      if (noticeSent || !deliveries.some((delivery) => Number(delivery.receipt?.deliveredBubbleCount || 0) > 0)) return null;
+      noticeSent = true;
+      closed = true;
+      await queue;
+      const message = normalizeQqChatSendArguments({ bubbles: [text], reply: { mode: "plain" } });
+      let delivery;
+      try {
+        delivery = await deliver(message, { sendIndex: attempts, notice: true });
+      } catch {
+        // A stopped or superseded scope stays quiet.
+        return null;
+      }
+      if (!delivery || delivery.refused) return null;
+      attempts += 1;
+      deliveries.push({
+        sendIndex: attempts - 1,
+        reply: String(delivery.reply || ""),
+        send: delivery.send || null,
+        receipt: delivery.receipt || {},
+        hasSticker: false,
+        attachmentCount: 0,
+        notice: true
+      });
+      report({ outcome: "notice", sendIndex: attempts - 1 });
+      summary = summarize();
+      return summary;
+    },
+    // Null until finalize(); then the lifecycle's view of what was sent.
+    get summary() {
+      return summary;
+    },
+    get finalized() {
+      return summary !== null;
+    },
     get deliveries() {
       return deliveries.map((delivery) => ({ ...delivery }));
     },
     get deliveredBubbleCount() {
       return deliveries.reduce((total, delivery) => total + Number(delivery.receipt?.deliveredBubbleCount || 0), 0);
+    },
+    // What people have already seen this turn, for a follow-up round's prompt.
+    deliveredText() {
+      return summarize().deliveredReply;
     },
     snapshot() {
       return {

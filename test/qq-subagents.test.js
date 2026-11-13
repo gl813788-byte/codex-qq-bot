@@ -112,6 +112,10 @@ test("sub-agent turns get a research-only tool subset and a strict report contra
   const life = filterQqSubagentToolSpecs(specs, { kind: "life" }).map((namespace) => namespace.name);
   assert.ok(life.includes("qq_social"));
   assert.equal(life.includes("qq_runtime") || life.includes("qq_agent") || life.includes("qq_session"), false);
+  // Engines that draw through Codex let sub-agents draw too.
+  const drawing = buildQqNativeToolSpecs({ isOwner: true, canDraw: true });
+  assert.ok(filterQqSubagentToolSpecs(drawing, { kind: "life" }).some((namespace) => namespace.name === "qq_draw"));
+  assert.ok(filterQqSubagentToolSpecs(drawing, { kind: "task" }).some((namespace) => namespace.name === "qq_draw"));
   assert.deepEqual(qqSubagentOutputSchema.required, ["summary", "report", "attachments", "needsUser", "question"]);
   const turn = buildQqSubagentTurn({
     job: { task: "查一下最新的 Node 版本", requester: { name: "甲", userId: "22" }, kind: "task", context: { background: "当前消息：帮我查" } },

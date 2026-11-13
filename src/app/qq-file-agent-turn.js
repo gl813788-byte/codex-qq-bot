@@ -1,4 +1,4 @@
-import { formatQqTaskWorkspaceContext, QQ_GENERATED_IMAGE_DELIVERY_RULE } from "../qq-main-prompt.js";
+import { formatQqTaskWorkspaceContext, QQ_DRAW_TOOL_DELIVERY_RULE, QQ_GENERATED_IMAGE_DELIVERY_RULE } from "../qq-main-prompt.js";
 
 export function buildQqFileAgentTurn({
   isOwner,
@@ -12,7 +12,8 @@ export function buildQqFileAgentTurn({
   inboundFileSummary = "",
   requestText = "",
   isImageGeneration = false,
-  canGenerateImages = true
+  canGenerateImages = true,
+  drawsWithTool = false
 } = {}) {
   if (!taskWorkspace?.root || !taskWorkspace?.inputDir || !taskWorkspace?.outputDir) {
     throw new TypeError("taskWorkspace root/inputDir/outputDir are required");
@@ -43,15 +44,17 @@ export function buildQqFileAgentTurn({
       : null,
     "绝不输出 token、密钥、密码、cookie、私钥或完整敏感配置；只给脱敏摘要。",
     "需要发送图片或文件时，先把最终成品复制或写入 task output 目录，再把绝对路径填进结构化 attachments。只有 output 目录中的附件会被 Hub 发送。",
-    canGenerateImages
-      ? "需要修改用户提供的图片时，把收到的本地图片作为参考输入交给原生图像能力；接口失败就如实说明，不能假装成功。"
-      : "这台机器没有原生生图/改图能力：被要求生成或修改图片时如实说明做不到，不能假装成功；本轮有 Shell 时可以做格式转换、裁剪等确定性处理。",
-    canGenerateImages ? QQ_GENERATED_IMAGE_DELIVERY_RULE : null,
+    drawsWithTool
+      ? "需要生成或修改图片时用 qq_draw.image（Codex 代画）：修改用户的图时把收到的本地图片路径放进 references；工具失败就如实说明，不能假装成功。"
+      : canGenerateImages
+        ? "需要修改用户提供的图片时，把收到的本地图片作为参考输入交给原生图像能力；接口失败就如实说明，不能假装成功。"
+        : "这台机器没有原生生图/改图能力：被要求生成或修改图片时如实说明做不到，不能假装成功；本轮有 Shell 时可以做格式转换、裁剪等确定性处理。",
+    drawsWithTool ? QQ_DRAW_TOOL_DELIVERY_RULE : canGenerateImages ? QQ_GENERATED_IMAGE_DELIVERY_RULE : null,
     "本段对话含图时，可从本轮上下文里的图片目录选择原图，用 qq_context.images 的 inspect 动作重新获得视觉输入；不要把配文或旧回答当作已经看过图片。需要修改时可用本轮输入目录中的已下载图片。",
     "最终只提交输出 Schema 要求的 JSON 对象。"
   ].filter(Boolean).join("\n");
   const prompt = [
-    formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages }),
+    formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages, drawsWithTool }),
     privileged ? `当前项目：${projectDir}` : null,
     quotedContext || null,
     imagePaths.length ? `收到的 QQ 图片：\n${imagePaths.join("\n")}` : null,

@@ -993,12 +993,18 @@ details.info-block[open] > summary::after { transform: rotate(-135deg); margin-b
 .log-fact b { margin-right: 4px; color: var(--faint); font-weight: 600; }
 .log-fact.is-speech { border-radius: 4px 10px 10px 10px; background: var(--accent-soft); color: var(--text); white-space: normal; overflow-wrap: anywhere; }
 .log-fact.is-speech b { margin-right: 2px; color: var(--accent-text); }
+/* What the Bot did with a tool: one readable line, result after the arrow. */
+.log-fact.is-activity { border-radius: 6px; background: var(--ok-soft); color: var(--text); white-space: normal; overflow-wrap: anywhere; }
+.log-fact.is-activity b { margin-right: 4px; color: var(--ok-text); }
+.log-fact.is-activity .log-activity-result { margin-left: 6px; color: var(--ok-text); font-weight: 600; }
+.log-fact.is-activity.is-failed { background: var(--bad-soft); }
+.log-fact.is-activity.is-failed b, .log-fact.is-activity.is-failed .log-activity-result { color: var(--bad-text); }
 .log-fact.is-good { background: var(--ok-soft); color: var(--ok-text); }
 .log-fact.is-bad, .log-fact.is-error { background: var(--bad-soft); color: var(--bad-text); }
 .log-fact.is-reason { background: var(--warn-soft); color: var(--warn-text); }
 .log-fact.is-muted { color: var(--muted); }
 .log-fact.is-time { font-family: var(--mono); }
-.log-entry.level-debug .log-fact:not(.is-speech) { opacity: .85; }
+.log-entry.level-debug .log-fact:not(.is-speech):not(.is-activity) { opacity: .85; }
 .log-duration { color: var(--muted); font: 12px var(--mono); text-align: right; }
 .log-duration.slow { color: var(--warn-text); }
 .log-duration.bad { color: var(--bad-text); font-weight: 700; }
