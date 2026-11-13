@@ -208,7 +208,8 @@ With Claude Code, `ai.model`, the reasoning summary, the Codex personality and t
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT` | `mcp` | How Codex receives the Hub's QQ tools: `mcp` serves them from a per-turn MCP server (re-listed on every resume), `dynamic` keeps App Server dynamic tools. Claude Code always uses MCP. Both defer tool schemas until the model searches for a tool |
+| `CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT` | `mcp` | How Codex receives the Hub's QQ tools: `mcp` serves them from a per-turn MCP server (re-listed on every resume), `dynamic` keeps App Server dynamic tools. Claude Code always uses MCP. Both defer tool schemas until the model searches for a tool, except the always-loaded `qq_chat.send` |
+| `CODEX_REMOTE_CONTACT_QQ_REPLY_DELIVERY` | `tool` | How the main model speaks in QQ: `tool` sends every message through the `qq_chat.send` tool during the turn (several times if it likes) and keeps the final structured output private; `final` keeps the older contract in which the final structured output is the one reply and native commentary is forwarded as progress. Turns without QQ tools, non-OneBot turns and owner/administrator file and image tasks always use `final` |
 | `CODEX_REMOTE_CONTACT_AGENT_LEAN_CONTEXT` | `0` | Opt-in for chat-only deployments: `1` removes connectors, plugins, browser/computer use, sub-agents, goals, the skill catalog and the checkout's AGENTS.md from Codex QQ turns (owner/administrator file tasks keep AGENTS.md) |
 | `CODEX_REMOTE_CONTACT_QQ_BASE_INSTRUCTIONS` | `engine` | `engine` keeps the engine's own system prompt; `qq` swaps in the compact QQ base prompt for QQ replies |
 

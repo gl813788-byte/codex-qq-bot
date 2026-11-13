@@ -254,3 +254,33 @@ test("the tool guide does not promise native tools the engine may not offer", ()
   assert.doesNotMatch(guide, /Shell 和计划直接可用/);
   assert.match(guide, /以本轮实际提供的为准/);
 });
+
+test("a turn that speaks through qq_chat.send is told its final output is never sent", () => {
+  const prompt = formatQqMainModelInstructions({
+    assistantName: "麦麦",
+    speaker: "小明(QQ 10000)；群聊",
+    replyDelivery: "tool"
+  });
+  assert.match(prompt, /【怎么说话】你在 QQ 里说的每一句话都用 qq_chat\.send 发出/);
+  assert.match(prompt, /先说一声再去查资料或干活，做完再把结果发出来/);
+  assert.match(prompt, /永远不会发送，别把要说的话写在那里/);
+  assert.match(prompt, /不能只发预告就结束本轮/);
+  assert.match(prompt, /一条都不发，并把结构化输出的 status 设为 silent/);
+  assert.match(prompt, /qq_chat\.send 的 reply\.mode/);
+  assert.match(prompt, /status 发过消息填 sent、一句都没说填 silent/);
+  assert.match(prompt, /qq_chat\.send 的 attachments/);
+  // The old single-reply contract and native commentary progress are gone.
+  assert.doesNotMatch(prompt, /原生 commentary/);
+  assert.doesNotMatch(prompt, /多气泡放 bubbles/);
+  assert.doesNotMatch(prompt, /先在 innerThought 里/);
+  assert.doesNotMatch(prompt, /\[\[qq_/);
+
+  // Without tools there is nothing to speak through, so the final output is the reply.
+  const noTools = formatQqMainModelInstructions({ toolsEnabled: false, replyDelivery: "tool" });
+  assert.doesNotMatch(noTools, /qq_chat\.send/);
+  assert.match(noTools, /最终只提交输出 Schema 要求的 JSON 对象/);
+
+  const guide = formatQqMainToolGuide({ replyDelivery: "tool" });
+  assert.match(guide, /qq_chat\.send：说话用的工具/);
+  assert.doesNotMatch(formatQqMainToolGuide({}), /qq_chat/);
+});

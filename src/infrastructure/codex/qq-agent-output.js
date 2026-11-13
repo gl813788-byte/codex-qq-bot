@@ -83,6 +83,28 @@ export const qqAgentOutputSchema = Object.freeze({
   }
 });
 
+// When the model speaks through qq_chat.send, the final structured output is
+// private state only: nothing in it is ever delivered. status records whether
+// the turn said anything, so a deliberate silence stays distinguishable.
+export const qqAgentToolModeOutputSchema = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["innerThought", "status", "affinity", "mood"],
+  properties: {
+    innerThought: {
+      type: "string",
+      description: "Never sent. Your private first-person inner monologue (内心OS) about this exchange, within 80 Chinese characters: how you really read the message and the person, how you feel, what you chose to say or not say. No analysis report, rules or tool talk."
+    },
+    status: {
+      type: "string",
+      enum: ["sent", "silent"],
+      description: "sent when you delivered at least one message with qq_chat.send this turn; silent when you deliberately said nothing."
+    },
+    affinity: qqAgentOutputSchema.properties.affinity,
+    mood: qqAgentOutputSchema.properties.mood
+  }
+});
+
 export function parseQqAgentOutput(value, { bubbleSeparator = "|||" } = {}) {
   const raw = String(value || "").trim();
   const parsed = parseJsonObject(raw);

@@ -27,36 +27,37 @@ export function flattenQqDynamicTools(dynamicTools = []) {
     if (entry?.type === "namespace" && Array.isArray(entry.tools)) {
       for (const tool of entry.tools) {
         if (!tool?.name) continue;
-        tools.push(withAnnotations({
+        tools.push(withAlwaysLoad(withAnnotations({
           name: `${entry.name}__${tool.name}`,
           namespace: String(entry.name),
           tool: String(tool.name),
           description: [entry.description, tool.description].filter(Boolean).join(" "),
           inputSchema: tool.inputSchema || { type: "object", properties: {} }
-        }, tool.annotations));
+        }, tool.annotations), tool.alwaysLoad));
       }
     } else if (entry?.name) {
-      tools.push(withAnnotations({
+      tools.push(withAlwaysLoad(withAnnotations({
         name: String(entry.name),
         namespace: entry.namespace ? String(entry.namespace) : "",
         tool: String(entry.name),
         description: String(entry.description || ""),
         inputSchema: entry.inputSchema || { type: "object", properties: {} }
-      }, entry.annotations));
+      }, entry.annotations), entry.alwaysLoad));
     }
   }
   return tools;
 }
 
 // App Server dynamic tools accept only name/description/inputSchema and the
-// deferLoading flag; annotations stay an MCP-only hint.
+// deferLoading flag; annotations stay an MCP-only hint. An always-loaded
+// tool (the one the model speaks through) is never deferred.
 export function toCodexDynamicToolSpecs(dynamicTools = [], { deferLoading = true } = {}) {
   const strip = (tool) => ({
     type: "function",
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema,
-    ...(deferLoading ? { deferLoading: true } : {})
+    ...(deferLoading && tool.alwaysLoad !== true ? { deferLoading: true } : {})
   });
   return (Array.isArray(dynamicTools) ? dynamicTools : []).map((entry) => {
     if (entry?.type === "namespace" && Array.isArray(entry.tools)) {
@@ -194,8 +195,22 @@ export function toMcpToolResult(result) {
   return { content, isError: !success };
 }
 
-function toMcpToolListing({ name, description, inputSchema, annotations }) {
-  return { name, description, inputSchema, ...(annotations ? { annotations } : {}) };
+// Claude Code keeps a tool marked anthropic/alwaysLoad out of tool search, so
+// its schema is in the prompt from the first step. Other clients ignore it.
+export const QQ_MCP_ALWAYS_LOAD_META_KEY = "anthropic/alwaysLoad";
+
+function toMcpToolListing({ name, description, inputSchema, annotations, alwaysLoad }) {
+  return {
+    name,
+    description,
+    inputSchema,
+    ...(annotations ? { annotations } : {}),
+    ...(alwaysLoad ? { _meta: { [QQ_MCP_ALWAYS_LOAD_META_KEY]: true } } : {})
+  };
+}
+
+function withAlwaysLoad(tool, alwaysLoad) {
+  return alwaysLoad === true ? { ...tool, alwaysLoad: true } : tool;
 }
 
 function withAnnotations(tool, annotations) {

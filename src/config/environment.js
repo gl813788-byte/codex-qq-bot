@@ -114,6 +114,15 @@ export function createEnvironmentConfig(env = process.env) {
       ["mcp", "dynamic"],
       "mcp"
     ),
+    // "tool" lets the main model speak through the always-loaded qq_chat.send
+    // tool, as many times as it likes during a turn; its final structured
+    // output is then private state only. "final" keeps the older contract in
+    // which the final structured output carries the one reply.
+    qqReplyDelivery: enumValue(
+      String(env.CODEX_REMOTE_CONTACT_QQ_REPLY_DELIVERY || "").trim().toLowerCase(),
+      ["tool", "final"],
+      "tool"
+    ),
     // The QQ bot is also a working Agent, so Codex keeps every native feature
     // and its own base instructions unless a deployment opts into trimming.
     agentLeanContext: env.CODEX_REMOTE_CONTACT_AGENT_LEAN_CONTEXT === "1",

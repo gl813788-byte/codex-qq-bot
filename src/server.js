@@ -425,12 +425,20 @@ import {
 } from "./qq-operation-log.js";
 import {
   extractQqAgentInnerState,
+  parseQqAgentOutput,
   qqAgentOutputSchema,
+  qqAgentToolModeOutputSchema,
   stripObsoleteQqControlMarkers
 } from "./infrastructure/codex/qq-agent-output.js";
 import {
+  createQqChatSendSession,
+  summarizeQqChatSendDeliveries,
+  toQqAgentOutputValue
+} from "./app/qq-chat-send-tool.js";
+import {
   buildQqNativeToolSpecs,
-  createQqNativeToolDispatcher
+  createQqNativeToolDispatcher,
+  isQqChatSendCall
 } from "./infrastructure/codex/qq-native-tools.js";
 import { createQqNativeProgressReporter } from "./infrastructure/codex/qq-native-progress.js";
 import {
@@ -662,6 +670,7 @@ const {
   oneBotMaxPending,
   agentEngine,
   agentToolTransport,
+  qqReplyDelivery,
   agentLeanContext,
   qqBaseInstructionsMode,
   claudeCliPath,
@@ -2272,7 +2281,9 @@ async function buildQqPendingSteeringInput(entries, generation) {
     type: "text",
     text: [
       `你处理当前 QQ 回复期间又收到了 ${aggregate.queuedMessageCount || entries.length} 条新消息。Hub 已沿用连续消息合并规则，把相邻重复内容压成一条并标出总次数。`,
-      "5 秒静默窗口已经结束。Hub 会优先把本批新消息引导进当前活跃任务；若活跃 turn 已不接受引导，才会中断旧 turn 并开启替代轮次。无论采用哪种方式，都要把追加消息与正在进行的多轮任务融合成一份统一回复，不要先发过时答案，也不要逐条机械回复“消息一/消息二”。",
+      parentEvent?.qqChatSendSession
+        ? "5 秒静默窗口已经结束。Hub 把本批新消息引导进当前任务（必要时中断旧 turn 开启替代轮次）。你已经用 qq_chat.send 发出的消息对方都看到了：把新消息和正在做的事一起考虑，需要回应就接着用 qq_chat.send 说，别重复已经发过的内容，也不要逐条机械回复“消息一/消息二”。"
+        : "5 秒静默窗口已经结束。Hub 会优先把本批新消息引导进当前活跃任务；若活跃 turn 已不接受引导，才会中断旧 turn 并开启替代轮次。无论采用哪种方式，都要把追加消息与正在进行的多轮任务融合成一份统一回复，不要先发过时答案，也不要逐条机械回复“消息一/消息二”。",
       replyTargetInstruction || null,
       semanticRecall.context || null,
       semanticRecall.context ? "" : null,
@@ -8137,6 +8148,7 @@ function formatQqBotInternalToolContext(event) {
     robotProfileCandidates: event.qqRobotProfileCandidates || [],
     canSearchImages: canQqSearchWebImages(),
     stickerLibraryHint: event.qqStickerLibraryHint || "",
+    replyDelivery: event.qqChatSendSession ? "tool" : "final",
     mediaSummary: formatQqMediaCandidates(getQqMediaCandidatesForEvent(event), {
       available: {
         video: Boolean(event.qqMediaToolStatus?.video),
@@ -8216,6 +8228,12 @@ async function executeQqMediaNativeTool(call, event, replyScope) {
 }
 
 async function executeQqStructuredNativeTool(call, event, context = {}) {
+  if (isQqChatSendCall(call)) {
+    // Always the original conversation's own send session, never a focus.
+    const session = (context.rootEvent || event)?.qqChatSendSession;
+    if (!session) return { ok: false, error: "这一轮不能用 qq_chat.send 发消息。" };
+    return session.send(call.arguments || {}, { threadId: String(call.threadId || "") });
+  }
   if (call?.namespace === "qq_agent" && call?.tool === "manage") {
     const rootEvent = context.rootEvent || event;
     if (rootEvent.qqBackgroundTurn) return { ok: false, error: "后台任务里不能再开子代理。" };
@@ -10950,7 +10968,8 @@ async function buildAssistantInstructions(event) {
     enhancerEnabled: Boolean(state.qq.enhancer.enabled),
     toolsEnabled: qqTurnToolsEnabled(event),
     canGenerateImages: qqAgentCanDraw,
-    assistantProfile: assistantSkillBrief
+    assistantProfile: assistantSkillBrief,
+    replyDelivery: event.qqChatSendSession ? "tool" : "final"
   });
 }
 
@@ -11006,7 +11025,30 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     return buildQqOwnerFileImageReply(event, { replyScope });
   }
 
-  const nativeProgress = createQqNativeAgentProgressObserver(event, { replyScope });
+  // The model speaks through qq_chat.send when the turn has QQ tools and a
+  // OneBot conversation to talk in; otherwise its final output is the reply.
+  const speaksThroughTool = qqReplyDelivery === "tool"
+    && qqTurnToolsEnabled(event)
+    && event.qqTransportSource === "onebot";
+  event.qqChatToolDelivery = null;
+  // Not enumerable: copies of the event (cross-session patches, aggregates)
+  // must never carry the turn's ability to speak.
+  Object.defineProperty(event, "qqChatSendSession", {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value: speaksThroughTool
+      ? createQqChatSendSession({
+        deliver: (message, { sendIndex, threadId }) => deliverQqChatToolMessage(event, message, {
+          sendIndex,
+          replyScope,
+          threadId,
+          turnStartedAt: event.qqReplyTurnStartedAt || 0
+        })
+      })
+      : null
+  });
+  const nativeProgress = createQqNativeAgentProgressObserver(event, { replyScope, forward: !speaksThroughTool });
 
   const text = stripMentionText(event.text);
   const scopeId = getQqMemoryScopeId(event);
@@ -11199,10 +11241,13 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     hasStickerCandidates: replyStickerCandidates.length > 0 || stickerCatalog.length > 0,
     hasMemoryPeople: event.qqMemoryPeople.length > 0,
     canRecordRobotProfiles: event.qqRobotProfileCandidates.length > 0,
-    canSearchImages: canQqSearchWebImages()
+    canSearchImages: canQqSearchWebImages(),
+    canSendMessages: speaksThroughTool,
+    privateChat: isQqPrivateEvent(event)
   });
-  qqCodexThreadId = resolveQqCodexReusableThreadId(qqCodexSessionPlan, nativeToolSpecs, { transport: qqAgentToolTransport });
-  event.qqCodexDynamicToolsFingerprint = fingerprintQqCodexDynamicTools(nativeToolSpecs, { transport: qqAgentToolTransport });
+  const threadFingerprintOptions = { transport: qqAgentToolTransport, replyDelivery: qqReplyDelivery };
+  qqCodexThreadId = resolveQqCodexReusableThreadId(qqCodexSessionPlan, nativeToolSpecs, threadFingerprintOptions);
+  event.qqCodexDynamicToolsFingerprint = fingerprintQqCodexDynamicTools(nativeToolSpecs, threadFingerprintOptions);
   if (!qqCodexThreadId) {
     event.qqCodexInjectedMessageIds = [
       ...getQqTriggerMessageIds(event),
@@ -11276,7 +11321,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       baseInstructions: qqAgentBaseInstructions,
       developerInstructions,
       dynamicTools: nativeToolSpecs,
-      outputSchema: qqAgentOutputSchema,
+      outputSchema: speaksThroughTool ? qqAgentToolModeOutputSchema : qqAgentOutputSchema,
       webSearchMode: state.qq.webLookup.enabled ? "live" : "disabled",
       sandbox: "workspace-write",
       sandboxPolicy: {
@@ -11295,6 +11340,15 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       qqCodexThreadId = result.threadId || qqCodexThreadId;
       event.qqCodexSessionThreadId = qqCodexThreadId;
       event.qqCodexSession.resumed = Boolean(event.qqCodexSession.resumed || result.resumed);
+    }
+    if (speaksThroughTool) {
+      // Everything visible already went out through qq_chat.send; the final
+      // output is private state (and "[[qq_silent]]" for a deliberate
+      // silence). Unstructured text is kept only as a fallback reply.
+      const privateOutput = parseQqAgentOutput(result.finalResponse, { bubbleSeparator: qqBubbleSeparator });
+      event.qqAgentStructuredOutput = privateOutput.structured;
+      event.qqAgentInnerState = extractQqAgentInnerState(privateOutput.value);
+      return privateOutput.output;
     }
     const parsed = await parseQqAgentOutputWithAttachmentImport(result.finalResponse, {
       bubbleSeparator: qqBubbleSeparator,
@@ -11333,7 +11387,9 @@ async function buildModelReply(event, { replyScope = null } = {}) {
         : "下面是本轮由 Hub 归一化并按权限裁剪后的 QQ 上下文。",
       formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages: qqAgentCanDraw }),
       persistentResume
-        ? "本轮仍使用与临时会话完全相同的融合式追问规则：所有触发 Bot 回复的新消息作为一个批次处理，最终只输出一份统一回复。"
+        ? speaksThroughTool
+          ? "本轮仍使用与临时会话完全相同的融合式追问规则：所有触发 Bot 回复的新消息作为一个批次处理，用 qq_chat.send 自然地回应。"
+          : "本轮仍使用与临时会话完全相同的融合式追问规则：所有触发 Bot 回复的新消息作为一个批次处理，最终只输出一份统一回复。"
         : null,
       "",
       intentContext,
@@ -11424,9 +11480,13 @@ async function buildModelReply(event, { replyScope = null } = {}) {
         : formatQqCurrentMessagePrompt(event, currentMessageText),
       "",
       event.qqColdProactive
-        ? formatQqColdProactiveCompletionInstruction()
+        ? formatQqColdProactiveCompletionInstruction({ replyDelivery: speaksThroughTool ? "tool" : "final" })
         : event.qqPrivateProactive
-        ? "现在只输出一句要发给对方的自然消息；读完上下文后没有真想说的内容、这类联系已经显得多余，或安全与关键事实无法可靠确认时，把 status 设为 silent。"
+        ? speaksThroughTool
+          ? "现在想说就用 qq_chat.send 给对方发一句自然的消息；读完上下文后没有真想说的内容、这类联系已经显得多余，或安全与关键事实无法可靠确认时，一条都不发，把 status 设为 silent。"
+          : "现在只输出一句要发给对方的自然消息；读完上下文后没有真想说的内容、这类联系已经显得多余，或安全与关键事实无法可靠确认时，把 status 设为 silent。"
+        : speaksThroughTool
+        ? `现在用 qq_chat.send 在${isQqPrivateEvent(event) ? "私聊" : "群"}里回应：可以马上说，也可以先说一声再去做、做完再发，分几次发都行；不想说就一条都不发。说完、做完后提交输出 Schema 结束本轮（它不会发送）。不要追加服务式追问或“我还能继续帮你”的结尾。`
         : isQqPrivateEvent(event)
         ? "请按输出 Schema 提交要发送到 QQ 私聊里的最终回复。不要追加服务式追问或“我还能继续帮你”的结尾。"
         : "请按输出 Schema 提交要发送到 QQ 群里的最终回复。不要追加服务式追问或“我还能继续帮你”的结尾。"
@@ -11520,21 +11580,47 @@ async function buildModelReply(event, { replyScope = null } = {}) {
             ...(candidate?.semanticRecallItemIds || [])
           ])
         ];
-        const fullBase = await buildReplyPrompt(memoryContext, 1, false, "", draft, 0);
-        const fullPrompt = [
-          fullBase,
-          "",
-          "上一版回答已经生成，但尚未发送。现在有新的追问到达：",
-          fusionText,
-          "",
-          "不要发送或复述上一版回答。立即进入下一轮，把上一版草稿与这批追问融合，只输出一份替代旧草稿的最终 QQ 回复；不要解释融合过程。"
-        ].join("\n");
-        const resumePrompt = [
-          "你正在继续同一个 QQ 长期线程。上一轮助手输出尚未真正发送到 QQ，只是一份必须丢弃或改写的草稿。",
-          fusionText,
-          "",
-          "立即进入下一轮，把本批触发消息及筛选后的中间语境融合进草稿，只输出一份替代草稿的最终 QQ 回复。不要逐条作答，不要解释内部过程。"
-        ].join("\n");
+        // Send-tool messages already reached QQ, so a later batch continues
+        // the conversation instead of replacing an unsent draft.
+        const alreadySent = speaksThroughTool
+          ? summarizeQqChatSendDeliveries(event.qqChatSendSession?.deliveries || [], { bubbleSeparator: qqBubbleSeparator }).deliveredReply
+          : "";
+        const sentContext = alreadySent
+          ? `你这一轮已经用 qq_chat.send 发出、对方都看到了的消息：\n${stripLocalQqMediaMarkers(alreadySent).slice(0, 2000)}`
+          : "你这一轮还没有发出任何消息。";
+        const fullBase = await buildReplyPrompt(memoryContext, 1, false, "", speaksThroughTool ? "" : draft, 0);
+        const fullPrompt = speaksThroughTool
+          ? [
+            fullBase,
+            "",
+            sentContext,
+            "",
+            "你刚结束上一段回应，又有新消息到达：",
+            fusionText,
+            "",
+            "接着自然回应这些新消息：需要回应就用 qq_chat.send 发，别重复已经发过的内容，也不要解释内部过程；没什么要补充的就一条都不发，把 status 设为 silent。"
+          ].join("\n")
+          : [
+            fullBase,
+            "",
+            "上一版回答已经生成，但尚未发送。现在有新的追问到达：",
+            fusionText,
+            "",
+            "不要发送或复述上一版回答。立即进入下一轮，把上一版草稿与这批追问融合，只输出一份替代旧草稿的最终 QQ 回复；不要解释融合过程。"
+          ].join("\n");
+        const resumePrompt = speaksThroughTool
+          ? [
+            "你正在继续同一个 QQ 长期线程。你上一轮用 qq_chat.send 发出的消息对方都已经看到。之后又有新消息到达：",
+            fusionText,
+            "",
+            "需要回应就用 qq_chat.send 接着说，别重复已经发过的话，不要逐条作答或解释内部过程；不需要就一条都不发，把 status 设为 silent。"
+          ].join("\n")
+          : [
+            "你正在继续同一个 QQ 长期线程。上一轮助手输出尚未真正发送到 QQ，只是一份必须丢弃或改写的草稿。",
+            fusionText,
+            "",
+            "立即进入下一轮，把本批触发消息及筛选后的中间语境融合进草稿，只输出一份替代草稿的最终 QQ 回复。不要逐条作答，不要解释内部过程。"
+          ].join("\n");
         logger.info("QQ pending follow-ups fused before send", {
           outcome: "started",
           action: "fuse-before-send",
@@ -11610,6 +11696,25 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       baseReply = (await fuseQueuedFollowUpsBeforeSend(baseReply)).reply;
     }
     assertQqReplyScopeActive(replyScope);
+    if (speaksThroughTool) {
+      const toolDelivery = await finalizeQqChatToolDelivery(event);
+      // The lifecycle records what qq_chat.send delivered; nothing is left to send.
+      if (toolDelivery?.sendCount > 0) return "";
+      if (isQqSilentReply(baseReply) || !String(baseReply || "").trim()) {
+        event.qqModelDeclinedReply = true;
+        if (!isQqSilentReply(baseReply)) {
+          logger.warn("QQ agent ended its turn without sending a message", {
+            operation: "reply.send_tool",
+            outcome: "no-message",
+            groupId: event.groupId || null,
+            senderId: event.senderId || null,
+            structuredOutput: Boolean(event.qqAgentStructuredOutput)
+          }, "qq", qqLogContext(event));
+        }
+        return "";
+      }
+      // Unstructured final text with no send: deliver it the older way below.
+    }
     if (isQqSilentReply(baseReply)) {
       event.qqModelDeclinedReply = true;
       return "";
@@ -11639,6 +11744,8 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     if (!parsedMemory.visibleText) return event.qqColdProactive || event.qqPrivateProactive ? "" : buildAssistantReply(event);
     return parsedMemory.visibleText;
   } finally {
+    // Late send-tool calls from an engine that kept going are refused.
+    await event.qqChatSendSession?.close();
     await nativeProgress.finish();
     event.imagePaths = imagePaths;
   }
@@ -13135,12 +13242,19 @@ async function processQqReplyEvent(event, options = {}) {
       }
     } catch (caught) {
       error = caught.message;
-      reply = event.qqColdProactive || event.qqPrivateProactive
+      const stopped = ["QQ_GENERATION_STOPPED", "QQ_REPLY_STOPPED", "QQ_FOLLOW_UP_FUSION_RETRY", "HUB_SHUTTING_DOWN"].includes(caught.code);
+      // Messages qq_chat.send already delivered stay this turn's reply.
+      const finalizedBeforeError = Boolean(event.qqChatToolDelivery);
+      const toolDelivery = await finalizeQqChatToolDelivery(event).catch(() => null);
+      const alreadySpoke = Number(toolDelivery?.deliveredBubbleCount || 0) > 0;
+      reply = event.qqColdProactive || event.qqPrivateProactive || stopped || alreadySpoke
         ? null
-        : ["QQ_GENERATION_STOPPED", "QQ_REPLY_STOPPED", "QQ_FOLLOW_UP_FUSION_RETRY", "HUB_SHUTTING_DOWN"].includes(caught.code)
-          ? null
-          // Nothing retries a failed reply automatically, so never promise one.
-          : "这边刚刚卡了一下，这条没弄出来，麻烦再叫我一次。";
+        // Nothing retries a failed reply automatically, so never promise one.
+        : "这边刚刚卡了一下，这条没弄出来，麻烦再叫我一次。";
+      if (alreadySpoke && !stopped && !finalizedBeforeError && !event.qqColdProactive && !event.qqPrivateProactive) {
+        // The Bot may have said "let me check" before failing; say so instead of going quiet.
+        await appendQqChatToolFailureNotice(event, replyScope);
+      }
     } finally {
       timings.generationDurationMs = Date.now() - generationStartedAt;
     }
@@ -13161,9 +13275,8 @@ async function processQqReplyEvent(event, options = {}) {
     timings
   };
 
-  if ((event.qqColdProactive || event.qqPrivateProactive)
-    && Number(event.qqScopeActivityVersion ?? event.groupActivityVersion ?? 0)
-      !== Number(qqGroupActivityVersionByGroupId.get(getQqMemoryScopeId(event)) || 0)) {
+  // Send-tool messages were checked before each send and are already out.
+  if (!event.qqChatToolDelivery && isQqTimedProactiveTurnStale(event)) {
     record.reply = null;
     record.decision = {
       ...record.decision,
@@ -13174,10 +13287,20 @@ async function processQqReplyEvent(event, options = {}) {
   }
 
   try {
+    const toolDelivery = !record.reply ? event.qqChatToolDelivery : null;
+    if (toolDelivery?.send) {
+      // qq_chat.send delivered these during the turn; record them, never resend.
+      record.reply = toolDelivery.reply;
+      record.send = toolDelivery.send;
+      record.toolDelivered = true;
+      record.toolSendCount = toolDelivery.sendCount;
+    }
     if (record.reply && commandAction?.beforeSend) await commandAction.beforeSend();
     const sendStartedAt = Date.now();
     try {
-      if (record.reply && source === "onebot") {
+      if (record.toolDelivered) {
+        // Already delivered and receipted by the send tool.
+      } else if (record.reply && source === "onebot") {
         assertHubAcceptingOutbound();
         if (isQqPrivateEvent(event)) {
           try {
@@ -13217,7 +13340,9 @@ async function processQqReplyEvent(event, options = {}) {
       if (record.reply && record.send?.ok !== false && commandAction?.afterSend) await commandAction.afterSend();
       const deliveredReply = deliveryReceipt?.deliveredBubbles?.filter(Boolean).join("\n") || "";
       const memoryReply = record.send?.ok === false ? deliveredReply : record.reply;
-      if (source === "onebot" && event.groupId && deliveryReceipt?.deliveredBubbleCount > 0) {
+      // Each send-tool message already reset the interest cycle when it was
+      // delivered; resetting again would drop messages that came after it.
+      if (source === "onebot" && event.groupId && deliveryReceipt?.deliveredBubbleCount > 0 && !record.toolDelivered) {
         await resetQqOrdinaryInterestAfterDeliveredBotReply(event, deliveryReceipt);
       }
       if (memoryReply && !commandAction?.skipMemory) {
@@ -13373,6 +13498,8 @@ function logQqReplyLifecycleCompleted(record, { lifecycleStartedAt, commandActio
     messageType: event.type || (event.groupId ? "group_message" : "private_message"),
     proactive: Boolean(decision.proactive),
     modelDeclinedReply: Boolean(event.qqModelDeclinedReply),
+    toolDelivered: Boolean(record.toolDelivered),
+    toolSendCount: Number(record.toolSendCount || 0),
     triggerMode: decision.triggerMode || (isMentionEvent(event) ? "explicit" : null),
     decisionReason: decision.reason || null,
     replyChars: String(record.reply || "").length,
@@ -13966,7 +14093,19 @@ function logQqNativeAgentProgress(event, progress) {
   }, AGENT_LOG_CATEGORY, event ? qqLogContext(event) : {});
 }
 
-function createQqNativeAgentProgressObserver(event, { replyScope = null } = {}) {
+function createQqNativeAgentProgressObserver(event, { replyScope = null, forward = true } = {}) {
+  // A turn that speaks through qq_chat.send sends its own progress; native
+  // commentary is then only logged, never forwarded as a second voice.
+  if (!forward) {
+    return {
+      observe(progress) {
+        logQqNativeAgentProgress(event, progress);
+        return false;
+      },
+      finish: async () => undefined,
+      snapshot: () => ({ acceptedCount: 0, maxMessages: 0, forwarded: false })
+    };
+  }
   const reporter = createQqNativeProgressReporter({
     send: (text) => sendQqTaskProgressMessage(event, text, { replyScope }),
     onError: (error) => {
@@ -13987,6 +14126,118 @@ function createQqNativeAgentProgressObserver(event, { replyScope = null } = {}) 
     finish: () => reporter.finish(),
     snapshot: () => reporter.snapshot()
   };
+}
+
+// Cold-group and private outreach turns stop speaking once someone else
+// talks in that conversation; a send-tool message checks it before each send.
+function isQqTimedProactiveTurnStale(event) {
+  return Boolean(event?.qqColdProactive || event?.qqPrivateProactive)
+    && Number(event.qqScopeActivityVersion ?? event.groupActivityVersion ?? 0)
+      !== Number(qqGroupActivityVersionByGroupId.get(getQqMemoryScopeId(event)) || 0);
+}
+
+// One qq_chat.send message: the same parser, drawn-picture import, reply
+// guards, addressing and OneBot senders as a final structured reply, but sent
+// right away while the turn keeps running. The workspace stays for later
+// attachments; the lifecycle turns all receipts into memory after the turn.
+async function deliverQqChatToolMessage(event, message, {
+  sendIndex = 0,
+  replyScope = null,
+  threadId = "",
+  turnStartedAt = 0
+} = {}) {
+  assertHubAcceptingOutbound();
+  assertQqReplyScopeActive(replyScope);
+  if (isQqTimedProactiveTurnStale(event)) {
+    return { refused: true, reason: "刚才有人说话了，这条主动消息不再发；等有人回应你时再说。" };
+  }
+  const outputDir = event.qqTaskWorkspace?.outputDir || "";
+  const parsed = await parseQqAgentOutputWithAttachmentImport(JSON.stringify(toQqAgentOutputValue(message)), {
+    bubbleSeparator: qqBubbleSeparator,
+    threadId,
+    generatedImagesDir: codexGeneratedImagesDir,
+    outputDir,
+    generatedAfterMs: turnStartedAt,
+    maxImageBytes: qqImageMaxBytes
+  });
+  if (parsed.importedImageCount > 0) {
+    trackBackgroundTask(rememberQqChatDrawings(parsed, event, outputDir), () => null);
+  }
+  let reply = state.qq.enhancer.enabled
+    ? deRepeatQqReply(deTemplateQqReply(parsed.output, event), event)
+    : parsed.output;
+  const parsedKnowledge = extractQqKnowledgeMarkers(reply);
+  event.qqKnowledgePatches = [...(event.qqKnowledgePatches || []), ...parsedKnowledge.patches];
+  const parsedMemory = extractQqConversationMemoryMarkers(parsedKnowledge.visibleText);
+  event.qqConversationMemoryPatches = [...(event.qqConversationMemoryPatches || []), ...parsedMemory.patches];
+  const targeted = extractQqReplyTargetDirective(normalizeVisibleQqReply(parsedMemory.visibleText, event));
+  reply = targeted.visibleText;
+  if (!reply) return { refused: true, reason: "清理掉控制标记后没有可发送的内容。" };
+  const targetDirective = targeted.directive
+    || (sendIndex > 0 ? { mode: "plain", senderId: null, implicit: true } : null);
+  let send;
+  try {
+    send = isQqPrivateEvent(event)
+      ? await sendOneBotPrivateReply(event, reply, { replyScope, keepWorkspace: true })
+      : await sendOneBotGroupReply(event, reply, { replyScope, keepWorkspace: true, targetDirective });
+  } catch (error) {
+    if (["QQ_REPLY_STOPPED", "HUB_SHUTTING_DOWN"].includes(error?.code)) throw error;
+    send = { ok: false, error: error.message };
+  }
+  const receipt = buildQqDeliveryReceipt(reply, send || {});
+  if (receipt.deliveredBubbleCount > 0) {
+    await resetQqOrdinaryInterestAfterDeliveredBotReply(event, receipt);
+  }
+  const visiblePreview = stripLocalQqMediaMarkers(reply).replace(/\s+/g, " ").trim().slice(0, 160);
+  logger[receipt.failedBubbleCount > 0 ? "warn" : "info"]("QQ chat message sent", {
+    operation: "reply.send_tool",
+    outcome: receipt.failedBubbleCount > 0
+      ? receipt.deliveredBubbleCount > 0 ? "partially-delivered" : "failed"
+      : "delivered",
+    groupId: event.groupId || null,
+    senderId: event.senderId || null,
+    sendIndex,
+    deliveredBubbleCount: receipt.deliveredBubbleCount,
+    failedBubbleCount: receipt.failedBubbleCount,
+    hasSticker: Boolean(message.sticker),
+    attachmentCount: message.attachments.length,
+    error: receipt.error || null,
+    preview: visiblePreview || null
+  }, "qq", qqLogContext(event));
+  return { reply, send, receipt };
+}
+
+// After a turn that already spoke fails, tell the people it did not finish,
+// as one more plain message recorded with the turn's other sends.
+async function appendQqChatToolFailureNotice(event, replyScope) {
+  const session = event?.qqChatSendSession;
+  if (!session) return;
+  try {
+    const notice = await deliverQqChatToolMessage(event, {
+      bubbles: ["刚才卡住了，后面的没弄完，麻烦再叫我一次"],
+      reply: { mode: "plain", targetUserId: "" },
+      attachments: [],
+      sticker: ""
+    }, { sendIndex: session.deliveries.length, replyScope });
+    if (!notice || notice.refused) return;
+    event.qqChatToolDelivery = summarizeQqChatSendDeliveries([...session.deliveries, notice], {
+      bubbleSeparator: qqBubbleSeparator
+    });
+  } catch {
+    // A stopped or superseded scope stays quiet.
+  }
+}
+
+// Closes the turn's send session (late calls are refused) and hands its
+// receipts to the lifecycle as one reply/send pair.
+async function finalizeQqChatToolDelivery(event) {
+  const session = event?.qqChatSendSession;
+  if (!session) return null;
+  await session.close();
+  if (event.qqChatToolDelivery) return event.qqChatToolDelivery;
+  const summary = summarizeQqChatSendDeliveries(session.deliveries, { bubbleSeparator: qqBubbleSeparator });
+  if (summary.sendCount > 0 && summary.send) event.qqChatToolDelivery = summary;
+  return summary;
 }
 
 async function rememberQqTaskProgress(event, progress) {
@@ -14466,8 +14717,10 @@ async function handleQqSubagentFinished(job) {
     raw: { message_id: messageId, time: Math.floor(Date.now() / 1000) }
   };
   ensureQqTraceId(event);
+  // The report is a real turn in the original OneBot conversation; any other
+  // source would generate it and then skip delivery.
   await processQqReplyEvent(event, {
-    source: "subagent",
+    source: "onebot",
     alreadyRemembered: true,
     decisionOverride: { ok: true, reason: "Sub-agent report", subagentReport: true }
   });
@@ -14647,7 +14900,12 @@ async function sendOneBotGroupReply(event, reply, options = {}) {
   try {
     assertQqReplyScopeActive(options.replyScope);
     const targetCandidates = collectQqReplyTargetCandidates(event);
-    const selectedTarget = resolveQqReplyTarget(event.qqReplyTargetDirective, targetCandidates);
+    // A send-tool message carries its own target; later messages of the same
+    // turn default to plain so the Bot does not quote the trigger every time.
+    const targetDirective = Object.hasOwn(options, "targetDirective")
+      ? options.targetDirective
+      : event.qqReplyTargetDirective;
+    const selectedTarget = resolveQqReplyTarget(targetDirective, targetCandidates);
     const addressing = selectedTarget.mode === "automatic"
       ? chooseQqReplyAddressing(
         event,
@@ -14667,7 +14925,7 @@ async function sendOneBotGroupReply(event, reply, options = {}) {
         invalidTarget: selectedTarget.invalidTarget || null
       };
     event.qqAddressing = addressing;
-    if (selectedTarget.explicit || selectedTarget.invalidTarget) {
+    if ((selectedTarget.explicit && !targetDirective?.implicit) || selectedTarget.invalidTarget) {
       logger.info("QQ model reply target applied", {
         groupId: event.groupId,
         senderId: event.senderId,
@@ -14724,7 +14982,8 @@ async function sendOneBotGroupReply(event, reply, options = {}) {
       }
     });
   } finally {
-    await cleanupQqEventTaskWorkspaceByBot(event);
+    // Mid-turn send-tool messages keep the workspace for the rest of the turn.
+    if (!options.keepWorkspace) await cleanupQqEventTaskWorkspaceByBot(event);
   }
 }
 
@@ -15125,7 +15384,7 @@ async function sendOneBotPrivateReply(event, reply, options = {}) {
       results
     };
   } finally {
-    await cleanupQqEventTaskWorkspaceByBot(event);
+    if (!options.keepWorkspace) await cleanupQqEventTaskWorkspaceByBot(event);
   }
 }
 

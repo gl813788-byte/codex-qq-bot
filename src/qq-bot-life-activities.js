@@ -35,7 +35,7 @@ export function selectQqLifeActivityDue(lifeState, {
   chatLimit = 0
 } = {}) {
   if (!enabled) return null;
-  const life = normalizeQqBotLifeState(lifeState);
+  const life = normalizeQqBotLifeState(lifeState, { now, timeZone });
   const segment = selectQqBotRoutineSegment(life.routine, { now, timeZone });
   if (!segment || segment.kind === "none" || !segment.plan) return null;
   if (segment.kind === "draw" && !canDraw) return null;
@@ -56,7 +56,7 @@ export function selectQqLifeActivityDue(lifeState, {
 }
 
 export function markQqLifeActivityStarted(lifeState, segment, { now = Date.now(), timeZone = "Asia/Shanghai" } = {}) {
-  const life = normalizeQqBotLifeState(lifeState);
+  const life = normalizeQqBotLifeState(lifeState, { now, timeZone });
   const ledger = normalizeQqLifeActivityLedger(life.activity, { now, timeZone });
   if (segment?.kind === "chat") {
     ledger.chats += 1;
@@ -69,7 +69,7 @@ export function markQqLifeActivityStarted(lifeState, segment, { now = Date.now()
 }
 
 export function recordQqLifeExperience(lifeState, experience, { now = Date.now() } = {}) {
-  const life = normalizeQqBotLifeState(lifeState);
+  const life = normalizeQqBotLifeState(lifeState, { now });
   const entry = normalizeQqLifeExperiences([{ ...experience, at: experience?.at || new Date(now).toISOString() }], { now })[0];
   if (!entry) return life;
   return { ...life, experiences: normalizeQqLifeExperiences([...life.experiences, entry], { now }) };
@@ -79,7 +79,7 @@ export function recordQqLifeExperience(lifeState, experience, { now = Date.now()
 // bypass them in the caller.
 export function consumeQqLifeSocialAllowance(lifeState, kind, { limits = {}, now = Date.now(), timeZone = "Asia/Shanghai" } = {}) {
   const field = { qzone_post: "qzonePosts", qzone_comment: "qzoneComments", friend_request: "friendRequests" }[kind];
-  const life = normalizeQqBotLifeState(lifeState);
+  const life = normalizeQqBotLifeState(lifeState, { now, timeZone });
   const ledger = normalizeQqLifeActivityLedger(life.activity, { now, timeZone });
   if (!field) return { ok: false, life, used: 0, limit: 0 };
   const limit = Math.max(0, Math.floor(Number(limits[kind]) || 0));
@@ -128,7 +128,7 @@ export function buildQqLifeActivityTask({
 }
 
 export function formatQqLifeExperienceContext(lifeState, { now = Date.now(), scopeId = "" } = {}) {
-  const life = normalizeQqBotLifeState(lifeState);
+  const life = normalizeQqBotLifeState(lifeState, { now });
   const recent = life.experiences
     .filter((entry) => now - Date.parse(entry.at) <= CONTEXT_HOURS * 3_600_000)
     .slice(-3);
@@ -140,7 +140,7 @@ export function formatQqLifeExperienceContext(lifeState, { now = Date.now(), sco
 }
 
 export function formatQqLifeExperienceDetail(lifeState, { now = Date.now() } = {}) {
-  const life = normalizeQqBotLifeState(lifeState);
+  const life = normalizeQqBotLifeState(lifeState, { now });
   const recent = life.experiences.slice(-6);
   if (!recent.length) return "最近还没有记录到真实经历。";
   return ["最近真实做过的事：", ...recent.map((entry) => `- ${formatAge(now - Date.parse(entry.at))}：${entry.summary}${entry.detail ? `\n  ${entry.detail.slice(0, 400)}` : ""}${formatSharedVideoIds(entry.detail)}`)].join("\n");

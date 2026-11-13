@@ -16,8 +16,14 @@ const maxStoredThreads = 64;
 // tools are listed again whenever the engine starts, so every MCP catalog
 // shares one transport fingerprint; a thread created with dynamic tools is
 // still replaced once when the transport changes.
-export function fingerprintQqCodexDynamicTools(tools = [], { transport = "dynamic" } = {}) {
-  const payload = transport === "mcp" ? { transport: "mcp", version: 1 } : (Array.isArray(tools) ? tools : []);
+// MCP catalogs are re-listed on every resume, so they share one fingerprint.
+// Speaking through qq_chat.send changes how the whole thread replies, so the
+// configured reply delivery is part of it (per deployment, not per turn: a
+// turn without tools must not replace the thread).
+export function fingerprintQqCodexDynamicTools(tools = [], { transport = "dynamic", replyDelivery = "final" } = {}) {
+  const payload = transport === "mcp"
+    ? { transport: "mcp", version: 1, ...(replyDelivery === "tool" ? { replyDelivery: "tool" } : {}) }
+    : (Array.isArray(tools) ? tools : []);
   return createHash("sha256")
     .update(JSON.stringify(payload, (_key, value) => {
       if (!value || typeof value !== "object" || Array.isArray(value)) return value;
@@ -26,10 +32,10 @@ export function fingerprintQqCodexDynamicTools(tools = [], { transport = "dynami
     .digest("hex");
 }
 
-export function resolveQqCodexReusableThreadId(plan, tools = [], { transport = "dynamic" } = {}) {
+export function resolveQqCodexReusableThreadId(plan, tools = [], { transport = "dynamic", replyDelivery = "final" } = {}) {
   const thread = plan?.existingThread;
   if (!plan?.persistent || thread?.protocolVersion !== QQ_CODEX_SESSION_PROTOCOL_VERSION) return null;
-  if (thread.dynamicToolsFingerprint !== fingerprintQqCodexDynamicTools(tools, { transport })) return null;
+  if (thread.dynamicToolsFingerprint !== fingerprintQqCodexDynamicTools(tools, { transport, replyDelivery })) return null;
   return thread.threadId || null;
 }
 

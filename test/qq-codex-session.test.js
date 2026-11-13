@@ -128,3 +128,21 @@ test("MCP-served tool catalogs keep a persistent thread reusable across catalog 
   assert.equal(resolveQqCodexReusableThreadId(plan(fingerprintQqCodexDynamicTools(toolsA)), toolsA, { transport: "mcp" }), null);
   assert.equal(resolveQqCodexReusableThreadId(plan(fingerprintQqCodexDynamicTools(toolsA)), toolsB), null);
 });
+
+test("switching to the send tool replaces an MCP thread once; tool-less turns keep it", async () => {
+  const { QQ_CODEX_SESSION_PROTOCOL_VERSION } = await import("../src/qq-codex-session.js");
+  const plan = (fingerprint) => ({
+    persistent: true,
+    existingThread: { threadId: "thread-1", protocolVersion: QQ_CODEX_SESSION_PROTOCOL_VERSION, dynamicToolsFingerprint: fingerprint }
+  });
+  const toolTools = buildQqNativeToolSpecs({ canSendMessages: true });
+  const finalPrint = fingerprintQqCodexDynamicTools([], { transport: "mcp" });
+  const toolPrint = fingerprintQqCodexDynamicTools(toolTools, { transport: "mcp", replyDelivery: "tool" });
+  // Deployments that keep the final-output contract keep their old threads.
+  assert.equal(finalPrint, fingerprintQqCodexDynamicTools(buildQqNativeToolSpecs({}), { transport: "mcp", replyDelivery: "final" }));
+  assert.notEqual(toolPrint, finalPrint);
+  assert.equal(resolveQqCodexReusableThreadId(plan(finalPrint), toolTools, { transport: "mcp", replyDelivery: "tool" }), null);
+  // A tool-less turn (private outreach) in a tool deployment reuses the same thread.
+  assert.equal(resolveQqCodexReusableThreadId(plan(toolPrint), [], { transport: "mcp", replyDelivery: "tool" }), "thread-1");
+  assert.equal(resolveQqCodexReusableThreadId(plan(toolPrint), buildQqNativeToolSpecs({ canSendMessages: true, isOwner: true }), { transport: "mcp", replyDelivery: "tool" }), "thread-1");
+});

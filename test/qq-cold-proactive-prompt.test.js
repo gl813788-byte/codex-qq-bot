@@ -36,3 +36,10 @@ test("approved cold chatter prompt stays lightweight without forbidding tools", 
   assert.match(prompt, /通常无需搜索；除非这句话天然依赖新资料/);
   assert.doesNotMatch(prompt, /禁止搜索|只能闲聊/);
 });
+
+test("a cold opener is sent through qq_chat.send when the Bot speaks through tools", () => {
+  const instruction = formatQqColdProactiveCompletionInstruction({ replyDelivery: "tool" });
+  assert.match(instruction, /qq_chat\.send 发出去/);
+  assert.match(instruction, /一条都不发，把 status 设为 silent/);
+  assert.doesNotMatch(formatQqColdProactiveCompletionInstruction(), /qq_chat/);
+});

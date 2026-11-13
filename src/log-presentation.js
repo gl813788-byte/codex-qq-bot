@@ -219,6 +219,8 @@ const messageTranslationsZh = Object.freeze({
   "QQ native Codex agent progress": "QQ 原生 Codex Agent 进度已记录",
   "QQ native Agent progress observer failed": "QQ 原生 Agent 进度观察器失败",
   "QQ task progress delivered": "QQ 任务进度已送达",
+  "QQ chat message sent": "Bot 用发言工具发出了一条 QQ 消息",
+  "QQ agent ended its turn without sending a message": "Agent 本轮结束时一条消息都没发",
   "QQ task progress delivery failed": "QQ 任务进度送达失败",
   "QQ reply delivery failure remembered for the next model turn": "QQ 回复发送失败信息已保留到下一轮模型上下文",
   "Codex fused replacement stalled; starting one fresh app-server recovery": "Codex 融合替代轮次停滞，正在用新进程恢复一次",
@@ -639,6 +641,12 @@ const detailLabelsZh = Object.freeze({
   roundsUsed: "已使用任务轮数",
   budgetRequestsUsed: "已使用预算申请次数",
   progressCount: "已发送进度条数",
+  sendIndex: "本轮第几次发言（从 0 起）",
+  hasSticker: "是否带表情包",
+  attachmentCount: "附件数",
+  structuredOutput: "是否为结构化输出",
+  toolDelivered: "是否由发言工具送达",
+  toolSendCount: "发言工具发送次数",
   steerFailureReason: "活跃轮次引导失败原因",
   fusionRecoveryCount: "融合超时恢复次数",
   fusionRecoveryReason: "融合超时恢复原因",
@@ -943,7 +951,8 @@ const detailValuesZh = Object.freeze({
     "media.tool": "媒体工具", "media.voice": "语音识别", "agent.subagent": "子代理",
     "memory.life_activity": "Bot 作息活动", "social.qzone_self": "Bot 自主空间动态",
     "social.card": "卡片与特殊消息", "memory.bot_drawing": "Bot 画作",
-    "media.update": "媒体组件更新", "history.archive": "历史消息与群文件"
+    "media.update": "媒体组件更新", "history.archive": "历史消息与群文件",
+    "reply.send_tool": "发言工具"
   },
   outcome: {
     loaded: "已加载", created: "已新建", updated: "已更新", rejected: "已拒绝", unchanged: "无变化", recorded: "已记录",
@@ -965,7 +974,8 @@ const detailValuesZh = Object.freeze({
     "owner-locked": "主人设定不可改", full: "已满", imported: "已导入",
     "invalid-field": "设定不可自改", "invalid-key": "设定项无效", "invalid-value": "取值无效", "not-allowed": "不允许",
     checked: "已检查新版本", deferred: "已推迟", check_failed: "检查失败", apply_failed: "安装失败",
-    transcribed: "已转写", partial: "部分转写", command_transcribed: "已转成文字", command_failed: "没能转成文字"
+    transcribed: "已转写", partial: "部分转写", command_transcribed: "已转成文字", command_failed: "没能转成文字",
+    "partially-delivered": "部分送达", "no-message": "一条都没发"
   },
   layer: {
     "short-term": "短期记忆", impression: "印象记忆", knowledge: "长期知识", unified: "统一记忆",
