@@ -22,7 +22,69 @@ const qqWrite = Object.freeze({ readOnlyHint: false, destructiveHint: false, ope
 const webRead = Object.freeze({ readOnlyHint: true, openWorldHint: true });
 const privileged = Object.freeze({ readOnlyHint: false, destructiveHint: true, openWorldHint: true });
 
-const fn = (name, description, inputSchema, annotations) => ({ type: "function", name, description, inputSchema, annotations });
+const fn = (name, description, inputSchema, annotations, extra = {}) => ({ type: "function", name, description, inputSchema, annotations, ...extra });
+
+export const QQ_CHAT_SEND_NAMESPACE = "qq_chat";
+export const QQ_CHAT_SEND_TOOL = "send";
+export const QQ_CHAT_SEND_MAX_BUBBLES = 12;
+
+export function isQqChatSendCall(call = {}) {
+  return call?.namespace === QQ_CHAT_SEND_NAMESPACE && call?.tool === QQ_CHAT_SEND_TOOL;
+}
+
+// The one tool the model speaks through. It stays loaded instead of waiting
+// behind tool search (Claude: anthropic/alwaysLoad, Codex dynamic tools:
+// deferLoading false), because nearly every turn uses it.
+export function buildQqChatSendToolNamespace({ privateChat = false } = {}) {
+  return {
+    type: "namespace",
+    name: QQ_CHAT_SEND_NAMESPACE,
+    description: "Talk in the current QQ conversation.",
+    tools: [fn(
+      QQ_CHAT_SEND_TOOL,
+      [
+        `Send a message to the current QQ ${privateChat ? "private chat" : "group"} right now. This is how you talk: people only see what this tool sends; your final structured output is private and never sent.`,
+        "Each bubbles item is one chat bubble, sent in order with a natural typing pause; one or two short bubbles is the usual chat rhythm, a real deliverable (code, steps, a long answer) may be one long bubble.",
+        "Call it whenever you have something to say: right away for a quick reaction, before a long task to say you are on it, after tools to give the result, or several times as the conversation goes. Say nothing at all when silence fits.",
+        "The result is the delivery receipt: only delivered bubbles were seen; never claim a failed one arrived and never resend what was delivered. New messages that arrive meanwhile are added to this turn; answer them with another send if they need it.",
+        "attachments sends files or images that already exist in this turn's output directory (absolute paths; a natively drawn picture's saved path is also accepted). sticker sends one sticker (#ref from qq_sticker search) as its own bubble after the text.",
+        privateChat
+          ? "reply.mode is ignored in private chats."
+          : "reply.mode: automatic (default; the Hub may quote the message you answer on your first send), plain, or quote/mention with targetUserId from this turn's reply candidates. To @ several people write @nickname or @QQ in the text.",
+        "Always the original conversation, never a cross-session focus; use qq_session.manage for other sessions. No Markdown headings, tool talk, local paths or control markers in bubbles."
+      ].join(" "),
+      objectSchema({
+        bubbles: {
+          type: "array",
+          maxItems: QQ_CHAT_SEND_MAX_BUBBLES,
+          items: { type: "string" },
+          description: "Ordered chat bubbles; may be empty when sending only a sticker or attachments."
+        },
+        reply: {
+          type: "object",
+          additionalProperties: false,
+          required: ["mode"],
+          properties: {
+            mode: { type: "string", enum: ["automatic", "plain", "quote", "mention"] },
+            targetUserId: string("QQ number from the reply candidates for quote/mention; otherwise empty.")
+          }
+        },
+        attachments: {
+          type: "array",
+          maxItems: 8,
+          items: objectSchema({
+            kind: { type: "string", enum: ["image", "file"] },
+            path: string("Absolute path inside this turn's task output directory, or a native drawing's saved path."),
+            name: string("Optional display filename; empty for images/default names.")
+          }, ["kind", "path"])
+        },
+        sticker: string("Optional #ref from qq_sticker search (or an exact sticker name); empty for none.")
+      }, ["bubbles"]),
+      qqWrite,
+      { alwaysLoad: true }
+    )]
+  };
+}
 
 // Every engine defers these schemas behind its tool search, so descriptions
 // carry the full usage contract and the prompt only names the namespaces.
@@ -33,10 +95,13 @@ export function buildQqNativeToolSpecs({
   hasMemoryPeople = false,
   canRecordRobotProfiles = false,
   canSearchImages = false,
-  canUseSubagents = false
+  canUseSubagents = false,
+  canSendMessages = false,
+  privateChat = false
 } = {}) {
   if (!toolsEnabled) return [];
   const namespaces = [
+    ...(canSendMessages ? [buildQqChatSendToolNamespace({ privateChat })] : []),
     {
       type: "namespace",
       name: "qq_context",
@@ -72,7 +137,7 @@ export function buildQqNativeToolSpecs({
         localWrite
       ), fn(
         "images",
-        "One picture tool for the original QQ conversation's images and your own drawings. list shows the image directory (image-… selectors; earlier images stay eligible within five minutes OR the latest 20 raw messages) and your saved drawings visible here (d-… ids: pictures you really drew with native image generation in a routine draw activity or while chatting; new drawings are saved automatically). inspect returns one as actual visual input. use copies one into this turn's output directory and returns its path, to send it via structured attachments or post it with qq_social.act(action=qzone_publish, target=输出). Only use selectors and ids from list; this tool never follows cross-session focus.",
+        "One picture tool for the original QQ conversation's images and your own drawings. list shows the image directory (image-… selectors; earlier images stay eligible within five minutes OR the latest 20 raw messages) and your saved drawings visible here (d-… ids: pictures you really drew with native image generation in a routine draw activity or while chatting; new drawings are saved automatically). inspect returns one as actual visual input. use copies one into this turn's output directory and returns its path, to send it as an attachment or post it with qq_social.act(action=qzone_publish, target=输出). Only use selectors and ids from list; this tool never follows cross-session focus.",
         objectSchema({
           action: { type: "string", enum: ["list", "inspect", "use"] },
           selector: string("An image selector from the image directory or a drawing id such as d-1a2b3c4d; required for inspect and use."),
@@ -204,7 +269,7 @@ export function buildQqNativeToolSpecs({
         webRead
       ), ...(canSearchImages ? [fn(
         "images",
-        "Search web pictures (including stickers/memes not in the local library) through Tavily, then download a chosen result into this turn's task output directory. search lists candidates with turn-scoped selectors and the provider's descriptions; download validates size and PNG/JPEG/GIF/WebP signature, returns the picture as visual input plus its absolute path. Inspect it before sending; to send, put that path in the structured attachments. Never follows cross-session focus.",
+        "Search web pictures (including stickers/memes not in the local library) through Tavily, then download a chosen result into this turn's task output directory. search lists candidates with turn-scoped selectors and the provider's descriptions; download validates size and PNG/JPEG/GIF/WebP signature, returns the picture as visual input plus its absolute path. Inspect it before sending; to send, put that path in your message's attachments. Never follows cross-session focus.",
         objectSchema({
           action: { type: "string", enum: ["search", "download"] },
           query: string("search: specific picture keywords; otherwise empty."),
@@ -373,7 +438,7 @@ export function buildQqNativeToolSpecs({
       description: "Search, view, label and favorite QQ stickers (表情包).",
       tools: [fn(
         "manage",
-        "search: find stickers in the library (local + account favorites + downloaded) by mood, scene or meme words such as 无语 震惊 摸鱼 狗头; an empty query returns a random labeled sample. Results carry #refs; to send one, put its #ref in the structured output sticker field. inspect: view a library sticker (#ref or exact name) or a current-message candidate (当前1) as actual visual input; animated stickers return sampled frames. label: after inspecting, save real tags and a description. favorite: save at most one current-message candidate to the QQ account. Never follows cross-session focus.",
+        "search: find stickers in the library (local + account favorites + downloaded) by mood, scene or meme words such as 无语 震惊 摸鱼 狗头; an empty query returns a random labeled sample. Results carry #refs; to send one, put its #ref in the sticker field of your message (qq_chat.send, or the structured output when that is how you reply). inspect: view a library sticker (#ref or exact name) or a current-message candidate (当前1) as actual visual input; animated stickers return sampled frames. label: after inspecting, save real tags and a description. favorite: save at most one current-message candidate to the QQ account. Never follows cross-session focus.",
         objectSchema({
           action: { type: "string", enum: ["search", "inspect", "label", "favorite"] },
           query: string("search: mood/scene/meme keywords separated by spaces; otherwise empty."),
@@ -442,7 +507,10 @@ export function createQqNativeToolDispatcher({
   return async function dispatch(call = {}) {
     const callId = String(call.callId || "").trim();
     if (callId && resultsByCallId.has(callId)) return resultsByCallId.get(callId);
-    if (callCount >= maxCalls) {
+    // Speaking has its own per-turn limit, so a tool-heavy turn can still
+    // deliver its answer after spending the ordinary tool budget.
+    const chatSendTool = isQqChatSendCall(call);
+    if (!chatSendTool && callCount >= maxCalls) {
       const result = { ok: false, error: "QQ native tool call limit reached for this turn." };
       notifyToolObserver(onToolEvent, {
         namespace: String(call.namespace || ""),
@@ -460,7 +528,7 @@ export function createQqNativeToolDispatcher({
       });
       return result;
     }
-    callCount += 1;
+    if (!chatSendTool) callCount += 1;
     const toolRound = callCount;
     if (event && typeof event === "object") event.qqCurrentToolRound = toolRound;
     const hostCommandTool = call.namespace === "qq_runtime" && call.tool === "host_command";
@@ -473,7 +541,8 @@ export function createQqNativeToolDispatcher({
       || call.namespace === "qq_media";
     // Reactions, recalls, profile lookups and the Bot's own state always
     // describe the original conversation, never a cross-session focus.
-    const originalConversationTool = (call.namespace === "qq_message" && call.tool === "act")
+    const originalConversationTool = chatSendTool
+      || (call.namespace === "qq_message" && call.tool === "act")
       || (call.namespace === "qq_agent" && call.tool === "manage")
       || (call.namespace === "qq_context" && call.tool === "lookup")
       || (call.namespace === "qq_self" && ["state", "language_habit", "persona"].includes(call.tool));

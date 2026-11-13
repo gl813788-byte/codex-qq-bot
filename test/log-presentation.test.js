@@ -456,3 +456,26 @@ test("row highlights skip trivial values but keep who said what first", () => {
   }), ["senderName", "text", "source", "senderId"]);
   assert.deepEqual(selectLogHighlightKeys({ category: "memory", details: { nested: { a: 1 }, title: "黑话" } }), ["title"]);
 });
+
+test("send-tool messages and silent tool turns are fully localized", () => {
+  assert.equal(formatLogMessage("QQ chat message sent"), "Bot 用发言工具发出了一条 QQ 消息");
+  assert.equal(formatLogMessage("QQ agent ended its turn without sending a message"), "Agent 本轮结束时一条消息都没发");
+  assert.deepEqual(localizeLogDetails({
+    operation: "reply.send_tool",
+    outcome: "partially-delivered",
+    sendIndex: 1,
+    hasSticker: true,
+    attachmentCount: 0,
+    toolDelivered: true,
+    toolSendCount: 2
+  }), {
+    操作: "发言工具",
+    结果: "部分送达",
+    "本轮第几次发言（从 0 起）": 1,
+    是否带表情包: true,
+    附件数: 0,
+    是否由发言工具送达: true,
+    发言工具发送次数: 2
+  });
+  assert.equal(localizeLogDetails({ outcome: "no-message" }).结果, "一条都没发");
+});

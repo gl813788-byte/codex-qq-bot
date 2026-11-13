@@ -59,3 +59,45 @@ test("follow-up bubbles wait in proportion to their length", () => {
   assert.ok(getQqTypingDelayMs("字".repeat(500), 650, { random: () => 1 }) <= 4200);
   assert.ok(getQqTypingDelayMs("[[qq_sticker:#abcdef]]", 650, { random: fixed }) < 650);
 });
+
+test("the send tool the model speaks through stays loaded on both engines", () => {
+  const specs = buildQqNativeToolSpecs({ canSendMessages: true });
+  const tools = flattenQqDynamicTools(specs);
+  const send = tools.find((tool) => tool.name === "qq_chat__send");
+  assert.ok(send, "qq_chat.send is offered when the turn speaks through it");
+  assert.equal(send.alwaysLoad, true);
+  assert.equal(send.annotations.readOnlyHint, false);
+  // Everything else keeps the deferred default.
+  assert.equal(tools.filter((tool) => tool.alwaysLoad).length, 1);
+  // Codex dynamic tools: only the send tool skips deferLoading.
+  const dynamic = toCodexDynamicToolSpecs(specs, { deferLoading: true });
+  const chat = dynamic.find((namespace) => namespace.name === "qq_chat");
+  assert.equal(Object.hasOwn(chat.tools[0], "deferLoading"), false);
+  assert.ok(dynamic.filter((namespace) => namespace.name !== "qq_chat").every((namespace) => namespace.tools.every((tool) => tool.deferLoading === true)));
+  // Without the send tool nothing is always loaded.
+  assert.equal(flattenQqDynamicTools(buildQqNativeToolSpecs({})).some((tool) => tool.name === "qq_chat__send"), false);
+});
+
+test("the MCP listing marks the send tool anthropic/alwaysLoad for Claude Code", async () => {
+  const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { startQqMcpToolServer, QQ_MCP_ALWAYS_LOAD_META_KEY } = await import("../src/infrastructure/agent/qq-mcp-tools.js");
+  const workDir = await mkdtemp(join(tmpdir(), "qq-mcp-always-"));
+  const server = await startQqMcpToolServer({
+    workDir,
+    tools: flattenQqDynamicTools(buildQqNativeToolSpecs({ canSendMessages: true })),
+    onCall: async () => ({ ok: true })
+  });
+  try {
+    const listing = JSON.parse(await readFile(server.toolsPath, "utf8"));
+    const send = listing.find((tool) => tool.name === "qq_chat__send");
+    assert.deepEqual(send._meta, { [QQ_MCP_ALWAYS_LOAD_META_KEY]: true });
+    assert.equal(QQ_MCP_ALWAYS_LOAD_META_KEY, "anthropic/alwaysLoad");
+    assert.equal(Object.hasOwn(send, "alwaysLoad"), false);
+    assert.equal(listing.filter((tool) => tool._meta).length, 1);
+  } finally {
+    server.close();
+    await rm(workDir, { recursive: true, force: true });
+  }
+});

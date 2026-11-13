@@ -96,7 +96,7 @@ export function formatQqStickerSearchResults(results = [], { query = "", total =
       const detail = [tags, item.description ? String(item.description).slice(0, 60) : ""].filter(Boolean).join("；");
       return `- ${ref} ${item.name}${meta ? `【${meta}】` : ""}${detail ? `：${detail}` : "（未标注，可先 inspect 看图再 label）"}`;
     }),
-    "选中后把 #编号 填进结构化输出的 sticker 字段即可发送；拿不准画面时先 inspect。每轮最多 1 张，不合适就不发。"
+    "选中后把 #编号 填进发消息时的 sticker 字段即可发送（qq_chat.send，或作为回复的结构化输出）；拿不准画面时先 inspect。每轮最多 1 张，不合适就不发。"
   ].join("\n");
 }
 

@@ -4,6 +4,7 @@ import {
   extractQqAgentInnerState,
   parseQqAgentOutput,
   qqAgentOutputSchema,
+  qqAgentToolModeOutputSchema,
   stripObsoleteQqControlMarkers
 } from "../src/infrastructure/codex/qq-agent-output.js";
 
@@ -94,4 +95,21 @@ test("a structured sticker becomes its own final bubble and inner state is never
   assert.deepEqual(extractQqAgentInnerState({
     innerThought: "", mood: "", status: "reply", affinity: { delta: 9, reason: " 真心感谢 ", nickname: "[老王]" }
   }), { innerThought: "", mood: "", silent: false, affinityDelta: 3, affinityReason: "真心感谢", nickname: "老王" });
+});
+
+test("when the model speaks through qq_chat.send its final output carries nothing visible", () => {
+  assert.equal(qqAgentToolModeOutputSchema.additionalProperties, false);
+  assert.deepEqual(qqAgentToolModeOutputSchema.required, ["innerThought", "status", "affinity", "mood"]);
+  for (const visible of ["text", "bubbles", "reply", "attachments", "sticker"]) {
+    assert.equal(Object.hasOwn(qqAgentToolModeOutputSchema.properties, visible), false, visible);
+  }
+  assert.deepEqual(qqAgentToolModeOutputSchema.properties.status.enum, ["sent", "silent"]);
+  assert.equal(qqAgentToolModeOutputSchema.properties.affinity, qqAgentOutputSchema.properties.affinity);
+  const sent = { innerThought: "他今天挺开心", status: "sent", affinity: { delta: 1, reason: "聊得来", nickname: "" }, mood: "开心" };
+  assert.deepEqual(parseQqAgentOutput(JSON.stringify(sent)), { structured: true, output: "", value: sent });
+  assert.equal(parseQqAgentOutput(JSON.stringify({ ...sent, status: "silent" })).output, "[[qq_silent]]");
+  const inner = extractQqAgentInnerState(sent);
+  assert.equal(inner.innerThought, "他今天挺开心");
+  assert.equal(inner.silent, false);
+  assert.equal(inner.affinityDelta, 1);
 });

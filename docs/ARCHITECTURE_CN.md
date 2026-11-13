@@ -68,10 +68,11 @@
 | `src/infrastructure/agent/agent-cli-version.js` | Agent CLI 版本探测 | 给仪表盘用的 `--version` 缓存结果，用最小环境在后台刷新 |
 | `src/infrastructure/agent/agent-child-env.js` | 引擎无关的子进程环境工具 | 两个引擎子进程环境共用的基础运行时白名单、白名单过滤和 ncc profile env 解析 |
 | `src/infrastructure/claude/claude-code-turn.js` | Claude Code 单轮客户端 | 与 `runCodexAppServerTurn` 同一接口：`claude -p` stream-json、`--json-schema` 结构化输出、追问/替代/中断、沙箱到 `--restricted` 工具集的映射、失效会话重建 |
-| `src/infrastructure/agent/qq-mcp-tools.js` + `qq-mcp-bridge.mjs` | 引擎无关的 QQ MCP 传输 | 把 QQ 工具目录展开为带注解的 MCP 工具，用本轮私有 Unix socket 提供工具，生成 Codex 的 `mcp_servers` 条目（由 Hub 预先批准、工具时限更长）和 Claude 的 `--mcp-config`；两个引擎拉起的同一个 stdio 桥把每次调用连同引擎调用 ID 交回 Hub，按原发送者权限执行 |
+| `src/infrastructure/agent/qq-mcp-tools.js` + `qq-mcp-bridge.mjs` | 引擎无关的 QQ MCP 传输 | 把 QQ 工具目录展开为带注解的 MCP 工具，用本轮私有 Unix socket 提供工具，生成 Codex 的 `mcp_servers` 条目（由 Hub 预先批准、工具时限更长）和 Claude 的 `--mcp-config`，给常驻工具（`qq_chat.send`）加上 `_meta["anthropic/alwaysLoad"]`，作为 Codex 动态工具时也不延迟加载；两个引擎拉起的同一个 stdio 桥把每次调用连同引擎调用 ID 交回 Hub，按原发送者权限执行 |
 | `src/infrastructure/codex/codex-lean-config.js` | 可选的精简 Codex 上下文 | 因为 Bot 同时是 Agent，默认关闭；开启后按线程覆盖配置，从 QQ 轮次去掉连接器、插件、浏览器/电脑操控、子 Agent、目标、技能目录和仓库 AGENTS.md（特权文件任务保留项目文档） |
 | `src/infrastructure/claude/claude-child-env.js` | Claude 子进程环境 | 白名单变量、连接 profile 和固定的静默开关 |
-| `src/infrastructure/codex/qq-native-tools.js` | QQ 工具目录与分发 | 带 MCP 注解的工具 Schema、每轮调用上限与 callId 去重、视觉/消息/资料查询/自身状态工具固定绑定原会话，以及映射到已有鉴权 Hub 操作 |
+| `src/infrastructure/codex/qq-native-tools.js` | QQ 工具目录与分发 | 带 MCP 注解的工具 Schema、每轮调用上限（发言工具单独计数）与 callId 去重、发言/视觉/消息/资料查询/自身状态工具固定绑定原会话，以及映射到已有鉴权 Hub 操作 |
+| `src/app/qq-chat-send-tool.js` | 用 `qq_chat.send` 说话 | 每轮一个发送会话：把参数规整成最终输出的可见字段、串行发送、每轮次数上限、拒绝已送达内容的重复和回合结束后的迟到调用、给模型的回执，以及把所有回执合成生命周期可用的一组 reply/send；实际投递由组合根注入 |
 | `src/qq-sticker-search.js` + `src/app/qq-sticker-tool.js` | 按需表情包库 | 由标签库身份生成的稳定 `#编号`、按情绪/场合/梗搜索并降低近期用过的权重，以及 `qq_sticker.manage` 的 search/inspect（真实视觉输入）/label/favorite |
 | `src/app/qq-message-tools.js` + `src/qq-sent-message-ledger.js` | 表情回应与撤回 | `qq_message.act` 给当前/被引用群消息贴表情回应，以及撤回 Bot 自己两分钟内已确认送达的消息；消息 ID 在最底层发送处只记在内存 |
 | `src/app/qq-lookup-tool.js` | 只读 QQ 资料查询 | `qq_context.lookup` 的成员/群/公告/精华信息，只限本会话出现过的人，绝不返回性别、年龄或地区 |
@@ -85,7 +86,7 @@
 | `src/qq-cross-session.js` | 跨会话目录与事件重绑定 | 列出/解析群聊私聊 selector，或把已验证角色安全绑定到目标会话 |
 | `src/qq-cross-session-search.js` | 跨会话聊天记录检索 | 聊天记录工具的读取/搜索流程：按关键词、人物 QQ 号或语义近似检索所有可访问会话或按名称/选择器指定的会话，逐条标注来源会话；执行他人私聊隐私边界，并为兴趣模型组装有界的跨会话材料 |
 | `src/qq-operation-log.js` | QQ 操作日志统一字段 | 统一 Agent、管理员、社交和跨会话的操作者及来源/目标范围 |
-| `src/infrastructure/codex/qq-agent-output.js` | QQ 结构化最终输出边界 | 内心OS/回复/静默/寻址/附件/表情包/好感/心情 Schema（内心OS最先生成且绝不投递）与投递兼容转换 |
+| `src/infrastructure/codex/qq-agent-output.js` | QQ 结构化最终输出边界 | 内心OS/回复/静默/寻址/附件/表情包/好感/心情 Schema（内心OS最先生成且绝不投递）、用 `qq_chat.send` 说话时的私有 Schema（内心OS、已发言/沉默、好感、心情）与投递兼容转换 |
 | `src/infrastructure/codex/qq-agent-attachments.js` | Codex 生成图导入边界 | 仅把当前轮、当前线程且通过图片签名校验的生成图复制进活动 QQ 任务输出目录；明确生图任务漏填附件时回收最新有效图片，普通文件策略保持不变 |
 | `src/qq-inbound-files.js` | QQ 入站文件信任与传输边界 | 提取并脱敏当前/引用文件元数据、分配本轮 selector、构造群聊/私聊 URL 查询，并把有界下载限制在活动任务 input |
 | `src/infrastructure/storage/settings-repository.js` | 原子设置 I/O | 加载或持久化 `data/settings.json`，不把文件系统逻辑塞回组合根 |

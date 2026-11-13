@@ -14,6 +14,8 @@ export function formatQqColdProactivePrompt({
   ].join("\n");
 }
 
-export function formatQqColdProactiveCompletionInstruction() {
-  return "现在按已批准模式认真尝试：能形成独立、自足、此刻发送也成立的新开场就输出；若只能迟到续旧话、重复自己或硬凑存在感，就把 status 设为 silent。";
+export function formatQqColdProactiveCompletionInstruction({ replyDelivery = "final" } = {}) {
+  return replyDelivery === "tool"
+    ? "现在按已批准模式认真尝试：能形成独立、自足、此刻发送也成立的新开场就用 qq_chat.send 发出去；若只能迟到续旧话、重复自己或硬凑存在感，就一条都不发，把 status 设为 silent。"
+    : "现在按已批准模式认真尝试：能形成独立、自足、此刻发送也成立的新开场就输出；若只能迟到续旧话、重复自己或硬凑存在感，就把 status 设为 silent。";
 }

@@ -213,10 +213,28 @@ refactor with a behavior change.
   index; put usage contracts in tool descriptions, not the prompt.
   `CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT=dynamic` keeps App Server dynamic
   tools with `deferLoading`.
+- The main model speaks through `qq_chat.send` (`src/app/qq-chat-send-tool.js`,
+  default `CODEX_REMOTE_CONTACT_QQ_REPLY_DELIVERY=tool`): each call delivers
+  bubbles/attachments/sticker to the original conversation at once through
+  the same parser, attachment import, guards, addressing and senders as a
+  final reply (later sends default to plain, workspace kept), resets the
+  interest cycle on delivery, and returns the receipt. It is the one
+  always-loaded tool (`_meta["anthropic/alwaysLoad"]`; no `deferLoading` as a
+  Codex dynamic tool) and has its own per-turn limit (12). The final output is
+  then private (`qqAgentToolModeOutputSchema`: innerThought, sent/silent,
+  affinity, mood); the lifecycle records all receipts as one exchange and
+  never resends. Native commentary is only logged. Repeats of delivered
+  content, late calls, and stale cold/private outreach sends are refused; a
+  turn that spoke and then failed sends one "rest did not finish" notice.
+  `final` restores the single structured reply; turns without QQ tools,
+  non-OneBot turns and owner/administrator file and image tasks always use it.
+  Sub-agent report turns run with source `onebot` so they are delivered.
 - Persistent thread reuse requires the stored tool fingerprint to match. MCP
   tools are re-listed on every `thread/resume`, so all MCP catalogs share one
   transport fingerprint; dynamic tools are fixed at `thread/start` (Codex
-  0.158+), so their exact catalog is fingerprinted. Changed dynamic catalogs, a
+  0.158+), so their exact catalog is fingerprinted. The configured reply
+  delivery (`tool`/`final`) is part of the MCP fingerprint, so switching it
+  replaces each persistent thread once; a turn without tools keeps it. Changed dynamic catalogs, a
   transport switch, or unknown fingerprints start a new thread with the
   complete current context; preserve QQ memory and old Codex history. Verify
   unchanged resume and one-time replacement after App Server upgrades. Claude Code
@@ -477,7 +495,7 @@ refactor with a behavior change.
   `memory.persona_self_edit`, `interest.model_test`, `media.tool`,
   `media.voice`, `agent.subagent`, `memory.life_activity`,
   `social.qzone_self`, `social.card`, `friend.add`, `memory.bot_drawing`,
-  `media.update` and `history.archive`.
+  `media.update`, `history.archive` and `reply.send_tool`.
   Language-statistics logs are low-noise checkpoints, contain counts/ratios rather than copied chat
   or inferred meaning, and fire when frequent candidates change or every 25
   text messages. Preserve stable English `message` values for JSON/API

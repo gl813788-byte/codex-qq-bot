@@ -346,3 +346,46 @@ test("archive reads the original conversation's server history even under a cros
   assert.ok(bound.every((boundEvent) => boundEvent === event));
   assert.deepEqual(normalizeDynamicToolResult(picture), { success: true, contentItems: visual });
 });
+
+test("qq_chat.send is offered only to turns that speak through it and always reaches the original conversation", async () => {
+  const names = (specs) => specs.map((namespace) => namespace.name);
+  assert.equal(names(buildQqNativeToolSpecs({})).includes("qq_chat"), false);
+  const specs = buildQqNativeToolSpecs({ canSendMessages: true, privateChat: true });
+  assert.equal(names(specs)[0], "qq_chat");
+  const send = specs[0].tools[0];
+  assert.equal(send.name, "send");
+  assert.equal(send.alwaysLoad, true);
+  assert.deepEqual(send.inputSchema.required, ["bubbles"]);
+  assert.match(send.description, /people only see what this tool sends/);
+  assert.match(send.description, /private chat/);
+  assert.match(send.description, /reply\.mode is ignored in private chats/);
+  assert.match(buildQqNativeToolSpecs({ canSendMessages: true })[0].tools[0].description, /quote\/mention with targetUserId/);
+  assert.deepEqual(buildQqNativeToolSpecs({ canSendMessages: true, toolsEnabled: false }), []);
+
+  const event = { groupId: "g1", isOwner: true };
+  const focused = { groupId: "g2", isOwner: true };
+  const sent = [];
+  const dispatch = createQqNativeToolDispatcher({
+    event,
+    maxCalls: 1,
+    executeCommand: async () => ({ ok: true, reply: "ok" }),
+    executeStructured: async (call, bound) => {
+      if (call.namespace === "qq_session") return { ok: true, scopeEvent: focused };
+      sent.push(bound);
+      return { ok: true, reply: "已送达 1 条" };
+    }
+  });
+  await dispatch({ namespace: "qq_session", tool: "manage", arguments: { action: "select" }, callId: "focus" });
+  // The ordinary budget (1 call) is spent, but speaking has its own limit.
+  const denied = await dispatch({ namespace: "qq_context", tool: "history", arguments: { query: "最近 5" }, callId: "history" });
+  assert.equal(denied.ok, false);
+  const first = await dispatch({ namespace: "qq_chat", tool: "send", arguments: { bubbles: ["在"] }, callId: "send-1" });
+  const second = await dispatch({ namespace: "qq_chat", tool: "send", arguments: { bubbles: ["好了"] }, callId: "send-2" });
+  assert.deepEqual([first.ok, second.ok], [true, true]);
+  assert.match(first.result, /已送达/);
+  // A cross-session focus never redirects what the Bot says here.
+  assert.deepEqual(sent, [event, event]);
+  // A retried call id is not delivered twice.
+  await dispatch({ namespace: "qq_chat", tool: "send", arguments: { bubbles: ["在"] }, callId: "send-1" });
+  assert.equal(sent.length, 2);
+});

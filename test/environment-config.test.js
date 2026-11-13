@@ -129,6 +129,12 @@ test("QQ agent turns default to deferred MCP tools and keep every native Codex f
   assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_AGENT_TOOL_TRANSPORT: "grpc" }).agentToolTransport, "mcp");
 });
 
+test("QQ replies are spoken through the send tool unless a deployment keeps the final-output contract", () => {
+  assert.equal(createEnvironmentConfig({}).qqReplyDelivery, "tool");
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_QQ_REPLY_DELIVERY: " Final " }).qqReplyDelivery, "final");
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_QQ_REPLY_DELIVERY: "stream" }).qqReplyDelivery, "tool");
+});
+
 test("agent host capacity gate settings default to auto and stay bounded", () => {
   const defaults = createEnvironmentConfig({});
   assert.equal(defaults.agentProcessLimit, "auto");
