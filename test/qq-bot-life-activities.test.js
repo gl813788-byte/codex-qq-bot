@@ -51,8 +51,24 @@ test("experiences are recorded, bounded in time and shown as real things the Bot
   assert.match(context, /你最近真实做过的事/);
   assert.match(context, /30 分钟前：刷到一个猫猫迷惑行为合集/);
   assert.equal(formatQqLifeExperienceContext(life, { now: now + 20 * 3_600_000 }), "");
-  const reloaded = normalizeQqBotLifeState(JSON.parse(JSON.stringify(life)));
+  const reloaded = normalizeQqBotLifeState(JSON.parse(JSON.stringify(life)), { now });
   assert.equal(reloaded.experiences[0].summary, "刷到一个猫猫迷惑行为合集，笑死");
+});
+
+test("life state follows the caller's clock, not the wall clock", () => {
+  // A fixed time far from today: experiences and the day's ledger must be
+  // judged at that time, or results change with the date tests run on.
+  const past = Date.parse("2020-03-01T06:00:00Z");
+  let life = recordQqLifeExperience(normalizeQqBotLifeState({}, { now: past }), { kind: "read", activity: "看书", summary: "读完一篇讲章鱼的长文" }, { now: past });
+  life = { ...life, activity: { date: "2020-03-01", runs: 4, lastAt: new Date(past).toISOString(), doneSegments: [], chats: 1 } };
+  const atThatTime = normalizeQqBotLifeState(life, { now: past + 3_600_000 });
+  assert.equal(atThatTime.experiences.length, 1);
+  assert.equal(atThatTime.activity.runs, 4);
+  assert.match(formatQqLifeExperienceContext(life, { now: past + 3_600_000 }), /读完一篇讲章鱼的长文/);
+  // Days later the same state has expired and rolled over.
+  const later = normalizeQqBotLifeState(life, { now: past + 10 * 86_400_000 });
+  assert.equal(later.experiences.length, 0);
+  assert.equal(later.activity.runs, 0);
 });
 
 test("the Bot's own Qzone writes and friend requests are capped per day", (t) => {

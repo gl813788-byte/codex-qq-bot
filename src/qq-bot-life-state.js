@@ -25,7 +25,9 @@ export function createEmptyQqBotLifeState() {
   return { version: QQ_BOT_LIFE_STATE_VERSION, mood: null, thoughts: [], routine: null, experiences: [], activity: null, drawings: [] };
 }
 
-export function normalizeQqBotLifeState(value = {}) {
+// Experiences expire and the activity ledger rolls over by date, so callers
+// that work at a given time pass it; the real clock is only the default.
+export function normalizeQqBotLifeState(value = {}, { now = Date.now(), timeZone = "Asia/Shanghai" } = {}) {
   const raw = value && typeof value === "object" ? value : {};
   const state = createEmptyQqBotLifeState();
   state.mood = normalizeMood(raw.mood);
@@ -34,8 +36,10 @@ export function normalizeQqBotLifeState(value = {}) {
     .filter(Boolean)
     .slice(-MAX_THOUGHTS);
   state.routine = normalizeQqBotRoutine(raw.routine);
-  state.experiences = normalizeQqLifeExperiences(raw.experiences);
-  state.activity = raw.activity && typeof raw.activity === "object" ? normalizeQqLifeActivityLedger(raw.activity) : null;
+  state.experiences = normalizeQqLifeExperiences(raw.experiences, { now });
+  state.activity = raw.activity && typeof raw.activity === "object"
+    ? normalizeQqLifeActivityLedger(raw.activity, { now, timeZone })
+    : null;
   state.drawings = normalizeQqBotDrawings(raw.drawings);
   return state;
 }
@@ -86,7 +90,7 @@ export function setQqBotRoutine(state, routine) {
 
 // Short prompt block; it is the Bot's private state, not a script.
 export function formatQqBotLifeContext(state, { scopeId = "", now = Date.now(), timeZone = "Asia/Shanghai" } = {}) {
-  const value = normalizeQqBotLifeState(state);
+  const value = normalizeQqBotLifeState(state, { now, timeZone });
   const lines = [];
   const segment = selectQqBotRoutineSegment(value.routine, { now, timeZone });
   if (segment) {
@@ -114,7 +118,7 @@ export function formatQqBotLifeContext(state, { scopeId = "", now = Date.now(), 
 }
 
 export function formatQqBotLifeDetail(state, { scopeId = "", now = Date.now(), timeZone = "Asia/Shanghai" } = {}) {
-  const value = normalizeQqBotLifeState(state);
+  const value = normalizeQqBotLifeState(state, { now, timeZone });
   const lines = [];
   lines.push(value.mood
     ? `心情：${value.mood.text}（${formatAge(now - Date.parse(value.mood.at))}）`
