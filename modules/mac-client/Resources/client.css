@@ -1069,6 +1069,11 @@ dialog::backdrop { background: var(--backdrop); backdrop-filter: blur(4px); -web
 .json-view { max-height: 60vh; overflow: auto; margin: 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .form-grid .span-2 { grid-column: span 2; }
+/* Main-model card: one group per engine, the active one first. */
+.ai-engine-group > .subhead { margin-bottom: 0; }
+.ai-engine-group + .ai-engine-group { padding-top: 14px; border-top: 1px solid var(--border); }
+.ai-engine-note { margin: -6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.ai-engine-note:empty { display: none; }
 
 .command-modal { margin-top: 12vh; }
 .command-shell { width: min(580px, calc(100vw - 32px)); border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-lg); overflow: hidden; }

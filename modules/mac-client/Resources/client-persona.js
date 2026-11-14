@@ -82,7 +82,13 @@ const personaTranslations = {
     presetLikes: "感兴趣", presetDislikes: "不感兴趣", presetStyle: "接话风格提示", savePreset: "保存兴趣偏好", presetSaved: "兴趣偏好已保存",
     aiSettings: "主模型", aiSettingsHint: "QQ 回复使用的模型与推理参数，保存后下一轮生效。", refreshModels: "刷新模型列表", reasoningSummary: "推理摘要",
     codexPersonality: "Codex 人格", serviceTier: "服务档位", saveAiSettings: "保存模型设置", aiSettingsSaved: "模型设置已保存", defaultTier: "默认",
-    aiClaudeHint: "当前引擎是 Claude Code，模型由 CODEX_REMOTE_CONTACT_CLAUDE_MODEL 决定（当前：{model}）。这里的设置在切回 Codex 后生效。",
+    aiClaudeGroup: "Claude Code", aiCodexGroup: "Codex", aiActiveEngine: "当前引擎", aiStandbyEngine: "未使用",
+    aiClaudeActiveNote: "QQ 回复用这里的模型。环境变量里的默认值是 {model}，在这里保存后以这里为准。",
+    aiClaudeStandbyNote: "切换到 Claude Code 引擎（ncc engine claude）后用于 QQ 回复。",
+    aiCodexActiveNote: "",
+    aiCodexDrawingNote: "QQ 回复现在用 Claude Code；Codex 的设置用于代画（qq_draw.image）和切回 Codex 引擎之后。点“刷新模型列表”读取可选模型。",
+    aiCodexStandbyNote: "切换到 Codex 引擎（ncc engine codex）后用于 QQ 回复。",
+    claudeEffortFollow: "跟随 Codex（{effort}）", claudeModelInvalid: "Claude 模型名只能是 opus、sonnet、haiku 这类别名或完整模型 ID。",
     modelsUnavailable: "读取模型列表失败：{error}",
     identitySettings: "身份与权限", identitySettingsHint: "名字、称呼和谁能管理 Bot；仅本机可修改。", assistantName: "Bot 名字", ownerLabel: "对主人的称呼",
     assistantMentions: "唤醒别名", commaSeparated: "用逗号分隔", ownerIds: "主人 QQ", adminIds: "管理员 QQ", idListHint: "空格或逗号分隔",
@@ -173,7 +179,13 @@ const personaTranslations = {
     presetLikes: "Interested in", presetDislikes: "Not interested in", presetStyle: "Chiming-in style hints", savePreset: "Save preferences", presetSaved: "Preferences saved",
     aiSettings: "Main model", aiSettingsHint: "Model and reasoning settings for QQ replies; applies from the next turn.", refreshModels: "Refresh models", reasoningSummary: "Reasoning summary",
     codexPersonality: "Codex personality", serviceTier: "Service tier", saveAiSettings: "Save model settings", aiSettingsSaved: "Model settings saved", defaultTier: "Default",
-    aiClaudeHint: "The engine is Claude Code; its model comes from CODEX_REMOTE_CONTACT_CLAUDE_MODEL (now: {model}). These settings apply after switching back to Codex.",
+    aiClaudeGroup: "Claude Code", aiCodexGroup: "Codex", aiActiveEngine: "Active engine", aiStandbyEngine: "Not in use",
+    aiClaudeActiveNote: "QQ replies use this model. The environment default is {model}; once saved here, this setting wins.",
+    aiClaudeStandbyNote: "Used for QQ replies after switching to the Claude Code engine (ncc engine claude).",
+    aiCodexActiveNote: "",
+    aiCodexDrawingNote: "QQ replies use Claude Code now; these Codex settings are used for drawing (qq_draw.image) and after switching back to Codex. Press Refresh models to load the choices.",
+    aiCodexStandbyNote: "Used for QQ replies after switching to the Codex engine (ncc engine codex).",
+    claudeEffortFollow: "Same as Codex ({effort})", claudeModelInvalid: "The Claude model must be an alias such as opus, sonnet or haiku, or a full model id.",
     modelsUnavailable: "Could not load models: {error}",
     identitySettings: "Identity & roles", identitySettingsHint: "Names and who controls the Bot; editable only on this machine.", assistantName: "Bot name", ownerLabel: "Owner title",
     assistantMentions: "Wake aliases", commaSeparated: "Comma separated", ownerIds: "Owner QQ", adminIds: "Admin QQ", idListHint: "Space or comma separated",
@@ -1116,13 +1128,30 @@ function renderAdminSettings() {
   updateSaveSyncButton();
 }
 
+// One group per engine: the engine that answers QQ comes first and is marked
+// active; the other group says when it is used.
 function renderAiSettingsForm(admin) {
   const form = $("#aiSettingsForm");
-  const usesCatalog = Boolean(admin.agent?.modelCatalog);
-  $("#aiSettingsHint").textContent = usesCatalog
-    ? (admin.modelError ? t("modelsUnavailable", { error: admin.modelError }) : t("aiSettingsHint"))
-    : t("aiClaudeHint", { model: admin.agent?.model || "default" });
+  const claudeActive = admin.agent?.engine === "claude";
+  const drawsWithCodex = admin.agent?.drawing === "codex";
+  $("#aiSettingsHint").textContent = admin.modelError ? t("modelsUnavailable", { error: admin.modelError }) : t("aiSettingsHint");
+  const claudeGroup = $("#aiClaudeGroup");
+  const codexGroup = $("#aiCodexGroup");
+  const [first, second] = claudeActive ? [claudeGroup, codexGroup] : [codexGroup, claudeGroup];
+  if (form.firstElementChild !== first) form.insertBefore(first, form.firstElementChild);
+  if (first.nextElementSibling !== second) form.insertBefore(second, first.nextElementSibling);
+  for (const [badge, active] of [[$("#aiClaudeBadge"), claudeActive], [$("#aiCodexBadge"), !claudeActive]]) {
+    badge.textContent = t(active ? "aiActiveEngine" : "aiStandbyEngine");
+    badge.className = `badge ${active ? "ok" : "off"}`;
+  }
+  $("#aiClaudeNote").textContent = claudeActive
+    ? t("aiClaudeActiveNote", { model: admin.claude?.defaultModel || "opus" })
+    : t("aiClaudeStandbyNote");
+  $("#aiCodexNote").textContent = claudeActive
+    ? t(drawsWithCodex ? "aiCodexDrawingNote" : "aiCodexStandbyNote")
+    : t("aiCodexActiveNote");
   if (form.contains(document.activeElement) || form.dataset.dirty === "1") return;
+  renderClaudeSettingsFields(admin);
   const models = admin.models?.length ? admin.models : [{ model: admin.ai.model, displayName: admin.ai.model, supportedReasoningEfforts: [admin.ai.reasoningEffort], serviceTiers: [] }];
   $("#aiModel").innerHTML = models.map((item) => `<option value="${escapeHtml(item.model)}">${escapeHtml(item.displayName || item.model)}${item.isDefault ? " ★" : ""}</option>`).join("");
   $("#aiModel").value = admin.ai.model;
@@ -1142,13 +1171,31 @@ function fillAiModelDependents(effort, tier) {
   $("#aiServiceTier").value = tiers.some((item) => item.id === tier) ? tier : "";
 }
 
+function renderClaudeSettingsFields(admin) {
+  const claude = admin.claude || {};
+  $("#aiClaudeModelOptions").innerHTML = (claude.suggestions || ["opus", "sonnet", "haiku"])
+    .map((model) => `<option value="${escapeHtml(model)}"></option>`).join("");
+  $("#aiClaudeModel").value = claude.model || "";
+  const efforts = claude.efforts?.length ? claude.efforts : ["low", "medium", "high", "xhigh", "max"];
+  $("#aiClaudeEffort").innerHTML = `<option value="">${escapeHtml(t("claudeEffortFollow", { effort: admin.ai?.reasoningEffort || "—" }))}</option>`
+    + efforts.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join("");
+  $("#aiClaudeEffort").value = efforts.includes(claude.reasoningEffort) ? claude.reasoningEffort : "";
+}
+
 async function saveAiSettings(control, { announce = true } = {}) {
+  const claudeModel = $("#aiClaudeModel").value.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:@[\]-]{0,119}$/.test(claudeModel)) {
+    showToast(t("claudeModelInvalid"), "error");
+    $("#aiClaudeModel").focus();
+    return false;
+  }
   const body = {
     model: $("#aiModel").value,
     reasoningEffort: $("#aiEffort").value,
     reasoningSummary: $("#aiSummary").value,
     personality: $("#aiPersonality").value,
-    serviceTier: $("#aiServiceTier").value
+    serviceTier: $("#aiServiceTier").value,
+    claude: { model: claudeModel, reasoningEffort: $("#aiClaudeEffort").value }
   };
   try {
     personaUi.admin = await mutate(() => api("/api/settings/ai", { method: "POST", body: JSON.stringify(body) }), { control, success: announce ? t("aiSettingsSaved") : "", busyKey: "admin" });

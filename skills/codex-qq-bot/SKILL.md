@@ -627,6 +627,12 @@ Claude invariants that must not be weakened:
   non-secret `CODEX_REMOTE_CONTACT_*` markers. Connection keys come from the
   optional `~/.claude/ncc-profiles/active.env` profile, otherwise the machine's
   `claude` login is used.
+- Claude's model and effort are dashboard-editable (`ai.claude` in
+  `data/settings.json`, validated by `src/infrastructure/claude/claude-settings.js`);
+  `CODEX_REMOTE_CONTACT_CLAUDE_MODEL`/`_EFFORT` are only defaults. The runner
+  reads them per turn through `resolveEngineSettings`. With Claude active the
+  dashboard reads the Codex model list only on "refresh" (`catalog.peek()`
+  otherwise), so opening settings never starts a codex process.
 
 Claude Code has no native image generation; with a `codex` CLI installed
 (`CODEX_REMOTE_CONTACT_CODEX_DRAWING=auto`) its turns, owner image tasks and

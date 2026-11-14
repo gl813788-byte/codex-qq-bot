@@ -28,6 +28,10 @@ export function createCodexModelCatalog({
         });
       return pending;
     },
+    // The last loaded list without starting a process; null when none.
+    peek() {
+      return cache ? cache.models : null;
+    },
     clear() {
       cache = null;
     }

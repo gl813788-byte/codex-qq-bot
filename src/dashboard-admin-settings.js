@@ -8,6 +8,7 @@ import {
   isValidReasoningEffort,
   isValidReasoningSummary
 } from "./app/qq-codex-runtime-settings.js";
+import { applyClaudeSettingsPatch } from "./infrastructure/claude/claude-settings.js";
 
 const QQ_ID_PATTERN = /^[1-9][0-9]{4,12}$/;
 
@@ -18,8 +19,11 @@ export function normalizeDashboardAiSettingsPatch(input, current = {}, { models 
     reasoningEffort: String(current.reasoningEffort || ""),
     reasoningSummary: String(current.reasoningSummary || "auto"),
     personality: String(current.personality || "none"),
-    serviceTier: String(current.serviceTier || "")
+    serviceTier: String(current.serviceTier || ""),
+    ...(current.claude ? { claude: { ...current.claude } } : {})
   };
+  // Claude Code's own model and effort, checked by the Claude validator.
+  if (Object.hasOwn(input, "claude")) next.claude = applyClaudeSettingsPatch(input.claude, current.claude || {});
   const catalog = Array.isArray(models) ? models : [];
   let selected = catalog.find((item) => item.model === next.model) || null;
   if (Object.hasOwn(input, "model")) {

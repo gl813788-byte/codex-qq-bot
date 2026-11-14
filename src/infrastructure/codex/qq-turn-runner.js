@@ -113,6 +113,9 @@ export function createQqCodexTurnRunner({
   claudePath = "claude",
   claudeModel = null,
   claudeReasoningEffort = null,
+  // Live settings ({ ai, claudeModel, claudeReasoningEffort }) read at each
+  // turn, so dashboard changes apply from the next turn.
+  resolveEngineSettings = null,
   toolTransport = "mcp",
   leanContext = false,
   activeChildren,
@@ -156,7 +159,9 @@ export function createQqCodexTurnRunner({
       const previousQuota = state.maintenance.codex.quota;
       let generationId = null;
       const generationIds = new WeakMap();
-      const engineSettings = { ai: state.ai, claudeModel, claudeReasoningEffort };
+      const engineSettings = typeof resolveEngineSettings === "function"
+        ? resolveEngineSettings()
+        : { ai: state.ai, claudeModel, claudeReasoningEffort };
       const model = agent.selectModel(engineSettings);
       const reasoningEffort = agent.selectReasoningEffort(engineSettings);
       let capacitySlot = null;
