@@ -55,7 +55,7 @@ export function buildQqChatSendToolNamespace({ privateChat = false } = {}) {
         "Each bubbles item is one chat bubble, sent in order with a natural typing pause; one or two short bubbles is the usual chat rhythm, a real deliverable (code, steps, a long answer) may be one long bubble.",
         "Call it whenever you have something to say: right away for a quick reaction, before a long task to say you are on it, after tools to give the result, or several times as the conversation goes. Say nothing at all when silence fits.",
         "The result is the delivery receipt: only delivered bubbles were seen; never claim a failed one arrived and never resend what was delivered. New messages that arrive meanwhile are added to this turn; answer them with another send if they need it.",
-        "attachments sends files or images that already exist in this turn's output directory (absolute paths; a natively drawn picture's saved path is also accepted). sticker sends one sticker (#ref from qq_sticker search) as its own bubble after the text.",
+        "attachments sends files or images: a path that already exists in this turn's output directory (absolute; a natively drawn picture's saved path is also accepted), or a text file you write right here with name + content (Markdown, TXT, CSV, JSON, HTML, code, SVG...; the Hub saves it into the output directory, so this works even when your own file writes fail). Any file format can go as kind file. kind image shows a picture in chat: PNG/JPEG/GIF/WebP go as they are, and SVG (including SVG content you write), BMP, TIFF, ICO, AVIF and HEIC are rendered to PNG first; something that is not a picture, or an SVG that references external files or URLs, arrives as a file instead and the receipt says so. sticker sends one sticker (#ref from qq_sticker search) as its own bubble after the text.",
         privateChat
           ? "reply.mode is ignored in private chats."
           : "reply.mode: automatic (default; the Hub may quote the message you answer on your first send), plain, or quote/mention with targetUserId from this turn's reply candidates. To @ several people write @nickname or @QQ in the text.",
@@ -82,9 +82,10 @@ export function buildQqChatSendToolNamespace({ privateChat = false } = {}) {
           maxItems: 8,
           items: objectSchema({
             kind: { type: "string", enum: ["image", "file"] },
-            path: string("Absolute path inside this turn's task output directory, or a native drawing's saved path."),
-            name: string("Optional display filename; empty for images/default names.")
-          }, ["kind", "path"])
+            path: string("Absolute path inside this turn's task output directory, or a native drawing's saved path. Empty when content is given."),
+            name: string("Display filename with its extension, e.g. 笔记.md or chart.svg; required with content (the extension decides the format), optional with path."),
+            content: string("Optional full text of the file to send (UTF-8, at most 512 KB, 1 MB per send). With kind image it must be an SVG document; use only #fragment or data:image references inside it.")
+          }, ["kind"])
         },
         sticker: string("Optional #ref from qq_sticker search (or an exact sticker name); empty for none.")
       }, ["bubbles"]),

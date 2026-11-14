@@ -112,7 +112,8 @@ const QQ_TOOL_DESCRIBERS = Object.freeze({
       .map((bubble) => String(bubble ?? "").trim())
       .filter(Boolean);
     if (!bubbles.length && typeof args.text === "string" && args.text.trim()) bubbles.push(args.text.trim());
-    const attachments = Array.isArray(args.attachments) ? args.attachments.filter((item) => item?.path) : [];
+    // Inline attachments are named, never quoted: their content stays out of logs.
+    const attachments = Array.isArray(args.attachments) ? args.attachments.filter((item) => item?.path || item?.name) : [];
     const mode = args.reply?.mode && args.reply.mode !== "automatic"
       ? `${{ plain: "不引用", quote: "引用", mention: "@" }[args.reply.mode] || args.reply.mode}${args.reply.targetUserId ? ` ${args.reply.targetUserId}` : ""}`
       : "";
@@ -120,7 +121,7 @@ const QQ_TOOL_DESCRIBERS = Object.freeze({
       bubbles.slice(0, 4).map((bubble) => quote(bubble)).join(""),
       bubbles.length > 4 ? `等 ${bubbles.length} 条` : "",
       args.sticker ? `表情包 ${clip(args.sticker, 20)}` : "",
-      attachments.length ? `附件 ${attachments.map((item) => fileName(item.path)).slice(0, 3).join("、")}` : "",
+      attachments.length ? `附件 ${attachments.map((item) => fileName(item.path || item.name)).slice(0, 3).join("、")}` : "",
       mode ? `（${mode}）` : ""
     ]);
     const delivered = String(result.text || "").match(/(?:已送达|送达) (\d+) 条/);

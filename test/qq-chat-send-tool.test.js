@@ -216,3 +216,46 @@ test("a turn that spoke and then failed sends one plain notice recorded with its
   assert.equal(await refusing.appendNotice(), null);
   assert.equal(refusing.summary, before);
 });
+
+test("attachments may carry text content, which counts as its own content for repeats", async () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>';
+  const message = normalizeQqChatSendArguments({
+    attachments: [
+      { kind: "file", name: "周报.md", content: "# 本周" },
+      { name: "chart.svg", content: svg },
+      { kind: "file", name: "empty.txt", content: "" },
+      { kind: "file", path: "/w/out/a.pdf", name: "a.pdf" }
+    ]
+  });
+  assert.deepEqual(message.attachments, [
+    { kind: "file", path: "", name: "周报.md", content: "# 本周" },
+    { kind: "image", path: "", name: "chart.svg", content: svg },
+    { kind: "file", path: "/w/out/a.pdf", name: "a.pdf" }
+  ]);
+
+  const delivers = [];
+  const session = createQqChatSendSession({
+    deliver: async (outgoing) => {
+      delivers.push(outgoing.attachments.map((attachment) => attachment.content ?? attachment.path));
+      return { ...delivered(["给你"]), notes: ["「chart.svg」没能转成图片（渲染出错或超时），已按文件发送。"] };
+    }
+  });
+  const first = await session.send({ bubbles: ["给你"], attachments: [{ kind: "file", name: "a.md", content: "v1" }] });
+  assert.equal(first.ok, true);
+  assert.match(first.reply, /已送达 1 条.*chart\.svg」没能转成图片.*按文件发送/);
+  const repeat = await session.send({ bubbles: ["给你"], attachments: [{ kind: "file", name: "a.md", content: "v1" }] });
+  assert.equal(repeat.ok, false);
+  const revised = await session.send({ bubbles: ["给你"], attachments: [{ kind: "file", name: "a.md", content: "v2" }] });
+  assert.equal(revised.ok, true, "changed content is a new message, not a repeat");
+  assert.deepEqual(delivers, [["v1"], ["v2"]]);
+});
+
+test("a refused send passes its attachment notes to the model", async () => {
+  const session = createQqChatSendSession({
+    deliver: async () => ({ refused: true, reason: "没有可发送的内容。", notes: ["附件「big.txt」内容太长，没有发送。"] })
+  });
+  const result = await session.send({ attachments: [{ kind: "file", name: "big.txt", content: "x" }] });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /没有可发送的内容。附件「big\.txt」内容太长/);
+  assert.match(formatQqChatSendResult({ deliveredBubbleCount: 0, failedBubbleCount: 1, failedBubbles: ["看"] }, { notes: ["「x.txt」不是 QQ 能显示的图片，已按文件发送。"] }).error, /不是 QQ 能显示的图片/);
+});

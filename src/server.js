@@ -67,7 +67,8 @@ import {
   shouldUseQqFileImageTask
 } from "./qq-file-image-task-intent.js";
 import { resolveAllowedQqMarkerPath, resolveQqMarkerPath } from "./qq-output-policy.js";
-import { resolveQqReplyFileAttachments } from "./qq-reply-files.js";
+import { estimateOneBotTransferTimeoutMs, resolveQqReplyFileAttachments, toOneBotLocalFileUri } from "./qq-reply-files.js";
+import { prepareQqOutboundReplyMarkers, writeQqInlineAttachments } from "./app/qq-outbound-attachments.js";
 import { importRecentCodexGeneratedImages, parseQqAgentOutputWithAttachmentImport } from "./infrastructure/codex/qq-agent-attachments.js";
 import { createQqZoneClient } from "./qq-qzone.js";
 import {
@@ -610,6 +611,7 @@ import { compressQqImage } from "./qq-enhancer/compress-image.js";
 import {
   createOneBotEventDeduplicator,
   getEventDedupeKey,
+  isEmptyOneBotMessage,
   isOneBotPokeNotice,
   isOneBotPokeToSelf,
   normalizeOneBotEvent,
@@ -869,7 +871,7 @@ let runQqInterestModelStructuredTask = async () => ({
   reason: "qq-enhancer module is not installed"
 });
 let buildQqStickerCatalog = async () => [];
-let buildQqImageSegment = (filePath) => ({ type: "image", data: { file: `file://${filePath}` } });
+let buildQqImageSegment = (filePath) => ({ type: "image", data: { file: toOneBotLocalFileUri(filePath) } });
 let extractOneBotImageInputs = extractOneBotImageInputsFallback;
 let formatQqImageSummary = formatQqImageSummaryFallback;
 let formatQqStickerCatalog = () => "";
@@ -4649,8 +4651,9 @@ function fetchQqInboundFileUrl(url) {
 }
 
 function oneBotFetch(endpoint, options = {}) {
-  const { signal, ...requestOptions } = options;
-  const timeoutSignal = AbortSignal.timeout(oneBotRequestTimeoutMs);
+  const { signal, timeoutMs, ...requestOptions } = options;
+  // Uploads pass a longer, size-based timeout; everything else keeps the default.
+  const timeoutSignal = AbortSignal.timeout(Math.max(oneBotRequestTimeoutMs, Number(timeoutMs) || 0));
   const headers = new Headers(requestOptions.headers || {});
   if (oneBotAccessToken && !headers.has("authorization")) {
     headers.set("authorization", `Bearer ${oneBotAccessToken}`);
@@ -11437,7 +11440,11 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       persistentResume
         ? "你正在继续同一个 QQ 长期会话。沿用线程中已经建立的身份、关系、稳定规则和前文，不要要求重新介绍背景。"
         : "下面是本轮由 Hub 归一化并按权限裁剪后的 QQ 上下文。",
-      formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages: qqAgentCanDraw, drawsWithTool: qqAgentDrawsWithTool }),
+      formatQqTaskWorkspaceContext(taskWorkspace, {
+        canGenerateImages: qqAgentCanDraw,
+        drawsWithTool: qqAgentDrawsWithTool,
+        inlineAttachments: speaksThroughTool
+      }),
       persistentResume ? formatQqPersistentFusionNote({ replyDelivery }) : null,
       "",
       intentContext,
@@ -14223,7 +14230,18 @@ async function deliverQqChatToolMessage(event, message, {
   if (isQqTimedProactiveTurnStale(event)) {
     return { refused: true, reason: "刚才有人说话了，这条主动消息不再发；等有人回应你时再说。" };
   }
-  const parsed = await importQqAgentReplyOutput(JSON.stringify(toQqAgentOutputValue(message)), event, {
+  // Text content in attachments becomes a real file in the output directory.
+  let inline;
+  try {
+    inline = await writeQqInlineAttachments(message.attachments, { outputDir: event.qqTaskWorkspace?.outputDir || "" });
+  } catch {
+    return { refused: true, reason: "附件内容没能写成文件，这条没有发出；可以再试一次或只发文字。" };
+  }
+  const outgoing = inline.attachments === message.attachments ? message : { ...message, attachments: inline.attachments };
+  if (outgoing.bubbles.length === 0 && !outgoing.sticker && outgoing.attachments.length === 0) {
+    return { refused: true, reason: "没有可发送的内容。", notes: inline.notes };
+  }
+  const parsed = await importQqAgentReplyOutput(JSON.stringify(toQqAgentOutputValue(outgoing)), event, {
     threadId,
     outputDir: event.qqTaskWorkspace?.outputDir || "",
     turnStartedAt
@@ -14233,7 +14251,7 @@ async function deliverQqChatToolMessage(event, message, {
     : parsed.output;
   const targeted = extractQqReplyTargetDirective(normalizeVisibleQqReply(takeQqReplyMemoryMarkers(polished, event), event));
   const reply = targeted.visibleText;
-  if (!reply) return { refused: true, reason: "清理掉控制标记后没有可发送的内容。" };
+  if (!reply) return { refused: true, reason: "清理掉控制标记后没有可发送的内容。", notes: inline.notes };
   const targetDirective = targeted.directive
     || (sendIndex > 0 ? { mode: "plain", senderId: null, implicit: true } : null);
   let send;
@@ -14265,7 +14283,11 @@ async function deliverQqChatToolMessage(event, message, {
     error: receipt.error || null,
     preview: visiblePreview || null
   }, "qq", qqLogContext(event));
-  return { reply, send, receipt };
+  const notes = [
+    ...inline.notes,
+    ...(Array.isArray(send?.results) ? send.results : []).flatMap((result) => result?.attachmentNotes || [])
+  ];
+  return { reply, send, receipt, notes };
 }
 
 async function rememberQqTaskProgress(event, progress) {
@@ -15086,9 +15108,11 @@ async function sendOneBotGroupReply(event, reply, options = {}) {
   }
 }
 
-async function sendOneBotGroupMessage(event, reply, options = {}) {
+async function sendOneBotGroupMessage(event, rawReply, options = {}) {
   if (!event.groupId) return { ok: false, reason: "Missing group id" };
   assertQqReplyScopeActive(options.replyScope);
+  const prepared = await prepareQqOutboundReply(rawReply, event, options.replyScope);
+  const reply = prepared.reply;
   const mediaPaths = await resolveQqReplyMedia(reply, { stickerDir: qqStickerDir, event });
   const { attachments: fileAttachments, failures: fileFailures } = await resolveQqReplyFiles(reply, event);
   assertQqReplyScopeActive(options.replyScope);
@@ -15101,6 +15125,7 @@ async function sendOneBotGroupMessage(event, reply, options = {}) {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: options.replyScope?.signal,
+      timeoutMs: await estimateQqMediaSendTimeoutMs(mediaPaths),
       body: JSON.stringify({
         group_id: Number(event.groupId),
         message
@@ -15122,7 +15147,7 @@ async function sendOneBotGroupMessage(event, reply, options = {}) {
     fileResults.push(await uploadOneBotGroupFile(event.groupId, attachment, { signal: options.replyScope?.signal }));
   }
 
-  return combineOneBotSendResults(messageResult, fileResults);
+  return withQqAttachmentNotes(combineOneBotSendResults(messageResult, fileResults), prepared.notes);
 }
 
 // Shows QQ's "对方正在输入…" in a private chat while a reply is being
@@ -15487,9 +15512,11 @@ async function sendOneBotPrivateReply(event, reply, options = {}) {
   }
 }
 
-async function sendOneBotPrivateMessage(event, reply, options = {}) {
+async function sendOneBotPrivateMessage(event, rawReply, options = {}) {
   if (!event.senderId) return { ok: false, reason: "Missing user id" };
   assertQqReplyScopeActive(options.replyScope);
+  const prepared = await prepareQqOutboundReply(rawReply, event, options.replyScope);
+  const reply = prepared.reply;
   const mediaPaths = await resolveQqReplyMedia(reply, { stickerDir: qqStickerDir, event });
   const { attachments: fileAttachments, failures: fileFailures } = await resolveQqReplyFiles(reply, event);
   assertQqReplyScopeActive(options.replyScope);
@@ -15502,6 +15529,7 @@ async function sendOneBotPrivateMessage(event, reply, options = {}) {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: options.replyScope?.signal,
+      timeoutMs: await estimateQqMediaSendTimeoutMs(mediaPaths),
       body: JSON.stringify({
         user_id: Number(event.senderId),
         message
@@ -15523,7 +15551,7 @@ async function sendOneBotPrivateMessage(event, reply, options = {}) {
     fileResults.push(await uploadOneBotPrivateFile(event.senderId, attachment, { signal: options.replyScope?.signal }));
   }
 
-  return combineOneBotSendResults(messageResult, fileResults);
+  return withQqAttachmentNotes(combineOneBotSendResults(messageResult, fileResults), prepared.notes);
 }
 
 async function buildOneBotPrivateReplyMessage(reply, resolvedImagePaths = null, { event, fileAttachments = [], fileFailures = [] } = {}) {
@@ -16187,26 +16215,41 @@ function hasSendableOneBotMessage(message) {
 async function uploadOneBotGroupFile(groupId, attachment, options = {}) {
   return uploadOneBotFile("upload_group_file", {
     group_id: Number(groupId),
-    file: attachment.path,
+    file: toOneBotLocalFileUri(attachment.path),
     name: attachment.name || basename(attachment.path)
-  }, options);
+  }, { ...options, size: attachment.size });
 }
 
 async function uploadOneBotPrivateFile(userId, attachment, options = {}) {
   return uploadOneBotFile("upload_private_file", {
     user_id: Number(userId),
-    file: attachment.path,
+    file: toOneBotLocalFileUri(attachment.path),
     name: attachment.name || basename(attachment.path)
-  }, options);
+  }, { ...options, size: attachment.size });
 }
 
-async function uploadOneBotFile(endpoint, payload, { signal } = {}) {
-  const response = await oneBotFetch(endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    signal,
-    body: JSON.stringify(payload)
-  });
+// NapCat answers an upload only after QQ has the whole file, so the wait
+// grows with the file instead of using the ordinary request timeout.
+async function uploadOneBotFile(endpoint, payload, { signal, size = 0 } = {}) {
+  let response;
+  try {
+    response = await oneBotFetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal,
+      timeoutMs: estimateOneBotTransferTimeoutMs(size, { minMs: oneBotRequestTimeoutMs }),
+      body: JSON.stringify(payload)
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return {
+      ok: false,
+      endpoint,
+      error: error?.name === "TimeoutError"
+        ? "QQ 上传文件超时，没有确认送达（可能仍在后台传完，先别重发，问一下对方收到没有）。"
+        : `QQ 上传文件失败：${String(error?.message || error)}`
+    };
+  }
   const body = await readResponseJson(response).catch(() => ({}));
   return {
     ok: response.ok && (body.status == null || body.status === "ok"),
@@ -16214,6 +16257,55 @@ async function uploadOneBotFile(endpoint, payload, { signal } = {}) {
     body,
     endpoint
   };
+}
+
+// Outgoing pictures are uploaded inside the message itself; the timeout
+// follows their total size the same way.
+async function estimateQqMediaSendTimeoutMs(mediaPaths = []) {
+  let bytes = 0;
+  for (const mediaPath of mediaPaths) {
+    if (isHttpUrl(mediaPath)) continue;
+    bytes += (await stat(mediaPath).catch(() => null))?.size || 0;
+  }
+  return estimateOneBotTransferTimeoutMs(bytes, { minMs: oneBotRequestTimeoutMs });
+}
+
+// Converts or re-labels this turn's outgoing pictures before the normal
+// path/type checks; see src/app/qq-outbound-attachments.js.
+async function prepareQqOutboundReply(reply, event, replyScope = null) {
+  const outputDir = event?.qqTaskWorkspace?.outputDir || "";
+  if (!outputDir || !String(reply || "").includes("[[qq_image:")) return { reply, notes: [] };
+  let prepared;
+  try {
+    prepared = await prepareQqOutboundReplyMarkers(reply, { outputDir, projectDir, signal: replyScope?.signal });
+  } catch (error) {
+    // A stopped reply stays a stop; anything else sends the reply unprepared.
+    assertQqReplyScopeActive(replyScope);
+    logger.warn("QQ outgoing attachments prepared", {
+      operation: "reply.attachment_prepare",
+      outcome: "failed",
+      groupId: event.groupId || null,
+      senderId: event.senderId || null,
+      error
+    }, "qq", qqLogContext(event));
+    return { reply, notes: [] };
+  }
+  if (prepared.conversions.length) {
+    logger.info("QQ outgoing attachments prepared", {
+      operation: "reply.attachment_prepare",
+      groupId: event.groupId || null,
+      senderId: event.senderId || null,
+      convertedCount: prepared.conversions.filter((item) => item.outcome === "converted").length,
+      renamedCount: prepared.conversions.filter((item) => item.outcome === "renamed").length,
+      sentAsFileCount: prepared.conversions.filter((item) => item.outcome !== "converted" && item.outcome !== "renamed").length,
+      formats: [...new Set(prepared.conversions.map((item) => item.format))]
+    }, "qq", qqLogContext(event));
+  }
+  return prepared;
+}
+
+function withQqAttachmentNotes(result, notes = []) {
+  return notes.length ? { ...result, attachmentNotes: [...notes] } : result;
 }
 
 async function sendOneBotPoke({ groupId, userId }) {
@@ -17308,6 +17400,15 @@ async function handleApi(req, res) {
         noticeType: payload.notice_type || null
       }, "onebot");
       return sendJson(res, 200, { ignored: true, reason: "Only group/private message events are handled" });
+    }
+
+    if (isEmptyOneBotMessage(payload)) {
+      logger.debug("OneBot empty message ignored", {
+        messageType: payload.message_type || null,
+        groupId: normalizeQqIdentifier(payload.group_id) || null,
+        senderId: normalizeQqIdentifier(payload.user_id) || null
+      }, "onebot");
+      return sendJson(res, 200, { ignored: true, reason: "Message has no content segments" });
     }
 
     const normalizedOneBotEvent = normalizeOneBotEvent(payload, {

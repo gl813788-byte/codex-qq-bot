@@ -90,6 +90,8 @@
 | `src/qq-cross-session-search.js` | 跨会话聊天记录检索 | 聊天记录工具的读取/搜索流程：按关键词、人物 QQ 号或语义近似检索所有可访问会话或按名称/选择器指定的会话，逐条标注来源会话；执行他人私聊隐私边界，并为兴趣模型组装有界的跨会话材料 |
 | `src/qq-operation-log.js` | QQ 操作日志统一字段 | 统一 Agent、管理员、社交和跨会话的操作者及来源/目标范围 |
 | `src/infrastructure/codex/qq-agent-output.js` | QQ 结构化最终输出边界 | 内心OS/回复/静默/寻址/附件/表情包/好感/心情 Schema（内心OS最先生成且绝不投递）、用 `qq_chat.send` 说话时的私有 Schema（内心OS、已发言/沉默、好感、心情）与投递兼容转换 |
+| `src/app/qq-outbound-attachments.js` | 待发附件整理 | 把 `qq_chat.send` 附件里的文本 `content` 写进本轮输出目录；把输出目录里 QQ 不能显示的图片转成 PNG；不是图片或渲染失败时改按普通文件发送，并为回执留下说明 |
+| `src/qq-enhancer/convert-image.js` | 图片格式识别与转换 | 按文件头识别格式、检查 SVG 安全性并确定渲染尺寸、在限制内用 `rsvg-convert` / `magick` 转成 PNG |
 | `src/infrastructure/codex/qq-agent-attachments.js` | Codex 生成图导入边界 | 仅把当前轮、当前线程且通过图片签名校验的生成图复制进活动 QQ 任务输出目录；明确生图任务漏填附件时回收最新有效图片，普通文件策略保持不变 |
 | `src/qq-inbound-files.js` | QQ 入站文件信任与传输边界 | 提取并脱敏当前/引用文件元数据、分配本轮 selector、构造群聊/私聊 URL 查询，并把有界下载限制在活动任务 input |
 | `src/infrastructure/storage/settings-repository.js` | 原子设置 I/O | 加载或持久化 `data/settings.json`，不把文件系统逻辑塞回组合根 |

@@ -222,6 +222,8 @@ const messageTranslationsZh = Object.freeze({
   "QQ native Agent progress observer failed": "QQ 原生 Agent 进度观察器失败",
   "QQ task progress delivered": "QQ 任务进度已送达",
   "QQ chat message sent": "Bot 用发言工具发出了一条 QQ 消息",
+  "QQ outgoing attachments prepared": "发送前整理了 QQ 附件（图片转 PNG 或改按文件发送）",
+  "OneBot empty message ignored": "忽略了一条没有任何内容的 OneBot 消息（如 QQ 的文件已接收提示）",
   "QQ agent ended its turn without sending a message": "Agent 本轮结束时一条消息都没发",
   "QQ task progress delivery failed": "QQ 任务进度送达失败",
   "QQ reply delivery failure remembered for the next model turn": "QQ 回复发送失败信息已保留到下一轮模型上下文",
@@ -646,6 +648,10 @@ const detailLabelsZh = Object.freeze({
   sendIndex: "本轮第几次发言（从 0 起）",
   hasSticker: "是否带表情包",
   attachmentCount: "附件数",
+  convertedCount: "转成 PNG 的图片数",
+  renamedCount: "更正扩展名的图片数",
+  sentAsFileCount: "改按文件发送数",
+  formats: "原始图片格式",
   structuredOutput: "是否为结构化输出",
   toolDelivered: "是否由发言工具送达",
   activity: "做了什么",
@@ -962,7 +968,7 @@ const detailValuesZh = Object.freeze({
     "memory.life_activity": "Bot 作息活动", "social.qzone_self": "Bot 自主空间动态",
     "social.card": "卡片与特殊消息", "memory.bot_drawing": "Bot 画作",
     "media.update": "媒体组件更新", "history.archive": "历史消息与群文件",
-    "reply.send_tool": "发言工具"
+    "reply.send_tool": "发言工具", "reply.attachment_prepare": "发送前附件整理"
   },
   outcome: {
     loaded: "已加载", created: "已新建", updated: "已更新", rejected: "已拒绝", unchanged: "无变化", recorded: "已记录",
