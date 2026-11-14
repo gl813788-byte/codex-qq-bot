@@ -611,6 +611,7 @@ import { compressQqImage } from "./qq-enhancer/compress-image.js";
 import {
   createOneBotEventDeduplicator,
   getEventDedupeKey,
+  isEmptyOneBotMessage,
   isOneBotPokeNotice,
   isOneBotPokeToSelf,
   normalizeOneBotEvent,
@@ -17399,6 +17400,15 @@ async function handleApi(req, res) {
         noticeType: payload.notice_type || null
       }, "onebot");
       return sendJson(res, 200, { ignored: true, reason: "Only group/private message events are handled" });
+    }
+
+    if (isEmptyOneBotMessage(payload)) {
+      logger.debug("OneBot empty message ignored", {
+        messageType: payload.message_type || null,
+        groupId: normalizeQqIdentifier(payload.group_id) || null,
+        senderId: normalizeQqIdentifier(payload.user_id) || null
+      }, "onebot");
+      return sendJson(res, 200, { ignored: true, reason: "Message has no content segments" });
     }
 
     const normalizedOneBotEvent = normalizeOneBotEvent(payload, {

@@ -223,6 +223,7 @@ const messageTranslationsZh = Object.freeze({
   "QQ task progress delivered": "QQ 任务进度已送达",
   "QQ chat message sent": "Bot 用发言工具发出了一条 QQ 消息",
   "QQ outgoing attachments prepared": "发送前整理了 QQ 附件（图片转 PNG 或改按文件发送）",
+  "OneBot empty message ignored": "忽略了一条没有任何内容的 OneBot 消息（如 QQ 的文件已接收提示）",
   "QQ agent ended its turn without sending a message": "Agent 本轮结束时一条消息都没发",
   "QQ task progress delivery failed": "QQ 任务进度送达失败",
   "QQ reply delivery failure remembered for the next model turn": "QQ 回复发送失败信息已保留到下一轮模型上下文",

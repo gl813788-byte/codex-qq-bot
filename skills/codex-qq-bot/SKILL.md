@@ -268,7 +268,9 @@ refactor with a behavior change.
   as files with a receipt note. Upload timeouts follow NapCat's own
   (10 s + size at 256 KB/s), and local paths reach NapCat as `file://` URIs
   with `%` escaped (NapCat decodes them). Never render SVGs through
-  ImageMagick or loosen the SVG reference check.
+  ImageMagick or loosen the SVG reference check. Segment-less OneBot
+  messages (QQ's "file received" tip after a private file send arrives as
+  one from the peer) are dropped before routing (`isEmptyOneBotMessage`).
 - Protocol output budgets (Codex 8 MiB, Claude 64 MiB) scale with the
   messages a turn answers (`scaleProtocolBytesForWorkload`: +25% per extra
   message, max 3x): the starting batch via `workloadMessageCount`, steered or

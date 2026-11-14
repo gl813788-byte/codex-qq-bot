@@ -73,6 +73,18 @@ export function normalizeOneBotEvent(payload, { extractImageInputs = () => [] } 
   };
 }
 
+// QQ reports some system tips as a message from the other person with no
+// segments at all (seen right after the Bot sent a private file, when QQ
+// marks it as received). There is nothing to answer, so it never reaches
+// routing or follow-up fusion.
+export function isEmptyOneBotMessage(payload) {
+  const message = payload?.message;
+  const hasContent = Array.isArray(message)
+    ? message.length > 0
+    : String(message ?? "").trim().length > 0;
+  return !hasContent && !String(payload?.raw_message ?? "").trim();
+}
+
 export function isOneBotPokeNotice(payload) {
   return payload?.post_type === "notice"
     && payload?.notice_type === "notify"

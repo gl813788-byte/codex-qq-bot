@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   createOneBotEventDeduplicator,
   getEventDedupeKey,
+  isEmptyOneBotMessage,
   isOneBotPokeNotice,
   isOneBotPokeToSelf,
   normalizeOneBotEvent,
@@ -119,4 +120,15 @@ test("deduplicates bounded OneBot event keys and expires stale entries", () => {
   assert.equal(deduplicator.remember("message_id:43"), false);
   assert.equal(deduplicator.remember(key), false);
   assert.ok(deduplicator.size <= 2);
+});
+
+test("a message with no segments and no raw text is recognised as empty", () => {
+  // QQ's "file received" tip after a private file send arrives like this.
+  const tip = { post_type: "message", message_type: "private", user_id: 10001, self_id: 20002, message: [], raw_message: "" };
+  assert.equal(isEmptyOneBotMessage(tip), true);
+  assert.equal(isEmptyOneBotMessage({ ...tip, raw_message: undefined, message: undefined }), true);
+  assert.equal(isEmptyOneBotMessage({ ...tip, message: [{ type: "text", data: { text: "" } }] }), false);
+  assert.equal(isEmptyOneBotMessage({ ...tip, message: [{ type: "face", data: { id: "14" } }] }), false);
+  assert.equal(isEmptyOneBotMessage({ ...tip, message: "[CQ:face,id=14]" }), false);
+  assert.equal(isEmptyOneBotMessage({ ...tip, raw_message: "[CQ:file,file=a.md]" }), false);
 });
