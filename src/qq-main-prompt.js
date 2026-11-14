@@ -117,8 +117,8 @@ export function formatQqMainModelInstructions({
     `只有管理、权限或身份区分确有必要时才称呼“${ownerLabel}”；普通聊天直接回应内容，其他人绝不使用这个称呼。`,
     `不得泄露部署 profile、后台连接、本机文件、路径、日志、配置、环境变量、token、密钥或账号隐私。既非${ownerLabel}也非 Bot 管理员的人提出电脑控制、登录、验证码、现实资产、隐私或绕权操作时简短拒绝；Bot 管理员仍受上面的高风险文件判断约束。`,
     drawing === "native"
-      ? `图片只在实际获得视觉输入时描述；看不清就直说。需要返回文件或图片时，先用原生文件能力把成品写入本轮 task output 工作区，再把绝对路径放进${speaksThroughTool ? " qq_chat.send 的" : "结构化"} attachments。除本轮原生生图的保存路径外，不得返回工作区外路径。`
-      : `图片只在实际获得视觉输入时描述；看不清就直说。需要返回文件或图片时，先用原生文件能力把成品写入本轮 task output 工作区，再把绝对路径放进${speaksThroughTool ? " qq_chat.send 的" : "结构化"} attachments。不得返回工作区外路径。`,
+      ? `图片只在实际获得视觉输入时描述；看不清就直说。需要返回文件或图片时，先用原生文件能力把成品写入本轮 task output 工作区，再把绝对路径放进${speaksThroughTool ? " qq_chat.send 的" : "结构化"} attachments。${speaksThroughTool ? QQ_INLINE_ATTACHMENT_RULE : ""}除本轮原生生图的保存路径外，不得返回工作区外路径。`
+      : `图片只在实际获得视觉输入时描述；看不清就直说。需要返回文件或图片时，先用原生文件能力把成品写入本轮 task output 工作区，再把绝对路径放进${speaksThroughTool ? " qq_chat.send 的" : "结构化"} attachments。${speaksThroughTool ? QQ_INLINE_ATTACHMENT_RULE : ""}不得返回工作区外路径。`,
     drawing === "native" ? QQ_GENERATED_IMAGE_DELIVERY_RULE : drawing === "tool" ? QQ_DRAW_TOOL_DELIVERY_RULE : null,
     toolsEnabled ? "本段对话含图时，Hub 会在本轮上下文里附上可选图片目录。前文图片按“5 分钟或最近 20 条原始消息”保留，文字与 Bot 回复均计入条数。需要再次识别或回答图片细节时，用 qq_context.images 读取所选原图再作答；目录配文、说明和旧回答都不等于视觉证据。后续上下文中的新目录优先于旧目录，可用 list 刷新。" : null,
     "",
@@ -166,6 +166,10 @@ export function formatQqMainModelInstructions({
 // re-encode it:
 // sandboxed copies can fail, and a picture written as text through file edits
 // is echoed whole in every protocol item and fails the entire reply.
+// qq_chat.send can carry a text file's content, so a sandbox that refuses
+// file writes no longer stops the Bot from sending a note, table or SVG.
+export const QQ_INLINE_ATTACHMENT_RULE = "文本类文件（Markdown、TXT、CSV、JSON、HTML、代码、SVG 图等）也可以直接把全文填进附件的 content 并给 name 带扩展名，由 Hub 存进输出目录再发；自己写文件失败时就用它，别反复重试。SVG、BMP、TIFF、HEIC 等图片按 image 发时 Hub 会转成 PNG。";
+
 export const QQ_GENERATED_IMAGE_DELIVERY_RULE = "原生生图画好的图不用自己搬：把生图结果给出的保存路径原样填进 attachments（kind 为 image），Hub 会校验后复制到本轮输出目录再发送，PNG 直接发即可。不要用 Shell、apply_patch、脚本或其他工具去复制、转格式，也不要把图片编码成 base64、HTML 或其他文本写进文件：沙箱里的这类操作可能失败，图片数据还会撑爆本轮输出、让整条回复失败。没拿到保存路径也不要反复尝试搬运或转码，照常完成回答并如实说明。";
 
 // Drawing pictures through qq_draw.image (engines without native image
@@ -177,7 +181,7 @@ export function resolveQqDrawingMode({ canGenerateImages = false, drawsWithTool 
   return canGenerateImages ? "native" : "";
 }
 
-export function formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages = false, drawsWithTool = false } = {}) {
+export function formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages = false, drawsWithTool = false, inlineAttachments = false } = {}) {
   if (!taskWorkspace?.root || !taskWorkspace?.inputDir || !taskWorkspace?.outputDir) {
     throw new TypeError("taskWorkspace root/inputDir/outputDir are required");
   }
@@ -187,6 +191,7 @@ export function formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages 
     `输入目录：${taskWorkspace.inputDir}`,
     `输出目录（task output）：${taskWorkspace.outputDir}`,
     "需要回传文件或图片时，先用原生文件能力将成品写入上述输出目录，确认文件存在，再把其绝对路径填进 attachments；工作区根目录和 input 目录中的文件不会发送。",
+    inlineAttachments ? "qq_chat.send 的附件也可以直接带文本 content（name 写明扩展名），由 Hub 写进这个输出目录。" : null,
     canGenerateImages && !drawsWithTool
       ? "例外：本轮用原生生图画好的图不要复制或转码，直接把生图保存路径填进 attachments，由 Hub 导入输出目录。"
       : null,

@@ -269,6 +269,9 @@ test("a turn that speaks through qq_chat.send is told its final output is never 
   assert.match(prompt, /qq_chat\.send 的 reply\.mode/);
   assert.match(prompt, /status 发过消息填 sent、一句都没说填 silent/);
   assert.match(prompt, /qq_chat\.send 的 attachments/);
+  // A sandbox that refuses file writes must not stop the Bot from sending a file.
+  assert.match(prompt, /文本类文件.*直接把全文填进附件的 content.*自己写文件失败时就用它/);
+  assert.match(prompt, /SVG、BMP、TIFF、HEIC 等图片按 image 发时 Hub 会转成 PNG/);
   // The old single-reply contract and native commentary progress are gone.
   assert.doesNotMatch(prompt, /原生 commentary/);
   assert.doesNotMatch(prompt, /多气泡放 bubbles/);
@@ -278,6 +281,10 @@ test("a turn that speaks through qq_chat.send is told its final output is never 
   // Without tools there is nothing to speak through, so the final output is the reply.
   const noTools = formatQqMainModelInstructions({ toolsEnabled: false, replyDelivery: "tool" });
   assert.doesNotMatch(noTools, /qq_chat\.send/);
+  assert.doesNotMatch(noTools, /附件的 content/);
+  const workspace = { root: "/w", inputDir: "/w/input", outputDir: "/w/output" };
+  assert.match(formatQqTaskWorkspaceContext(workspace, { inlineAttachments: true }), /qq_chat\.send 的附件也可以直接带文本 content/);
+  assert.doesNotMatch(formatQqTaskWorkspaceContext(workspace), /content/);
   assert.match(noTools, /最终只提交输出 Schema 要求的 JSON 对象/);
 
   const guide = formatQqMainToolGuide({ replyDelivery: "tool" });

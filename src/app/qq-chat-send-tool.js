@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { QQ_CHAT_SEND_MAX_BUBBLES } from "../infrastructure/codex/qq-native-tools.js";
 import { QQ_CHAT_SEND_FAILURE_NOTICE } from "../qq-reply-delivery-prompt.js";
 
@@ -27,7 +28,7 @@ export function resolveQqReplyDelivery({ configured = "tool", toolsEnabled = fal
 const STOP_CODES = new Set(["QQ_REPLY_STOPPED", "HUB_SHUTTING_DOWN", "QQ_GENERATION_STOPPED"]);
 const MAX_ATTACHMENTS = 8;
 const REPLY_MODES = new Set(["automatic", "plain", "quote", "mention"]);
-const IMAGE_EXTENSION_PATTERN = /\.(?:png|jpe?g|gif|webp|bmp)$/i;
+const IMAGE_EXTENSION_PATTERN = /\.(?:png|jpe?g|gif|webp|bmp|svg|tiff?|ico|avif|heic|heif)$/i;
 
 export function normalizeQqChatSendArguments(args = {}) {
   const source = args && typeof args === "object" && !Array.isArray(args) ? args : {};
@@ -49,12 +50,20 @@ export function normalizeQqChatSendArguments(args = {}) {
     .slice(0, MAX_ATTACHMENTS)
     .map((attachment) => {
       const path = String(attachment?.path || "").trim();
+      const name = String(attachment?.name || "").trim();
+      // Text content (Markdown, CSV, code, SVG...) is written into the
+      // output directory by the Hub before delivery; it wins over a path.
+      const content = typeof attachment?.content === "string" && attachment.content.length > 0
+        ? attachment.content
+        : null;
       const kind = attachment?.kind === "image" || attachment?.kind === "file"
         ? attachment.kind
-        : IMAGE_EXTENSION_PATTERN.test(path) ? "image" : "file";
-      return { kind, path, name: String(attachment?.name || "").trim() };
+        : IMAGE_EXTENSION_PATTERN.test(content ? name : path) ? "image" : "file";
+      return content == null
+        ? { kind, path, name }
+        : { kind, path: "", name, content };
     })
-    .filter((attachment) => attachment.path);
+    .filter((attachment) => attachment.path || attachment.content != null);
   return {
     bubbles: bubbles.slice(0, QQ_CHAT_SEND_MAX_BUBBLES),
     droppedBubbleCount: Math.max(0, bubbles.length - QQ_CHAT_SEND_MAX_BUBBLES),
@@ -147,7 +156,7 @@ export function createQqChatSendSession({
     if (delivery?.refused) {
       // Nothing was attempted (for example a proactive turn that went stale).
       report({ outcome: "refused", sendIndex });
-      return { ok: false, error: String(delivery.reason || "这条没有发出。") };
+      return { ok: false, error: [String(delivery.reason || "这条没有发出。"), ...formatNotes(delivery.notes)].join("") };
     }
     const receipt = delivery?.receipt || {};
     deliveries.push({
@@ -169,7 +178,8 @@ export function createQqChatSendSession({
     });
     return formatQqChatSendResult(receipt, {
       droppedBubbleCount: message.droppedBubbleCount,
-      remaining: limit - attempts
+      remaining: limit - attempts,
+      notes: delivery?.notes
     });
   };
 
@@ -252,17 +262,20 @@ export function createQqChatSendSession({
   };
 }
 
-export function formatQqChatSendResult(receipt = {}, { droppedBubbleCount = 0, remaining = 0 } = {}) {
+export function formatQqChatSendResult(receipt = {}, { droppedBubbleCount = 0, remaining = 0, notes = [] } = {}) {
   const delivered = Math.max(0, Number(receipt.deliveredBubbleCount || 0));
   const failed = Math.max(0, Number(receipt.failedBubbleCount || 0));
   const dropped = Math.max(0, Number(droppedBubbleCount || 0));
-  const droppedNote = dropped > 0 ? `超出单次 ${QQ_CHAT_SEND_MAX_BUBBLES} 条上限的 ${dropped} 条没有发，要说就再调用一次。` : "";
+  const extraNote = [
+    dropped > 0 ? `超出单次 ${QQ_CHAT_SEND_MAX_BUBBLES} 条上限的 ${dropped} 条没有发，要说就再调用一次。` : "",
+    ...formatNotes(notes)
+  ].join("");
   if (failed === 0 && delivered > 0) {
     return {
       ok: true,
       reply: [
         `已送达 ${delivered} 条，对方已经看到；别重发。`,
-        droppedNote,
+        extraNote,
         remaining > 0 ? "还有事就继续做，有新话再发；说完了就结束本轮。" : "本轮发言次数已用完。"
       ].filter(Boolean).join("")
     };
@@ -277,12 +290,12 @@ export function formatQqChatSendResult(receipt = {}, { droppedBubbleCount = 0, r
   if (delivered > 0) {
     return {
       ok: true,
-      reply: `送达 ${delivered} 条，失败 ${failed} 条（${reason}）。没送达的${failedText}对方没看到，可以换个说法补发，但别重复已送达的。${droppedNote}`
+      reply: `送达 ${delivered} 条，失败 ${failed} 条（${reason}）。没送达的${failedText}对方没看到，可以换个说法补发，但别重复已送达的。${extraNote}`
     };
   }
   return {
     ok: false,
-    error: `没有发出去（${reason}）。${failedText ? `对方没看到${failedText}。` : ""}不要说已经发了；可以换个说法再试一次。`
+    error: `没有发出去（${reason}）。${failedText ? `对方没看到${failedText}。` : ""}不要说已经发了；可以换个说法再试一次。${extraNote}`
   };
 }
 
@@ -331,10 +344,21 @@ export function summarizeQqChatSendDeliveries(deliveries = [], { bubbleSeparator
   };
 }
 
+// Attachment notes (an inline file not written, a picture sent as a file)
+// tell the model what people actually received.
+function formatNotes(notes) {
+  return (Array.isArray(notes) ? notes : [])
+    .map((note) => String(note || "").replace(/\s+/g, " ").trim().slice(0, 200))
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
 function messageKey(message) {
   return JSON.stringify([
     message.bubbles.map((bubble) => bubble.replace(/\s+/g, " ").toLocaleLowerCase()),
     message.sticker.toLocaleLowerCase(),
-    message.attachments.map((attachment) => attachment.path)
+    message.attachments.map((attachment) => attachment.content != null
+      ? `inline:${attachment.name}:${createHash("sha256").update(attachment.content).digest("hex")}`
+      : attachment.path)
   ]);
 }

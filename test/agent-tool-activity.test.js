@@ -31,6 +31,14 @@ test("a chat send shows the Bot's own bubbles and the delivery receipt", () => {
   assert.equal(partial.outcome, "已送达 1 条，失败 1 条");
   const failed = describe("qq_chat.send", { bubbles: ["a"] }, { ok: false, error: "没有发出去（OneBot timeout）。不要说已经发了" });
   assert.match(failed.outcome, /^没发出：没有发出去（OneBot timeout）/);
+
+  // An inline file is named by its display name; its content is never quoted.
+  const inline = describe("qq_chat.send", {
+    bubbles: [],
+    attachments: [{ kind: "file", name: "周报.md", content: "私密内容 SECRET" }]
+  }, { ok: true, text: "已送达 1 条" });
+  assert.match(inline.target, /附件 周报\.md/);
+  assert.doesNotMatch(JSON.stringify(inline), /SECRET/);
 });
 
 test("private material stays out of the activity line", () => {

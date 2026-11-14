@@ -3,6 +3,7 @@ import { basename, extname, isAbsolute, join } from "node:path";
 import crypto from "node:crypto";
 import { isSupportedImageContentType, writeResponseBodyToFile } from "../bounded-stream.js";
 import { buildQqReplySendPlan } from "../qq-reply-chunks.js";
+import { toOneBotLocalFileUri } from "../qq-reply-files.js";
 import { fetchWithUrlPolicy } from "../safe-fetch.js";
 import { getQqStickerRef, parseQqStickerRef } from "../qq-sticker-search.js";
 
@@ -89,7 +90,7 @@ export function formatQqStickerCatalog(catalog = []) {
 }
 
 export function buildQqImageSegment(filePath) {
-  return { type: "image", data: { file: `file://${filePath}` } };
+  return { type: "image", data: { file: toOneBotLocalFileUri(filePath) } };
 }
 
 export function extractOneBotImageInputs(payload) {

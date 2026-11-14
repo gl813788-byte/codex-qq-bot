@@ -257,6 +257,18 @@ refactor with a behavior change.
   input/output paths. Ordinary file attachments must already exist under that
   output directory; rejected paths produce a warning and failed receipt even
   when the accompanying text was sent. Do not auto-import ordinary files.
+  `qq_chat.send` attachments may instead carry text `content` + `name`
+  (512 KB each, 1 MB per send); the Hub writes it into the output directory
+  (`src/app/qq-outbound-attachments.js`), because the Codex non-owner
+  sandbox on PRoot fails file writes. Right before sending, output-directory
+  pictures QQ cannot show become PNG (`src/qq-enhancer/convert-image.js`,
+  signature-based; SVG via `rsvg-convert` after refusing entities, external
+  stylesheets and non-`#`/non-raster-`data:` references; BMP/TIFF/ICO/AVIF/
+  HEIC via `magick` with a fixed coder); non-pictures and failed renders go
+  as files with a receipt note. Upload timeouts follow NapCat's own
+  (10 s + size at 256 KB/s), and local paths reach NapCat as `file://` URIs
+  with `%` escaped (NapCat decodes them). Never render SVGs through
+  ImageMagick or loosen the SVG reference check.
 - Protocol output budgets (Codex 8 MiB, Claude 64 MiB) scale with the
   messages a turn answers (`scaleProtocolBytesForWorkload`: +25% per extra
   message, max 3x): the starting batch via `workloadMessageCount`, steered or
@@ -505,7 +517,8 @@ refactor with a behavior change.
   `memory.persona_self_edit`, `interest.model_test`, `media.tool`,
   `media.voice`, `agent.subagent`, `memory.life_activity`,
   `social.qzone_self`, `social.card`, `friend.add`, `memory.bot_drawing`,
-  `media.update`, `history.archive`, `reply.send_tool`, `agent.tool`,
+  `media.update`, `history.archive`, `reply.send_tool`,
+  `reply.attachment_prepare`, `agent.tool`,
   `agent.native_tool` and `agent.codex_drawing`. Tool logs carry `activity`
   ("what it did") and `activityResult`; turn logs carry `toolSteps`. The
   describer never logs host-command bodies/output, chat search terms, habit
