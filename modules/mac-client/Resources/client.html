@@ -637,11 +637,21 @@
                   <button id="refreshModels" class="button small ghost" type="button" data-i18n="refreshModels">刷新模型列表</button>
                 </header>
                 <form id="aiSettingsForm" class="form-grid">
-                  <label class="field span-2"><span data-i18n="engineModel">模型</span><select id="aiModel"></select></label>
-                  <label class="field"><span data-i18n="engineEffort">思考强度</span><select id="aiEffort"></select></label>
-                  <label class="field"><span data-i18n="reasoningSummary">推理摘要</span><select id="aiSummary"><option value="auto">auto</option><option value="concise">concise</option><option value="detailed">detailed</option><option value="none">none</option></select></label>
-                  <label class="field"><span data-i18n="codexPersonality">Codex 人格</span><select id="aiPersonality"><option value="none">none</option><option value="friendly">friendly</option><option value="pragmatic">pragmatic</option></select></label>
-                  <label class="field"><span data-i18n="serviceTier">服务档位</span><select id="aiServiceTier"></select></label>
+                  <div id="aiClaudeGroup" class="form-grid span-2 ai-engine-group" data-engine="claude">
+                    <div class="subhead span-2"><h3 data-i18n="aiClaudeGroup">Claude Code</h3><span id="aiClaudeBadge" class="badge off"></span></div>
+                    <p id="aiClaudeNote" class="ai-engine-note span-2"></p>
+                    <label class="field"><span data-i18n="engineModel">模型</span><input id="aiClaudeModel" list="aiClaudeModelOptions" maxlength="120" autocomplete="off" spellcheck="false" /><datalist id="aiClaudeModelOptions"></datalist></label>
+                    <label class="field"><span data-i18n="engineEffort">思考强度</span><select id="aiClaudeEffort"></select></label>
+                  </div>
+                  <div id="aiCodexGroup" class="form-grid span-2 ai-engine-group" data-engine="codex">
+                    <div class="subhead span-2"><h3 data-i18n="aiCodexGroup">Codex</h3><span id="aiCodexBadge" class="badge off"></span></div>
+                    <p id="aiCodexNote" class="ai-engine-note span-2"></p>
+                    <label class="field span-2"><span data-i18n="engineModel">模型</span><select id="aiModel"></select></label>
+                    <label class="field"><span data-i18n="engineEffort">思考强度</span><select id="aiEffort"></select></label>
+                    <label class="field"><span data-i18n="reasoningSummary">推理摘要</span><select id="aiSummary"><option value="auto">auto</option><option value="concise">concise</option><option value="detailed">detailed</option><option value="none">none</option></select></label>
+                    <label class="field"><span data-i18n="codexPersonality">Codex 人格</span><select id="aiPersonality"><option value="none">none</option><option value="friendly">friendly</option><option value="pragmatic">pragmatic</option></select></label>
+                    <label class="field"><span data-i18n="serviceTier">服务档位</span><select id="aiServiceTier"></select></label>
+                  </div>
                   <div class="form-actions span-2"><button class="button primary" type="submit" data-i18n="saveAiSettings">保存模型设置</button></div>
                 </form>
               </section>

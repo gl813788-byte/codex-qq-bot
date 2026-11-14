@@ -74,9 +74,9 @@ bash "$installer" --prepare
 | --- | --- | --- |
 | 安装 | 安装器自动装 | 自己装：`curl -fsSL https://claude.ai/install.sh \| bash` |
 | 登录 | `codex login` | `claude auth login`，或在 `~/.claude/ncc-profiles/active.env` 里配中转地址和 key |
-| 模型 | 仪表盘或 QQ 命令里切换 | `CODEX_REMOTE_CONTACT_CLAUDE_MODEL`，默认 `opus` |
-| 思考强度 | 仪表盘或 QQ 命令里切换 | 默认跟 Bot 的设置走，也可以用 `CODEX_REMOTE_CONTACT_CLAUDE_EFFORT` 单独指定 |
-| 生成图片 | 支持 | 不支持 |
+| 模型 | 仪表盘或 QQ 命令里切换 | 仪表盘“主模型”卡片里切换；默认值来自 `CODEX_REMOTE_CONTACT_CLAUDE_MODEL`（`opus`） |
+| 思考强度 | 仪表盘或 QQ 命令里切换 | 仪表盘里单独设置，或跟随 Codex 的设置；默认值来自 `CODEX_REMOTE_CONTACT_CLAUDE_EFFORT` |
+| 生成图片 | 支持 | 交给 Codex 代画（装了 `codex` CLI 时） |
 | 额度显示 | 仪表盘里能看到 | 不显示，用 `claude` 里的 `/usage` 查 |
 
 切换方法：

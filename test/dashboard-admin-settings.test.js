@@ -23,6 +23,26 @@ test("AI settings follow the live model catalog", () => {
   assert.equal(normalizeDashboardAiSettingsPatch({ personality: "friendly" }, current, { models }).personality, "friendly");
 });
 
+test("Claude Code model settings are edited beside the Codex ones", () => {
+  const current = {
+    model: "gpt-a", reasoningEffort: "low", reasoningSummary: "auto", personality: "none", serviceTier: "",
+    claude: { model: "opus", reasoningEffort: "" }
+  };
+  const next = normalizeDashboardAiSettingsPatch({ claude: { model: "sonnet[1m]", reasoningEffort: "HIGH" } }, current, { models });
+  assert.deepEqual(next.claude, { model: "sonnet[1m]", reasoningEffort: "high" });
+  // Codex fields are untouched and the current object is not mutated.
+  assert.equal(next.model, "gpt-a");
+  assert.deepEqual(current.claude, { model: "opus", reasoningEffort: "" });
+  // Only the given field changes; an empty effort follows Codex.
+  assert.deepEqual(normalizeDashboardAiSettingsPatch({ claude: { reasoningEffort: "" } }, next, { models }).claude, { model: "sonnet[1m]", reasoningEffort: "" });
+  assert.deepEqual(normalizeDashboardAiSettingsPatch({ claude: { model: "claude-opus-4-5@20251101" } }, current, { models }).claude.model, "claude-opus-4-5@20251101");
+  assert.throws(() => normalizeDashboardAiSettingsPatch({ claude: { model: "opus; rm -rf /" } }, current, { models }), RangeError);
+  assert.throws(() => normalizeDashboardAiSettingsPatch({ claude: { reasoningEffort: "ultra" } }, current, { models }), /low, medium, high, xhigh, max/);
+  assert.throws(() => normalizeDashboardAiSettingsPatch({ claude: "opus" }, current, { models }), TypeError);
+  // A patch without claude keeps it as it was.
+  assert.deepEqual(normalizeDashboardAiSettingsPatch({ personality: "friendly" }, current, { models }).claude, current.claude);
+});
+
 test("identity settings validate QQ numbers and keep owners out of admins", () => {
   const current = { ownerUserIds: ["10001"], adminUserIds: ["10002"], assistantName: "bot", ownerLabel: "主人", assistantMentions: [] };
   const next = normalizeDashboardIdentityPatch({ adminUserIds: "10002, 10001 10003", assistantMentions: "小助手，bot\nbot" }, current);

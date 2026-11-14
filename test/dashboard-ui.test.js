@@ -129,3 +129,90 @@ test("buttons with light text keep a solid background where color-mix is unsuppo
     assert.ok(backgrounds.slice(0, firstMixed).some((value) => !value.includes("color-mix(")), `${selector} needs a plain background before its color-mix background`);
   }
 });
+
+test("the main-model card puts the active engine's group first and saves Claude settings", async () => {
+  const pick = (name) => {
+    const start = personaScript.indexOf(`function ${name}(`);
+    const asyncStart = personaScript.lastIndexOf("async ", start) === start - 6 ? start - 6 : start;
+    const end = personaScript.indexOf("\n}\n", start);
+    assert.notEqual(start, -1, `client-persona.js must define ${name}`);
+    return personaScript.slice(asyncStart, end + 2);
+  };
+  const element = (id) => ({ id, textContent: "", className: "", innerHTML: "", value: "", dataset: {}, focus() {} });
+  const nodes = Object.fromEntries([
+    "aiSettingsHint", "aiClaudeBadge", "aiCodexBadge", "aiClaudeNote", "aiCodexNote", "aiClaudeModel", "aiClaudeModelOptions",
+    "aiClaudeEffort", "aiModel", "aiEffort", "aiServiceTier", "aiSummary", "aiPersonality"
+  ].map((id) => [id, element(id)]));
+  const claudeGroup = element("aiClaudeGroup");
+  const codexGroup = element("aiCodexGroup");
+  const actions = element("actions");
+  const form = {
+    ...element("aiSettingsForm"),
+    children: [claudeGroup, codexGroup, actions],
+    contains: () => false,
+    get firstElementChild() { return this.children[0]; },
+    insertBefore(node, reference) {
+      if (reference === node) return;
+      this.children = this.children.filter((child) => child !== node);
+      const index = reference ? this.children.indexOf(reference) : this.children.length;
+      this.children.splice(index < 0 ? this.children.length : index, 0, node);
+    }
+  };
+  for (const group of [claudeGroup, codexGroup, actions]) {
+    Object.defineProperty(group, "nextElementSibling", { get: () => form.children[form.children.indexOf(group) + 1] || null });
+  }
+  Object.assign(nodes, { aiSettingsForm: form, aiClaudeGroup: claudeGroup, aiCodexGroup: codexGroup });
+  const translations = { aiActiveEngine: "当前引擎", aiStandbyEngine: "未使用", aiClaudeActiveNote: "claude-active {model}", aiCodexDrawingNote: "codex-draws", aiClaudeStandbyNote: "claude-standby", aiCodexActiveNote: "", claudeEffortFollow: "跟随 Codex（{effort}）", aiSettingsHint: "hint" };
+  const posted = [];
+  const context = {
+    $: (selector) => nodes[selector.slice(1)],
+    t: (key, values = {}) => String(translations[key] ?? key).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? ""),
+    escapeHtml: (value) => String(value),
+    document: { activeElement: null },
+    personaUi: {},
+    showToast: (message) => posted.push({ toast: message }),
+    api: async (path, options) => { posted.push({ path, body: JSON.parse(options.body) }); return {}; },
+    mutate: async (run) => run(),
+    renderAdminSettings: () => {},
+    refreshState: async () => {},
+    refreshMaintenance: async () => {}
+  };
+  vm.runInNewContext(
+    [pick("renderAiSettingsForm"), pick("renderClaudeSettingsFields"), pick("fillAiModelDependents"), pick("saveAiSettings"),
+      "this.render = renderAiSettingsForm; this.save = saveAiSettings;"].join("\n"),
+    context,
+    { timeout: 100 }
+  );
+  const admin = {
+    agent: { engine: "claude", drawing: "codex", modelCatalog: false },
+    ai: { model: "gpt-x", reasoningEffort: "high", reasoningSummary: "auto", personality: "none", serviceTier: "" },
+    claude: { model: "sonnet", reasoningEffort: "", suggestions: ["opus", "sonnet", "haiku"], efforts: ["low", "high"], defaultModel: "opus" },
+    models: []
+  };
+  context.personaUi.admin = admin;
+  context.render(admin);
+  assert.deepEqual(form.children.map((child) => child.id), ["aiClaudeGroup", "aiCodexGroup", "actions"]);
+  assert.equal(nodes.aiClaudeBadge.textContent, "当前引擎");
+  assert.equal(nodes.aiClaudeBadge.className, "badge ok");
+  assert.equal(nodes.aiCodexBadge.textContent, "未使用");
+  assert.equal(nodes.aiClaudeNote.textContent, "claude-active opus");
+  assert.equal(nodes.aiCodexNote.textContent, "codex-draws");
+  assert.equal(nodes.aiClaudeModel.value, "sonnet");
+  assert.match(nodes.aiClaudeEffort.innerHTML, /跟随 Codex（high）/);
+  assert.equal(nodes.aiClaudeEffort.value, "");
+
+  nodes.aiClaudeModel.value = " haiku ";
+  nodes.aiClaudeEffort.value = "low";
+  await context.save(null, { announce: false });
+  assert.deepEqual(posted.at(-1).body.claude, { model: "haiku", reasoningEffort: "low" });
+  assert.equal(posted.at(-1).body.model, "gpt-x");
+  nodes.aiClaudeModel.value = "bad model";
+  assert.equal(await context.save(null, { announce: false }), false);
+  assert.ok(posted.at(-1).toast);
+
+  // With Codex answering, its group leads and Claude says when it is used.
+  context.render({ ...admin, agent: { engine: "codex", drawing: "native", modelCatalog: true } });
+  assert.deepEqual(form.children.map((child) => child.id), ["aiCodexGroup", "aiClaudeGroup", "actions"]);
+  assert.equal(nodes.aiCodexBadge.textContent, "当前引擎");
+  assert.equal(nodes.aiClaudeNote.textContent, "claude-standby");
+});
