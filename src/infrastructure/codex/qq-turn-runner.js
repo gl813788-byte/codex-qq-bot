@@ -10,6 +10,7 @@ import { describeAgentHostCapacity } from "../agent/agent-process-gate.js";
 import { assertAgentTurnNotNested, runAgentToolCall } from "../agent/agent-tool-context.js";
 import { notifyObserver } from "../agent/agent-turn-process.js";
 import { describeNativeAgentItem, summarizeAgentTurnTools } from "../agent/agent-tool-activity.js";
+import { agentTurnUsageLogFields, createAgentTurnUsageTracker } from "../agent/agent-token-usage.js";
 import { buildCodexLeanQqConfig } from "./codex-lean-config.js";
 
 // Every difference between the two engines lives in this table (display
@@ -168,6 +169,8 @@ export function createQqCodexTurnRunner({
       // Every tool the engine itself ran in this turn (QQ tools included),
       // for the native-tool log lines and the turn's tool-step summary.
       const toolItems = [];
+      // Input and prompt-cache hits for the turn's log line.
+      const usageTracker = createAgentTurnUsageTracker();
       const observeItem = (notification) => {
         if (notification?.method === "item/completed" && notification.item) {
           toolItems.push(notification.item);
@@ -221,12 +224,13 @@ export function createQqCodexTurnRunner({
           onServerRequest: options.onServerRequest,
           // Codex streams account rate limits and token usage as protocol
           // notifications; an engine without a usage feed skips the observer.
-          onNotification: agent.reportsQuota && typeof observeQuotaNotification === "function"
-            ? (message) => {
+          onNotification: (message) => {
+            usageTracker.observe(message);
+            if (agent.reportsQuota && typeof observeQuotaNotification === "function") {
               notifyObserver(observeQuotaNotification, message);
-              notifyObserver(options.onNotification, message);
             }
-            : options.onNotification,
+            notifyObserver(options.onNotification, message);
+          },
           onItem: observeItem,
           onProgress: options.onProgress,
           onRestarted: attempt.onRestarted,
@@ -262,7 +266,7 @@ export function createQqCodexTurnRunner({
             }, AGENT_LOG_CATEGORY, options.qqEvent ? logContext(options.qqEvent, { spanId: generationId }) : {});
           }
         });
-        recordSuccess({ state, result, options, startedAt, generationId, logger, logContext, agent, model, reasoningEffort, toolItems });
+        recordSuccess({ state, result, options, startedAt, generationId, logger, logContext, agent, model, reasoningEffort, toolItems, usage: usageTracker.summarize(result) });
         logModelOutput(result.finalResponse, {
           event: options.qqEvent,
           taskType: options.taskType,
@@ -319,7 +323,7 @@ export function createQqCodexTurnRunner({
   }
 }
 
-function recordSuccess({ state, result, options, startedAt, generationId, logger, logContext, agent, model, reasoningEffort, toolItems = [] }) {
+function recordSuccess({ state, result, options, startedAt, generationId, logger, logContext, agent, model, reasoningEffort, toolItems = [], usage = null }) {
   const run = recordAgentRun(state, { startedAt, ok: true, error: null });
   const diagnostics = summarizeProcessDiagnostics({ stderr: result.stderr, stdout: "" });
   logger.success(`${agent.logLabel} turn finished`, {
@@ -337,6 +341,7 @@ function recordSuccess({ state, result, options, startedAt, generationId, logger
     fusionRecoveryCount: Number(result.fusionRecoveryCount || 0),
     fusionRecoveryReason: result.fusionRecoveryReason || null,
     ...toolStepFields(toolItems.length ? toolItems : result.items),
+    ...agentTurnUsageLogFields(usage),
     ...diagnosticFields(diagnostics)
   }, AGENT_LOG_CATEGORY, options.qqEvent ? logContext(options.qqEvent, { spanId: generationId }) : {});
 }

@@ -54,11 +54,11 @@
 | `src/app/qq-knowledge-image-tool.js` | 知识配图工具 | `qq_knowledge.image` 的读写范围、图片目录 selector 导入、添加/替换/改说明/移除/查看；纯数据变更在 `src/qq-knowledge-base.js`，网页上传校验在 `src/dashboard-knowledge-base.js` |
 | `src/qq-enhancer/interest-vision.js` | 兴趣模型看图 | 看图模式（auto/on/off）、按厂商/模型记住是否支持图片、图片拒绝识别、被判断消息的有界选图与多模态消息内容 |
 | `src/app/qq-web-image-tool.js` | 联网搜图工具 | `qq_search.images` 的本轮 selector、下载到任务 output、签名校验与预览；Tavily 图片请求在 `src/web-search.js` |
-| `src/qq-main-prompt.js` | 主模型提示词边界 | 角色、执行顺序、活人感规则、主动任务、每个命名空间一行的工具索引，以及只聊天部署可选的精简 QQ 基础提示 |
+| `src/qq-main-prompt.js` | 主模型提示词边界 | 角色、执行顺序、活人感规则与各种情绪打出来的样子、主动任务、每个命名空间一行的工具索引、每轮的身份块，以及只聊天部署可选的精简 QQ 基础提示；开发者指令不含说话人、QQ 号和日期，群聊/私聊和发送者权限部分放在最后，保证内容逐字不变以命中引擎的提示词缓存 |
 | `src/qq-proactive-pipeline.js` | 主动聊天双模型契约 | 普通接话、冷群话题/水群和主动私聊的兴趣批准凭据与主模型必经校验 |
 | `src/qq-proactive-cycle-state.js` | 普通兴趣内存周期状态 | pending 消息计数、Bot 确认送达后的重置，以及作废送达前执行中 judge 且保留后续消息 |
 | `src/qq-conversation-follow-up.js` | Bot 回复后的续聊批次状态机 | 同一发送者、自适应 3–12 分钟与 2–6 条边界、满条不提前判定的 5 秒静默合并、judge 前冻结入口及兴趣模型语义复核元数据 |
-| `src/qq-language-style.js` | QQ 语言统计候选 | 群/成员标点与功能性短语计数及高频候选，不分配任何含义；打字习惯占比（空格断句、句末标点、括号补充语、颜文字、波浪号、笑声写法）及至少两人用过的具体写法 |
+| `src/qq-language-style.js` | QQ 语言统计候选 | 群/成员标点与功能性短语计数及高频候选，不分配任何含义；打字习惯占比（空格断句、句末标点、括号补充语与括号动作、纯标点消息与标点连打、颜文字、波浪号、笑声写法、短反应）及至少两人（私聊为一人）用过的具体写法 |
 | `src/qq-message-run-compaction.js` | 模型上下文连续复读压缩 | 相邻同文消息的语义签名、计数合并和中文条数标注 |
 | `src/codex-app-server-turn.js` | Codex app-server 单轮客户端 | `thread/start`/`thread/resume`、`turn/start`、运行中控制、直接截断续开、inactive turn 竞态恢复、超时和中断 |
 | `src/infrastructure/codex/qq-turn-runner.js` | QQ App Server 生命周期适配器 | 限流、用一张引擎表集中 Codex/Claude Code 的全部差异、隔离子进程环境、原生轮次参数、诊断、融合恢复、取消和配额刷新 |
@@ -74,12 +74,15 @@
 | `src/infrastructure/codex/qq-native-tools.js` | QQ 工具目录与分发 | 带 MCP 注解的工具 Schema、每轮调用上限（发言工具单独计数）与 callId 去重、发言/视觉/消息/资料查询/自身状态工具固定绑定原会话，以及映射到已有鉴权 Hub 操作 |
 | `src/app/qq-chat-send-tool.js` | 用 `qq_chat.send` 说话 | 哪些轮次用工具说话（`resolveQqReplyDelivery`）；每轮一个发送会话：把参数规整成最终输出的可见字段、串行发送、每轮次数上限、拒绝已送达内容的重复和回合结束后的迟到调用、给模型的回执，`finalize()` 把所有回执合成一组只算一次的 reply/send 交给生命周期记录，以及说过话后又失败时补发一次“没弄完”提示；实际投递由组合根注入 |
 | `src/qq-reply-delivery-prompt.js` | 两种说话方式的措辞 | `tool` 与 `final` 两种方式下不同的回复提示句：引导进来的追加消息、长期会话续接说明、结尾指令（普通、私聊主动、冷群）、融合追问提示和中断提示 |
+| `src/infrastructure/agent/agent-token-usage.js` | 每轮 token 用量 | 从 Codex 的线程累计或 Claude 的结果用量算出每轮输入、提示词缓存命中和输出，写进本轮日志 |
 | `src/infrastructure/agent/agent-tool-activity.js` | 可读的工具记录 | 把每次工具调用（QQ 工具和两种引擎的原生工具）连同结果写成一行中文，并汇总每轮的工具步骤；本机命令内容、聊天搜索词、口癖词和人设取值不进日志 |
 | `src/infrastructure/agent/agent-drawing.js` + `src/infrastructure/codex/codex-image-generation.js` + `src/app/qq-draw-tool.js` | 没有原生生图时画图 | 启动时决定原生/Codex/不画；每张图跑一轮无工具、只读的 Codex 生图并导入本轮输出目录；`qq_draw.image` 一次只画一张并排队、过主机余量闸门、每轮限量、参考图需校验 |
 | `src/qq-sticker-search.js` + `src/app/qq-sticker-tool.js` | 按需表情包库 | 由标签库身份生成的稳定 `#编号`、按情绪/场合/梗搜索并降低近期用过的权重，以及 `qq_sticker.manage` 的 search/inspect（真实视觉输入）/label/favorite |
 | `src/app/qq-message-tools.js` + `src/qq-sent-message-ledger.js` | 表情回应与撤回 | `qq_message.act` 给当前/被引用群消息贴表情回应，以及撤回 Bot 自己两分钟内已确认送达的消息；消息 ID 在最底层发送处只记在内存 |
 | `src/app/qq-lookup-tool.js` | 只读 QQ 资料查询 | `qq_context.lookup` 的成员/群/公告/精华信息，只限本会话出现过的人，绝不返回性别、年龄或地区 |
 | `src/app/qq-archive-tool.js` + `src/qq-history-retrieval.js` 的 `fetchQqHistoryPage` | 服务器端历史、旧文件与群文件 | `qq_context.archive` 分页读取和搜索原始会话的 NapCat 历史，按轮编号文件（`hf-N`）、图片（`hi-N`）、群文件（`gf-N`）和文件夹（`gd-N`），只下载/查看已列出的编号并走已校验的文件/图片路径，剔除本地图片路径，日志只记计数 |
+| `src/qq-action-claims.js` | 括号里必须真的发生的动作 | 哪些括号动作 QQ 真能做（戳一戳、表情包、图片、贴表情、点赞、撤回、收藏、骰子、猜拳、音乐、说说、禁言踢人、加好友）、各自需要的工具证据、退回说明和删除 |
+| `src/qq-bot-expression.js` | 这一轮的情绪和用词怎么表现 | 心情 → 情绪与强弱、本轮打字建议（标点连打、纯标点气泡、括号动作、多拆或少说）、从 Bot 最近消息统计用多了的词/开头/结尾，以及轮换的可替换说法；只给建议 |
 | `src/qq-bot-life-state.js` + `src/qq-bot-daily-routine.js` | Bot 的连续状态 | 跨会话延续的心情、来自结构化输出的分会话第一人称内心OS、每日作息（每个作息日一次无工具任务，05:00 换日），以及它们在提示词和工具里的呈现 |
 | `src/qq-bot-personality.js` + `src/qq-affinity-command.js` | 核心人格与关系 | 部署者设定的基本资料、性格维度、说话方式滑块、待人方式、角色资料、世界书与预设；角色卡映射与导出；有界的自主调整（工具与周期复盘）、经核实的主人指令修改、改动历史与撤销；真人化规划使用的表达偏置；每人的好感、熟悉度、称呼与历史，带每轮/每日截断、主人下限、半衰期淡化和同会话理由；回复、世界书与兴趣判断的提示词片段；`/好感度` 解析 |
 | `src/qq-character-card.js` | 角色卡格式 | 纯函数解析 Character Card V1/V2/V3、Pygmalion 与 Agnai JSON、PNG 文本块、`.charx` 压缩包和纯文字；导出 V2/V3 |

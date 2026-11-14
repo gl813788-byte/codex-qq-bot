@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 
-// The Bot's own language habits: a few slang words, symbols (such as a
-// bracketed aside like “（bushi）”), kaomoji or short phrases that the Bot
+// The Bot's own language habits: slang words, symbols (such as a bracketed
+// aside like “（bushi）”, a bracketed action like “（戳戳）” or a “！！！”
+// burst), kaomoji or short phrases that the Bot
 // has picked up from the people it talks with and made its own.
 //
 // The Bot chooses them itself: periodic scope summaries propose adoptions and
@@ -14,11 +15,13 @@ import { createHash } from "node:crypto";
 // each habit. Habits are style only; they never carry facts or permissions.
 
 export const QQ_LANGUAGE_HABIT_KINDS = Object.freeze(["slang", "symbol", "kaomoji", "phrase"]);
+// A voice needs enough expressions to vary between them; a handful per scope
+// made every reply reach for the same one.
 export const QQ_LANGUAGE_HABIT_LIMITS = Object.freeze({
-  total: 24,
-  perScope: 6,
-  global: 8,
-  modelAdoptionsPerDay: 3
+  total: 80,
+  perScope: 12,
+  global: 16,
+  modelAdoptionsPerDay: 5
 });
 const KIND_LABELS = Object.freeze({ slang: "黑话", symbol: "符号", kaomoji: "颜文字", phrase: "说法" });
 const SOURCES = new Set(["summary", "persona", "self", "owner"]);

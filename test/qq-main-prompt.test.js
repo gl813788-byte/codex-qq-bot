@@ -5,7 +5,9 @@ import {
   formatQqApprovedProactivePrompt,
   formatQqMainModelInstructions,
   formatQqMainToolGuide,
-  formatQqTaskWorkspaceContext
+  formatQqMainToolIndex,
+  formatQqTaskWorkspaceContext,
+  formatQqTurnIdentityContext
 } from "../src/qq-main-prompt.js";
 
 test("main instructions advertise selectable image memory and require fresh visual evidence", () => {
@@ -307,4 +309,58 @@ test("an engine that draws through Codex is told to use qq_draw.image instead of
   assert.doesNotMatch(formatQqTaskWorkspaceContext(workspace, { canGenerateImages: true, drawsWithTool: true }), /原生生图/);
   assert.match(formatQqMainToolGuide({ drawsWithTool: true }), /qq_draw\.image：画图、改图/);
   assert.doesNotMatch(formatQqMainToolGuide({}), /qq_draw/);
+});
+
+// Prompt caching: the developer instructions become (part of) the engine's
+// system prompt, so anything that changes between turns there (the speaker,
+// their QQ number, the date) invalidated the cached prefix of every turn.
+test("developer instructions stay byte-identical across speakers and days", () => {
+  const options = { assistantName: "麦麦", replyDelivery: "tool", canGenerateImages: true };
+  const first = formatQqMainModelInstructions({ ...options, speaker: "小明(QQ 10000)", senderId: "10000", currentDate: "2026-11-13" });
+  const second = formatQqMainModelInstructions({ ...options, speaker: "小红(QQ 20000)", senderId: "20000", currentDate: "2026-11-14" });
+  assert.equal(first, second);
+  assert.doesNotMatch(first, /10000|小明|2026-11-1/);
+  // Chat type and sender role vary, but only in the tail: every variant
+  // shares the long common prefix.
+  const owner = formatQqMainModelInstructions({ ...options, isOwner: true });
+  const privateChat = formatQqMainModelInstructions({ ...options, privateChat: true });
+  const common = first.indexOf("下面的部署 profile");
+  assert.ok(common > first.length * 0.8, "the shared prefix covers most of the instructions");
+  assert.equal(owner.slice(0, common), first.slice(0, common));
+  assert.equal(privateChat.slice(0, common), first.slice(0, common));
+  assert.match(owner, /【本轮发送者的权限】\n发送者是已验证的主人 QQ（号码见本轮上下文）/);
+  assert.match(privateChat, /【本轮是 QQ 私聊】/);
+  assert.doesNotMatch(privateChat, /reply\.mode/);
+});
+
+test("the speaker and date travel in the turn prompt instead", () => {
+  const identity = formatQqTurnIdentityContext({ speaker: "小明(QQ 10000)（权限身份：主人）", currentDate: "2026-11-14" });
+  assert.match(identity, /当前日期（Asia\/Shanghai）：2026-11-14/);
+  assert.match(identity, /当前说话来源：小明\(QQ 10000\)（权限身份：主人）；群聊/);
+  assert.match(formatQqTurnIdentityContext({ speaker: "x", privateChat: true }), /；私聊/);
+});
+
+test("the static tool index rides in the instructions and the turn guide keeps only this message's facts", () => {
+  const instructions = formatQqMainModelInstructions({ replyDelivery: "tool", canSearchImages: true });
+  assert.ok(instructions.includes(formatQqMainToolIndex({ replyDelivery: "tool", canSearchImages: true })));
+  assert.match(instructions, /网络图片与表情包/);
+  assert.doesNotMatch(formatQqMainModelInstructions({ toolsEnabled: false }), /【QQ 工具】/);
+  const guide = formatQqMainToolGuide({ includeIndex: false, currentSender: "小明(QQ 10000)", replyDelivery: "tool" });
+  assert.doesNotMatch(guide, /【QQ 工具】|qq_context：/);
+  assert.match(guide, /当前发送者：小明\(QQ 10000\)/);
+  assert.match(formatQqMainToolIndex({ privileged: true }), /qq_runtime\.configure/);
+  assert.doesNotMatch(formatQqMainToolIndex({}), /qq_runtime/);
+});
+
+test("feelings show in typing: bracketed actions, punctuation-only bubbles and bursts are allowed", () => {
+  const prompt = formatQqMainModelInstructions({});
+  assert.match(prompt, /一条气泡也可以只有标点（“？”“！！！”“…”）/);
+  assert.match(prompt, /在括号里写一个很短的动作或情景（像（抱住）（缩）（摸摸头））时，你也可以这样回应/);
+  // The Bot used to type “（戳回去）” without poking; doable brackets are done.
+  assert.match(prompt, /括号里的动作如果 QQ 真能做（戳一戳、发表情包、发图、贴表情、点赞、撤回/);
+  assert.match(prompt, /戳一戳 Hub 会替你真的戳出去，其他没做成的括号这条消息会被退回让你先做/);
+  assert.match(prompt, /小说式旁白、长段动作和心理描写不写/);
+  assert.match(prompt, /情绪要体现在打字上，而不是说出“我很开心”/);
+  assert.match(prompt, /感叹号连打（！！！）/);
+  assert.match(prompt, /最近用过的说法就换一个/);
 });

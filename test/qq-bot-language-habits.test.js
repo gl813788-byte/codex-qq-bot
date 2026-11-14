@@ -61,14 +61,15 @@ test("the model adopts within a daily cap and cannot drop owner habits", () => {
     adopt: [{ kind: "phrase", term: "主人定的", usage: "", reason: "" }], drop: []
   }, { scopeId: "10001", source: "owner", at }).habits;
   assert.equal(applyQqModelLanguageHabitChange(habits, { action: "drop", term: "主人定的", scopeId: "10001", at }).reason, "owner-locked");
-  for (const [index, term] of ["a1", "a2", "a3"].entries()) {
+  const daily = Array.from({ length: QQ_LANGUAGE_HABIT_LIMITS.modelAdoptionsPerDay }, (_, index) => `a${index + 1}`);
+  for (const [index, term] of daily.entries()) {
     const result = applyQqModelLanguageHabitChange(habits, { action: "adopt", kind: "slang", term, scopeId: "10001", at: at + index });
     assert.equal(result.ok, true, term);
     assert.equal(result.habit.source, "self");
     habits = result.habits;
   }
-  assert.equal(applyQqModelLanguageHabitChange(habits, { action: "adopt", kind: "slang", term: "a4", scopeId: "10001", at: at + 10 }).reason, "daily-cap");
-  assert.equal(applyQqModelLanguageHabitChange(habits, { action: "adopt", kind: "slang", term: "a4", scopeId: "10001", at: at + 86_400_000 }).ok, true, "the cap resets the next day");
+  assert.equal(applyQqModelLanguageHabitChange(habits, { action: "adopt", kind: "slang", term: "z1", scopeId: "10001", at: at + 10 }).reason, "daily-cap");
+  assert.equal(applyQqModelLanguageHabitChange(habits, { action: "adopt", kind: "slang", term: "z1", scopeId: "10001", at: at + 86_400_000 }).ok, true, "the cap resets the next day");
   assert.equal(applyQqModelLanguageHabitChange(habits, { action: "adopt", kind: "slang", term: "a1", scopeId: "10001", at }).reason, "already-adopted");
   assert.equal(applyQqModelLanguageHabitChange(habits, { action: "adopt", kind: "bad", term: "x1", scopeId: "10001", at }).reason, "invalid-kind");
   assert.equal(applyQqModelLanguageHabitChange(habits, { action: "adopt", kind: "slang", term: "x1", scopeId: "not-a-scope", at }).reason, "invalid-scope");
