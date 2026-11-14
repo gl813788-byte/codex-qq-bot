@@ -71,7 +71,7 @@ export function analyzeQqHumanChatStyle(entries = [], { privateChat = false, win
     sampleSize: humans.length,
     textSampleSize: textMessages.length,
     confidence: textMessages.length >= 40 ? "high" : textMessages.length >= 16 ? "medium" : "low",
-    symbolHabits: analyzeQqSymbolHabits(humans, { windowSize }),
+    symbolHabits: analyzeQqSymbolHabits(humans, { windowSize, minPeople: privateChat ? 1 : 2 }),
     medianTextChars: median,
     p90TextChars: p90,
     shortMessageRatio: ratio(shortMessages, lengths.length),

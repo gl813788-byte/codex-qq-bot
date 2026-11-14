@@ -508,7 +508,7 @@ export function buildQqSelfPersonaScopeSummaryPrompt(scopeId, entries = [], {
       imageCount: Array.isArray(entry?.images) ? entry.images.length : 0
     };
   }).filter((entry) => entry.text || entry.imageCount);
-  const statisticalLanguageProfile = buildLanguageEvidence(entries);
+  const statisticalLanguageProfile = buildLanguageEvidence(entries, { scopeType });
   const botLanguageHabits = describeQqLanguageHabitsForReview(languageHabits, scopeId);
   const sharedSlang = (Array.isArray(slangCandidates) ? slangCandidates : []).slice(0, 16);
   return [
@@ -530,7 +530,7 @@ export function buildQqSelfPersonaScopeSummaryPrompt(scopeId, entries = [], {
     "词语、短语和标点的语境含义统一使用现有黑话 knowledge，不在 languageStyle 里另存一份。statisticalLanguageProfile 只提供符号/结构类别、次数与占比，不提供含义；发现稳定含义时，由你阅读 messages 后写 kind=slang 的 knowledge：title 使用实际词/短语/标点，content 同时说明通用解释、当前范围的具体含义和必要边界。相同对象沿用稳定 title，只有确认改名时才写 replacesTitle。",
     "languageStyle 只专项总结如何表达：共享短语结构、开头/收尾/拆句/改口等句式，以及引用黑话知识的 punctuationUsageRules。每个 rule 只写 symbol、对应 knowledgeTitle、0-1 confidence、上下文 evidence 概括和 usageBoundary，不得再写 meaning；没有同时产出或复用对应 slang knowledge 时不要写 rule。memberPatterns 只记录样本充分的成员差异；个人结果主要用于理解语气，不用于逐字模仿。不得引用原话或保存某个人独有的口癖；群级共享规律才可供 Bot 在合适语境中采用。",
     "languageStyle.summary 要具体写出这里的打字习惯：用空格还是逗号断句、句末加不加标点、括号补充语（如“（bushi）”“（小声）”这类）、颜文字/emoji、波浪号、叠字和笑声写法（哈哈哈/hhh/www/草）、拆条连发等各自常不常见；statisticalLanguageProfile 里的 symbolHabits 给出这些符号的实际占比和高频写法，可作依据。",
-    "botLanguageHabits 是 Bot 自己在这个范围里的语言习惯，由你替 Bot 挑选和复盘：从这里的人普遍在用的黑话（sharedSlang 与本次 knowledge）、括号补充语、颜文字、标点写法和短说法里，挑出符合 Bot 性格、Bot 自己也愿意常用的 0-3 个写进 adopt（kind 为 slang/symbol/kaomoji/phrase，term 是实际写法且不超过 16 字，usage 说明什么场合怎么用，reason 写为什么适合 Bot）。只挑至少两三个人都在用、含义清楚的群级说法，不挑某个人独有的口癖、骂人话、带隐私或会被误解的词；人设设定冲突的不要挑。",
+    "botLanguageHabits 是 Bot 自己在这个范围里的语言习惯，由你替 Bot 挑选和复盘：从这里的人普遍在用的黑话（sharedSlang 与本次 knowledge）、括号补充语、括号里的短动作（如（戳戳））、颜文字、标点写法（如单独一条“？”或“！！！”）和常见短反应（symbolHabits.shortReactions）里，挑出符合 Bot 性格、Bot 自己也愿意常用的 0-5 个写进 adopt（kind 为 slang/symbol/kaomoji/phrase，term 是实际写法且不超过 16 字，usage 说明什么场合、什么情绪下怎么用，reason 写为什么适合 Bot）。说法要有变化：兴奋、无语、害羞、敷衍等不同情绪各有可用的说法比只会一个口头禅好；Bot 已经用得很多（uses 高、最近一直在用）的说法如果开始显得重复，可以写进 drop 换新的。群聊只挑至少两三个人都在用、含义清楚的群级说法，私聊可以挑对方常用、Bot 也自然会说的；不挑某个人在群里独有的口癖、骂人话、带隐私或会被误解的词；人设设定冲突的不要挑。",
     "currentBotLanguageHabits 是 Bot 现有习惯及真实使用统计（uses 为已发送回复中用到的次数，daysSinceLastUse 为距上次使用的天数）：群友已经不用、Bot 用得别扭、长期没用上或与新证据冲突的写进 drop（填 term）；仍合适的不要重复 adopt。总数保持精简，宁缺毋滥；没有合适的就 adopt 和 drop 都给空数组。",
     "最后只输出一行 FINAL_JSON，格式：",
     `FINAL_JSON: {"summary":"不超过180字","topics":["..."],"botInterests":["..."],"botDislikes":["..."],"interactionStyle":["..."],"socialMemory":{"scopeSummary":"...","scopeDetail":"...","atmosphere":["..."],"interactionHabits":["..."],"personSummary":"...","personDetail":"...","personMemorable":false,"personPromotionReason":"","notablePeople":[{"userId":"QQ号","userName":"昵称","summary":"...","detail":"...","memorable":false,"promotionReason":""}],"robotProfiles":[{"userId":"QQ号","userName":"昵称","isRobot":true,"confidence":0.9,"evidence":"不引用原话的证据概括","commands":[{"command":"/今日运势","effect":"触发后返回娱乐性质的今日运势","requiresMention":false}]}]},"languageStyle":{"summary":"只写结构和节奏，不重复黑话含义","phrasePatterns":["不含词义的功能性短语结构"],"sentencePatterns":["句式规律"],"punctuationUsageRules":[{"symbol":"？？","knowledgeTitle":"？？","confidence":0.8,"evidence":"不引用原话的上下文概括","usageBoundary":"何时不应这样理解或使用"}],"memberPatterns":[{"userId":"QQ号","userName":"昵称","summary":"个人语言习惯概括","phrasePatterns":["..."],"punctuationUsageRules":[]}]},"knowledge":[{"kind":"slang","title":"？？","content":"模型标注的通用解释、范围含义与必要边界","scope":"${knowledgeScope}","userId":"","userName":"","replacesTitle":""}],"botLanguageHabits":{"adopt":[{"kind":"symbol","term":"（bushi）","usage":"开完玩笑紧接着反口时","reason":"群里都这么用，也合 Bot 爱逗人的性格"}],"drop":[]}}`,
@@ -592,7 +592,7 @@ export function buildQqSelfPersonaGenerationPrompt(store, { corePersonality = ""
     "把人格与协作方式分开：人格描述 Bot 通常在意什么、如何判断、情绪基调、好奇心、幽默边界、如何关心人和表达不同意见；conversationStyle 只描述接话、追问、推进、留白和主动性的选择。两者都不规定具体台词。",
     "角色要有内在一致性：traits、quirks、兴趣、厌恶、主动话题与 selfDescription 应互相解释，形成一个能在新场景中自主反应的主体，而不是若干流行标签的堆叠。稳定不等于僵硬；只有跨多个会话的持续证据才能明显改写旧人格。",
     "表层说话方式不写进 selfDescription、traits 或 conversationStyle：固定句尾、标点、颜文字、括号补充语、黑话和口头禅统一放进 botLanguageHabits，那里才是 Bot 自己的语言习惯。",
-    "botLanguageHabits 管理跨所有会话通用的语言习惯：scopeHabits 是 Bot 已在各个会话里分别采用的习惯及真实使用次数，globalHabits 是现有的通用习惯。只把在多个会话都采用、属于通用网络用语或通用符号（而不是某个群的专属黑话）、并且符合性格的写进 adopt（0-3 个，term 不超过 16 字）；长期没用上、用得别扭或与性格冲突的通用习惯写进 drop。群专属的说法留在各自会话里，不要提升为通用。",
+    "botLanguageHabits 管理跨所有会话通用的语言习惯：scopeHabits 是 Bot 已在各个会话里分别采用的习惯及真实使用次数，globalHabits 是现有的通用习惯。只把在多个会话都采用、属于通用网络用语或通用符号（而不是某个群的专属黑话）、并且符合性格的写进 adopt（0-4 个，term 不超过 16 字）；长期没用上、用得别扭或与性格冲突的通用习惯写进 drop。群专属的说法留在各自会话里，不要提升为通用。",
     coreEditable
       ? "coreAdjustments 是 Bot 对自己核心人格的自我优化：coreEditable 列出当前允许调整的设定、现值、今天的近期改动。只有跨多个会话的长期证据表明某处设定和 Bot 一贯的真实表现明显不符（例如滑块写着内向、实际总爱接话），或有很贴切、反复出现的小毛病、喜好、口头禅值得补上时，才提出最多 3 处小调整：traits/speech 用 op=nudge、key=滑块 id、delta 在 -10 到 10；social 用 op=set、key=反应 id、value=选项 id；quirks/speechHabits/catchphrases/likes/dislikes 用 op=add/remove 和 value；boundaries 只能 add；identity/personality/background/selfReference 用 op=set 和完整新文本。不改名字、角色卡资料和好感规则；证据不足或会和 corePersonality 的整体方向冲突时给空数组。"
       : "coreAdjustments 必须是空数组（核心人格当前不允许自主调整）。",
@@ -703,7 +703,7 @@ export function summarizeQqSelfPersona(store) {
   };
 }
 
-function buildLanguageEvidence(entries) {
+function buildLanguageEvidence(entries, { scopeType = "group" } = {}) {
   const profile = analyzeQqLanguageStyle(entries, { windowSize: 300 });
   return {
     sampleSize: profile.sampleSize,
@@ -721,7 +721,7 @@ function buildLanguageEvidence(entries) {
       messageRatio: item.messageRatio,
       frequentCandidate: item.frequent
     })),
-    symbolHabits: analyzeQqSymbolHabits(entries, { windowSize: 300 })
+    symbolHabits: analyzeQqSymbolHabits(entries, { windowSize: 300, minPeople: scopeType === "private" ? 1 : 2 })
   };
 }
 

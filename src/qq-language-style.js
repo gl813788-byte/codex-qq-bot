@@ -9,7 +9,13 @@ const urlPattern = /https?:\/\/\S+/giu;
 const kaomojiGlyphs = "ωω▽∀´｀°≧≦ﾟ゜＾^ᴗ˘･・∇εσ⊙◕‿｡•̀́ㅂ╯□︵┻━づ⌒Дд≖ಠ;；＞＜><≡⁄∠ゝ灬";
 const kaomojiSource = `[(（][^()（）\\n]{0,8}[${kaomojiGlyphs}][^()（）\\n]{0,8}[)）]|QAQ|QwQ|qwq|OvO|TAT|T_T|orz|Orz|OTZ|=\\s?w\\s?=|>_<|＞_＜|\\^_\\^|\\^\\^|[ヽ٩][^\\n]{1,8}[ノو]`;
 const kaomojiPattern = new RegExp(kaomojiSource, "gu");
-const bracketAsidePattern = /[（(]([^()（）\n]{1,12})[）)]/gu;
+const bracketAsidePattern = /[（(]([^()（）\n]{1,16})[）)]/gu;
+// Bracketed remarks that comment on the sentence rather than act something
+// out: “（bushi）”“（小声）”“（误）”. Everything else short and in Han script
+// (“（亲亲）”“（把门关上）”) is a bracketed action or scene.
+const bracketRemarkPattern = /^(?:bushi|bs|不是|误|雾|大雾|划掉|小声|大声|确信|狗头|doge|滑稽|笑|悲|喜|恼|乐|存疑|暴论|迫真|无端联想|指)$/iu;
+const punctuationOnlyPattern = /^[\s!！?？。.…~～、，,]+$/u;
+const punctuationBurstPattern = /[!！]{2,}|[?？]{2,}|[?？][!！]|[!！][?？]|。{3,}/u;
 const laughterPattern = /哈{3,}|h{3,}|w{3,}|2333+|草+(?=$|[\s，,。！？!?])|笑死|xswl/giu;
 
 const punctuationDefinitions = Object.freeze([
@@ -270,9 +276,12 @@ export function formatQqLanguageStyleProfile(profile = {}, { label = "当前范�
 }
 
 // Group-level typing habits with ratios over human text messages, plus the
-// concrete bracketed asides, kaomoji and laughter forms that at least two
-// different people used (so one person's private quirk never counts).
-export function analyzeQqSymbolHabits(entries = [], { windowSize = 240 } = {}) {
+// concrete bracketed asides and actions, kaomoji, laughter, punctuation-only
+// and short reaction forms that at least two different people used (so one
+// person's private quirk never counts in a group). A private chat passes
+// minPeople 1: there the contact's own way of typing is the conversation's.
+export function analyzeQqSymbolHabits(entries = [], { windowSize = 240, minPeople = 2 } = {}) {
+  const people = Math.max(1, Math.floor(Number(minPeople) || 2));
   const messages = (Array.isArray(entries) ? entries : [])
     .slice(-Math.max(20, Number(windowSize) || 240))
     .filter((entry) => !(entry?.isAssistant || entry?.senderId === "assistant"))
@@ -283,7 +292,14 @@ export function analyzeQqSymbolHabits(entries = [], { windowSize = 240 } = {}) {
     .filter((entry) => entry.text && !entry.text.startsWith("/"));
   const total = messages.length;
   const count = (predicate) => messages.filter((entry) => predicate(entry.text)).length;
-  const forms = { bracketAsides: new Map(), kaomoji: new Map(), laughter: new Map() };
+  const forms = {
+    bracketAsides: new Map(),
+    bracketActions: new Map(),
+    kaomoji: new Map(),
+    laughter: new Map(),
+    punctuationOnly: new Map(),
+    shortReactions: new Map()
+  };
   const note = (map, form, senderId) => {
     const item = map.get(form) || { count: 0, senders: new Set() };
     item.count += 1;
@@ -291,8 +307,20 @@ export function analyzeQqSymbolHabits(entries = [], { windowSize = 240 } = {}) {
     map.set(form, item);
   };
   let bracketMessages = 0;
+  let bracketRemarkMessages = 0;
+  let bracketActionMessages = 0;
+  let punctuationOnlyMessages = 0;
   let kaomojiMessages = 0;
+  const bracketActionPeople = new Set();
+  const punctuationOnlyPeople = new Set();
   for (const { text, senderId } of messages) {
+    // A message of only “？”, “！！！” or “…” is a reaction of its own.
+    if (punctuationOnlyPattern.test(text)) {
+      punctuationOnlyMessages += 1;
+      if (senderId) punctuationOnlyPeople.add(senderId);
+      note(forms.punctuationOnly, normalizePunctuationOnlyForm(text), senderId);
+      continue;
+    }
     const faces = [...text.matchAll(kaomojiPattern)].map((match) => match[0]);
     if (faces.length) kaomojiMessages += 1;
     for (const face of new Set(faces)) note(forms.kaomoji, face, senderId);
@@ -301,23 +329,39 @@ export function analyzeQqSymbolHabits(entries = [], { windowSize = 240 } = {}) {
       .map((match) => match[1].trim())
       .filter((inner) => inner && !/^\d+$/.test(inner));
     if (asides.length) bracketMessages += 1;
+    const actions = asides.filter(isQqBracketAction);
+    if (actions.length) {
+      bracketActionMessages += 1;
+      if (senderId) bracketActionPeople.add(senderId);
+    }
+    if (actions.length < asides.length) bracketRemarkMessages += 1;
     for (const inner of new Set(asides)) note(forms.bracketAsides, `（${inner}）`, senderId);
+    for (const inner of new Set(actions)) note(forms.bracketActions, `（${inner}）`, senderId);
     for (const match of new Set([...text.matchAll(laughterPattern)].map((item) => normalizeLaughter(item[0])))) {
       note(forms.laughter, match, senderId);
     }
+    const reaction = normalizeShortReaction(text);
+    if (reaction) note(forms.shortReactions, reaction, senderId);
   }
   const shared = (map, limit) => [...map.entries()]
-    .filter(([, item]) => item.count >= 2 && item.senders.size >= 2)
+    .filter(([, item]) => item.count >= 2 && item.senders.size >= people)
     .sort((left, right) => right[1].senders.size - left[1].senders.size || right[1].count - left[1].count)
     .slice(0, limit)
     .map(([form, item]) => ({ form, count: item.count, people: item.senders.size }));
   return {
     sampleSize: total,
+    minPeople: people,
     spaceSeparatorRatio: ratio(count((text) => /\p{Script=Han}[ \u3000]+\p{Script=Han}/u.test(text)), total),
     commaRatio: ratio(count((text) => /[，,]/.test(text)), total),
     noEndPunctuationRatio: ratio(count((text) => !/[。！？!?…~～）)」』.]$/u.test(text)), total),
     fullStopEndRatio: ratio(count((text) => /。$/.test(text)), total),
     bracketAsideRatio: ratio(bracketMessages, total),
+    bracketRemarkRatio: ratio(bracketRemarkMessages, total),
+    bracketActionRatio: ratio(bracketActionMessages, total),
+    bracketActionPeople: bracketActionPeople.size,
+    punctuationOnlyRatio: ratio(punctuationOnlyMessages, total),
+    punctuationOnlyPeople: punctuationOnlyPeople.size,
+    punctuationBurstRatio: ratio(count((text) => punctuationBurstPattern.test(text)), total),
     kaomojiRatio: ratio(kaomojiMessages, total),
     emojiRatio: ratio(count((text) => /\p{Extended_Pictographic}/u.test(text)), total),
     tildeRatio: ratio(count((text) => /[～~]/.test(text)), total),
@@ -325,9 +369,45 @@ export function analyzeQqSymbolHabits(entries = [], { windowSize = 240 } = {}) {
     repeatedCharacterRatio: ratio(count((text) => /([\p{Script=Han}a-zA-Z])\1{2,}/u.test(text)), total),
     laughterRatio: ratio(count((text) => new RegExp(laughterPattern.source, "iu").test(text)), total),
     bracketAsides: shared(forms.bracketAsides, 6),
+    bracketActions: shared(forms.bracketActions, 6),
     kaomoji: shared(forms.kaomoji, 6),
-    laughter: shared(forms.laughter, 4)
+    laughter: shared(forms.laughter, 4),
+    punctuationOnly: shared(forms.punctuationOnly, 4),
+    shortReactions: shared(forms.shortReactions, 12)
   };
+}
+
+// A short Han-script bracketed text that is not a known remark marker:
+// “亲亲”, “摸摸头”, “把门关上”.
+export function isQqBracketAction(inner) {
+  const value = String(inner || "").trim();
+  return /^[\p{Script=Han}、，,~～…]{1,16}$/u.test(value)
+    && /\p{Script=Han}/u.test(value)
+    && !bracketRemarkPattern.test(value);
+}
+
+// “！！！！！” and “!!!” are the same reaction; runs keep up to three marks.
+export function normalizePunctuationOnlyForm(text) {
+  return String(text || "")
+    .replace(/\s+/g, "")
+    .replace(/\.{3,}|。{3,}/g, "…")
+    .replace(/!/g, "！")
+    .replace(/\?/g, "？")
+    .replace(/,/g, "，")
+    .replace(/~/g, "～")
+    .replace(/(.)\1{3,}/gu, "$1$1$1")
+    .slice(0, 6);
+}
+
+// A whole short message (“确实”“笑死”“666”“绷不住了”) people send as a
+// reaction; longer text, commands, mentions and bare numbers are not.
+function normalizeShortReaction(text) {
+  const value = String(text || "").replace(/\s+/g, "").replace(/[。.，,]+$/u, "").toLowerCase();
+  const length = [...value].length;
+  if (length < 1 || length > 6) return "";
+  if (!/[\p{Script=Han}a-z0-9]/u.test(value) || /^\d{4,}$/.test(value)) return "";
+  if (/^[/／#!！]/.test(value)) return "";
+  return /^哈+$/u.test(value) || /^h+$/.test(value) ? normalizeLaughter(value) : value;
 }
 
 // One prompt line per notable habit; quiet habits are left out.
@@ -339,10 +419,24 @@ export function describeQqSymbolHabits(habits = {}) {
     lines.push(`常用空格代替逗号断句（${pct(habits.spaceSeparatorRatio)}，逗号 ${pct(habits.commaRatio)}）`);
   }
   if (habits.noEndPunctuationRatio >= 0.6) lines.push(`句末大多不加标点（${pct(habits.noEndPunctuationRatio)}），句号收尾只占 ${pct(habits.fullStopEndRatio)}`);
-  if (habits.bracketAsideRatio >= 0.03) {
-    const forms = (habits.bracketAsides || []).map((item) => item.form).slice(0, 4);
-    lines.push(`常加括号补充语（${pct(habits.bracketAsideRatio)}）${forms.length ? `，大家常写 ${forms.join(" ")}` : ""}`);
+  const remarkRatio = Number.isFinite(habits.bracketRemarkRatio) ? habits.bracketRemarkRatio : habits.bracketAsideRatio;
+  if (remarkRatio >= 0.03) {
+    const actions = new Set((habits.bracketActions || []).map((item) => item.form));
+    const forms = (habits.bracketAsides || []).map((item) => item.form).filter((form) => !actions.has(form)).slice(0, 4);
+    lines.push(`常加括号补充语（${pct(remarkRatio)}）${forms.length ? `，大家常写 ${forms.join(" ")}` : ""}`);
   }
+  // Bracketed actions are rarely written the same way twice, so the habit
+  // counts once two people do it; a concrete form still needs two people.
+  const minPeople = Math.max(1, Number(habits.minPeople) || 2);
+  if (Number(habits.bracketActionPeople || 0) >= minPeople && habits.bracketActionRatio >= 0.008) {
+    const forms = (habits.bracketActions || []).map((item) => item.form).slice(0, 4);
+    lines.push(`会在括号里写一个很短的动作或情景来表达亲近、害羞、无奈或玩闹（${pct(habits.bracketActionRatio)}，${habits.bracketActionPeople} 人这样写过${forms.length ? `，比如 ${forms.join(" ")}` : ""}）`);
+  }
+  if (Number(habits.punctuationOnlyPeople || 0) >= minPeople && habits.punctuationOnlyRatio >= 0.01) {
+    const forms = (habits.punctuationOnly || []).map((item) => item.form).slice(0, 4);
+    lines.push(`有时单独发一条只有标点的消息当反应（${pct(habits.punctuationOnlyRatio)}${forms.length ? `，常见 ${forms.join(" ")}` : ""}）`);
+  }
+  if (habits.punctuationBurstRatio >= 0.04) lines.push(`激动、惊讶或疑惑时感叹号、问号常连打（${pct(habits.punctuationBurstRatio)}）`);
   if (habits.kaomojiRatio >= 0.02) {
     const forms = (habits.kaomoji || []).map((item) => item.form).slice(0, 4);
     lines.push(`会用颜文字（${pct(habits.kaomojiRatio)}）${forms.length ? `，常见 ${forms.join(" ")}` : ""}`);

@@ -78,7 +78,7 @@ export const qqAgentOutputSchema = Object.freeze({
     },
     mood: {
       type: "string",
-      description: "Your mood after this exchange in 2-8 Chinese characters (e.g. 有点困, 被逗乐了, 烦躁, 好奇), or empty to keep the previous mood. Never put private details here."
+      description: "Your mood after this exchange in 2-8 Chinese characters, with its strength when it matters (e.g. 有点困, 超开心, 被逗乐了, 有点烦, 好奇, 懵了), or empty to keep the previous mood. It decides how you type next time. Never put private details here."
     }
   }
 });

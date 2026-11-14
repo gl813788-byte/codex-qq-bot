@@ -313,3 +313,35 @@ test("compresses learned human follow-up gaps into a bounded bubble delay", () =
   assert.equal(getQqAdaptiveBubbleDelayMs({ sameSpeakerGapMedianSeconds: 30 }, { configuredMs: 650 }), 1800);
   assert.equal(getQqAdaptiveBubbleDelayMs({}, { configuredMs: 700 }), 700);
 });
+
+test("bracketed actions, punctuation-only messages and bursts are learned as group habits", () => {
+  const lines = [
+    ["1", "麦麦（亲亲）"], ["2", "好困（倒地）"], ["3", "？"], ["1", "？？？"], ["2", "！！！！！"],
+    ["3", "真的吗！！"], ["1", "确实"], ["2", "确实"], ["3", "今天吃什么"], ["1", "随便吧"],
+    ["2", "哈哈哈哈"], ["3", "我先走了（关门）"], ["1", "晚上见"]
+  ];
+  const entries = lines.map(([senderId, text], index) => ({ senderId, text, at: new Date(Date.UTC(2026, 10, 1, 10, index)).toISOString() }));
+  const style = analyzeQqHumanChatStyle(entries);
+  const habits = style.symbolHabits;
+  assert.equal(habits.bracketActionPeople, 3);
+  assert.ok(habits.bracketActionRatio > 0.2);
+  assert.deepEqual(habits.bracketActions, [], "each action was written once, so none is named");
+  assert.equal(habits.punctuationOnlyPeople, 3);
+  assert.deepEqual(habits.punctuationOnly.map((item) => item.form), [], "no punctuation form was shared by two people twice");
+  assert.ok(habits.punctuationBurstRatio > 0);
+  assert.deepEqual(habits.shortReactions.map((item) => item.form), ["确实"], "a short reaction two people send is a shared reaction");
+  const plan = buildQqHumanBehaviorPlan({ text: "哈哈", groupId: "1" }, {}, style, { text: "哈哈" });
+  assert.ok(plan.typingHabits.some((line) => /括号里写一个很短的动作或情景.*3 人这样写过/.test(line)), plan.typingHabits.join("\n"));
+  assert.ok(plan.typingHabits.some((line) => /单独发一条只有标点的消息/.test(line)));
+  assert.ok(!plan.typingHabits.some((line) => /常加括号补充语/.test(line)), "actions are not reported as remarks");
+});
+
+test("a private chat follows the contact's own bracketed actions", () => {
+  const lines = ["（蹭蹭）在吗", "今天好累（瘫）", "（蹭蹭）晚安", "嗯嗯", "好耶", "明天见", "吃了吗", "睡了", "早", "哈哈", "好", "行"];
+  const entries = lines.map((text, index) => ({ senderId: "42", text, at: new Date(Date.UTC(2026, 10, 1, 10, index)).toISOString() }));
+  const style = analyzeQqHumanChatStyle(entries, { privateChat: true });
+  assert.equal(style.symbolHabits.minPeople, 1);
+  assert.deepEqual(style.symbolHabits.bracketActions.map((item) => item.form), ["（蹭蹭）"]);
+  const group = analyzeQqHumanChatStyle(entries);
+  assert.deepEqual(group.symbolHabits.bracketActions, [], "in a group one person's action is never named");
+});

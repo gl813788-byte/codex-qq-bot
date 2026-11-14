@@ -658,6 +658,10 @@ const detailLabelsZh = Object.freeze({
   activityResult: "执行结果",
   toolSteps: "工具步骤",
   toolCallCount: "工具调用次数",
+  inputTokens: "输入 token",
+  cachedInputTokens: "缓存命中 token",
+  outputTokens: "输出 token",
+  cacheHitPercent: "缓存命中率（%）",
   referenceCount: "参考图数",
   claudeModel: "Claude 模型",
   claudeReasoningEffort: "Claude 思考强度",
@@ -1189,7 +1193,8 @@ const defaultLogKeyFields = Object.freeze([
 const logKeyFieldsByCategory = Object.freeze({
   agent: Object.freeze([
     "activity", "activityResult", "toolSteps", "toolCallCount", "operation", "outcome", "error", "errorCode", "reason",
-    "durationMs", "model", "reasoningEffort", "modelOutput", "outputChars", "workloadMessageCount", "deadlineRenewalCount",
+    "durationMs", "model", "reasoningEffort", "cacheHitPercent", "inputTokens", "cachedInputTokens",
+    "modelOutput", "outputChars", "workloadMessageCount", "deadlineRenewalCount",
     "taskType", "targetScopeId", "actorRole"
   ]),
   lifecycle: Object.freeze(["outcome", "messageType", "groupId", "triggerMode", "decisionReason", "totalDurationMs", "durationMs", "error"]),

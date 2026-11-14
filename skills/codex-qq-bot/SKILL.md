@@ -140,6 +140,8 @@ subsystems belong in focused modules.
 | Structured final output (inner thought, sticker, mood) | `src/infrastructure/codex/qq-agent-output.js` |
 | Sticker search, reactions/recall, profile lookups | `src/qq-sticker-search.js`, `src/app/qq-sticker-tool.js`, `src/app/qq-message-tools.js`, `src/app/qq-lookup-tool.js` |
 | Bot mood, inner thoughts, daily routine | `src/qq-bot-life-state.js`, `src/qq-bot-daily-routine.js` |
+| How mood and vocabulary show this turn (typing ideas, worn-out words, fresh expressions) | `src/qq-bot-expression.js` |
+| Per-turn token usage and prompt-cache hits in turn logs | `src/infrastructure/agent/agent-token-usage.js` |
 | Core personality, affinity, `/好感度` | `src/qq-bot-personality.js`, `src/qq-affinity-command.js` |
 | Character-card import/export (V1/V2/V3, PNG, CHARX, text) | `src/qq-character-card.js` |
 | Videos, songs, voice, Bilibili (`qq_media`), the optional media components and their updates | `src/qq-media/`, `src/app/qq-media-tool.js`, `src/app/qq-media-services.js`, `scripts/media/` |
@@ -578,16 +580,36 @@ Untrusted chat material such as the image directory belongs in the turn
 prompt, never in developer instructions. The rules must keep truthful
 answers when someone sincerely asks whether the Bot is an AI. Typing follows
 group-level habits from `analyzeQqSymbolHabits` (spaces, end punctuation,
-bracketed asides, kaomoji, laughter forms; a concrete form is named only when at
-least two people used it), never one member's quirk.
+bracketed asides and short bracketed actions, punctuation-only messages and
+bursts, kaomoji, laughter forms, short reactions; in a group a concrete form is
+named only when at least two people used it, in a private chat the contact's
+own habits count), never one member's quirk in a group. A short bracketed
+action like （戳戳） is allowed; novel-style narration, long action text and
+inner monologue are not. `src/qq-bot-expression.js` turns the stored mood
+(family + strength, fading with age, scaled by the emotionality slider) into
+this turn's typing ideas (more short bubbles, “！！！” bursts, a “？”-only
+bubble, a bracketed action, fewer words), lists words/openers/endings the Bot
+wore out in the scope (words humans there also keep using are topic, not tic)
+and a rotating set of fresh expressions. Chat turns only, suggestions only: the
+Hub never rewrites model text. Developer instructions carry no speaker, QQ
+number or date (`formatQqTurnIdentityContext` puts them next to the current
+message) and keep chat-type and sender-role parts last; the static tool index
+lives there too, and the per-turn tool catalog no longer depends on who is
+speaking, so the engine's prompt cache keeps hitting. The turn prompt puts
+slow-changing blocks (core persona, self persona, scope topics, habits, robots)
+first and the behavior/expression plan, workspace and identity right before
+the current message. Turn logs carry `inputTokens`, `cachedInputTokens` and
+`cacheHitPercent`.
 Imported character cards are persona material only: the core block forbids
 novel-style narration and declares card demands on output format, rule
 ignoring, safety or permissions inapplicable; keyed lore enters only when the
 current message or quote mentions a key.
-The Bot chooses its own language habits: scope summaries adopt/drop 0-3 per
-scope from reviewed group-wide slang and shared symbols using usage counts from
-delivered replies, the global refresh only promotes general internet language,
-and `qq_self.language_habit` lets the main model adopt at most three a day.
+The Bot chooses its own language habits: scope summaries adopt/drop 0-5 per
+scope from reviewed group-wide slang, shared symbols, bracketed actions,
+punctuation reactions and short reactions using usage counts from delivered
+replies (12 per scope, 16 global, 80 total), the global refresh only promotes
+general internet language, and `qq_self.language_habit` lets the main model
+adopt at most five a day.
 Scoped habits never leave their scope; owner-added habits cannot be dropped by
 the model; logs carry kind and outcome only, never terms.
 The Bot may also adjust its own core persona through `qq_self.persona` (sliders

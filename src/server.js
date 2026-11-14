@@ -100,6 +100,7 @@ import {
   revertQqPersonaSelfEdit,
   buildQqPersonalityCardExport,
   formatQqPersonaLoreContext,
+  getQqPersonalityEmotionScales,
   getQqPersonalityExpressionBias,
   normalizeQqPersonality,
   normalizeQqPersonalityProfile,
@@ -123,6 +124,7 @@ import {
   recordQqLanguageHabitUsage,
   removeQqLanguageHabit,
   applyQqLanguageHabitProposals,
+  selectQqLanguageHabitsForScope,
   selectQqScopeSlangCandidates,
   summarizeQqLanguageHabits
 } from "./qq-bot-language-habits.js";
@@ -289,6 +291,7 @@ import {
   formatQqAgentBaseInstructions,
   formatQqMainModelInstructions,
   formatQqMainToolGuide,
+  formatQqTurnIdentityContext,
   formatQqTaskWorkspaceContext,
   formatQqPromptDate
 } from "./qq-main-prompt.js";
@@ -327,6 +330,14 @@ import {
   isQqSilentReply,
   isQqStickerStyleMessage
 } from "./qq-human-behavior.js";
+import {
+  applyQqBotExpressionToBehaviorPlan,
+  buildQqBotExpressionPlan,
+  findQqBotOverusedExpressions,
+  formatQqBotExpressionContext,
+  resolveQqBotMoodExpression,
+  selectQqFreshExpressions
+} from "./qq-bot-expression.js";
 import {
   backfillQqAdaptiveInterruptionLearning,
   applyQqAdaptiveModelStyleReview,
@@ -8208,6 +8219,8 @@ function formatQqBotInternalToolContext(event) {
     stickerLibraryHint: event.qqStickerLibraryHint || "",
     replyDelivery: getQqReplyDelivery(event),
     drawsWithTool: qqAgentDrawsWithTool,
+    // The static tool index rides in the developer instructions.
+    includeIndex: !qqTurnToolsEnabled(event),
     mediaSummary: formatQqMediaCandidates(getQqMediaCandidatesForEvent(event), {
       available: {
         video: Boolean(event.qqMediaToolStatus?.video),
@@ -11024,28 +11037,34 @@ function extractQqCommandTarget(event, command) {
   return "";
 }
 
+// Developer instructions carry no speaker, QQ number or date, so they stay
+// identical across turns of the same chat type and sender role and the
+// engine's cached system prompt keeps hitting; formatQqTurnIdentityContext
+// puts those per-turn facts next to the current message.
 async function buildAssistantInstructions(event) {
-  const speaker = event.qqColdProactive
-    ? "兴趣回复定时器（没有新发送者）"
-    : event.qqPrivateProactive ? "私聊兴趣定时器（没有新消息）"
-    : `${formatQqParticipantIdentity(event)}${hasQqPrivilegedAccess(event) ? `（权限身份：${getQqAuthorityLabel(event)}）` : ""}`;
   const assistantSkillBrief = await loadAssistantSkillBrief();
-  const privateChat = isQqPrivateEvent(event);
   return formatQqMainModelInstructions({
-    privateChat,
+    privateChat: isQqPrivateEvent(event),
     assistantName: state.qq.selfPersona.account.nickname || state.qq.selfPersona.persona.name || assistantName,
     ownerLabel,
-    speaker: `${speaker}；${privateChat ? "私聊" : "群聊"}。QQ 号跨群标识同一人物，群名片按群理解`,
     isOwner: Boolean(event.isOwner),
     isAdministrator: Boolean(event.isBotAdmin),
-    senderId: event.senderId,
     enhancerEnabled: Boolean(state.qq.enhancer.enabled),
     toolsEnabled: qqTurnToolsEnabled(event),
     canGenerateImages: qqAgentCanDraw,
     drawsWithTool: qqAgentDrawsWithTool,
+    canSearchImages: canQqSearchWebImages(),
     assistantProfile: assistantSkillBrief,
     replyDelivery: getQqReplyDelivery(event)
   });
+}
+
+function buildQqTurnIdentityContext(event) {
+  const speaker = event.qqColdProactive
+    ? "兴趣回复定时器（没有新发送者）"
+    : event.qqPrivateProactive ? "私聊兴趣定时器（没有新消息）"
+    : `${formatQqParticipantIdentity(event)}${hasQqPrivilegedAccess(event) ? `（权限身份：${getQqAuthorityLabel(event)}）` : ""}`;
+  return formatQqTurnIdentityContext({ speaker, privateChat: isQqPrivateEvent(event) });
 }
 
 async function loadAssistantSkillBrief() {
@@ -11172,10 +11191,26 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   const humanChatStyle = adaptiveSignals
     ? personalizeQqHumanStyle(baseHumanChatStyle, adaptiveSignals)
     : baseHumanChatStyle;
-  const humanBehaviorPlan = buildQqHumanBehaviorPlan(event, conversationIntent, humanChatStyle, {
+  const baseHumanBehaviorPlan = buildQqHumanBehaviorPlan(event, conversationIntent, humanChatStyle, {
     text,
     expression: getQqPersonalityExpressionBias(state.qq.personality)
   });
+  // The Bot's current mood and the conversation's typing habits become
+  // concrete typing for this turn (bursts, punctuation-only bubbles,
+  // bracketed actions, fewer or more bubbles).
+  const emotionScales = getQqPersonalityEmotionScales(state.qq.personality);
+  const botExpressionPlan = state.qq.enhancer.enabled
+    ? buildQqBotExpressionPlan({
+      mood: resolveQqBotMoodExpression(state.qq.botLife.mood, { emotionality: emotionScales?.emotionality ?? 50 }),
+      messageText: event.qqColdProactive || event.qqPrivateProactive ? "" : text,
+      symbolHabits: humanChatStyle.symbolHabits,
+      mode: baseHumanBehaviorPlan.mode,
+      privateChat: isQqPrivateEvent(event),
+      seed: `${scopeId}:${event.raw?.message_id ?? ""}:${text}`,
+      speechIntensity: emotionScales?.intensity ?? 50
+    })
+    : null;
+  const humanBehaviorPlan = applyQqBotExpressionToBehaviorPlan(baseHumanBehaviorPlan, botExpressionPlan);
   // Sticker-friendly turns get a few ready candidates so a sticker does not
   // always cost a tool search; the full library stays behind qq_sticker.
   const stickerCatalog = state.qq.enhancer.enabled ? await buildQqStickerCatalog(qqStickerDir) : [];
@@ -11236,15 +11271,21 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   const scopeTopicContext = formatQqSelfPersonaScopeTopicContext(state.qq.selfPersona, scopeId);
   // The Bot's own slang/symbol habits for this scope plus slang people here
   // use; lore entries follow what the current exchange mentions.
+  const scopeSlangCandidates = state.qq.enhancer.enabled
+    ? selectQqScopeSlangCandidates(state.qq.knowledgeBase, isQqPrivateEvent(event)
+      ? { privateUserId: event.senderId, limit: 30 }
+      : { groupId: event.groupId, limit: 30 })
+    : [];
   const languageHabitsContext = state.qq.enhancer.enabled && !event.qqColdProactive
     ? formatQqLanguageHabitsContext({
       habits: state.qq.selfPersona.languageHabits,
       scopeId,
-      scopeSlang: selectQqScopeSlangCandidates(state.qq.knowledgeBase, isQqPrivateEvent(event)
-        ? { privateUserId: event.senderId }
-        : { groupId: event.groupId }),
+      scopeSlang: scopeSlangCandidates,
       toolsEnabled: qqTurnToolsEnabled(event)
     })
+    : "";
+  const botExpressionContext = botExpressionPlan
+    ? formatQqBotExpressionTurnContext(event, botExpressionPlan, { scopeId, humanChatStyle, scopeSlangCandidates })
     : "";
   const personaLoreContext = formatQqPersonaLoreContext(state.qq.personality, {
     text: [text, event.replyContext?.text || ""].filter(Boolean).join("\n"),
@@ -11263,7 +11304,6 @@ async function buildModelReply(event, { replyScope = null } = {}) {
   const semanticMemoryContext = semanticRecall.context;
   event.qqSemanticMemoryItemIds = [...semanticRecall.itemIds];
   const personaContext = formatQqPersonaContext(event);
-  const repetitionGuard = state.qq.enhancer.enabled ? buildQqRepetitionGuard(event) : "";
   const webContext = "";
   // The library is searched on demand through qq_sticker; only its size is in the prompt.
   event.qqStickerLibraryHint = state.qq.enhancer.enabled ? formatQqStickerLibraryHint(stickerCatalog) : "";
@@ -11300,8 +11340,11 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     toolsEnabled: qqTurnToolsEnabled(event),
     canUseSubagents: subagentMaxConcurrency > 0 && !event.qqColdProactive && !event.qqSubagentReport,
     hasStickerCandidates: replyStickerCandidates.length > 0 || stickerCatalog.length > 0,
-    hasMemoryPeople: event.qqMemoryPeople.length > 0,
-    canRecordRobotProfiles: event.qqRobotProfileCandidates.length > 0,
+    // Offered every turn: the tool catalog opens the cached prompt prefix, so
+    // it must not change with who happens to be speaking. Both tools still
+    // accept only the people and robots recognized in this turn.
+    hasMemoryPeople: true,
+    canRecordRobotProfiles: true,
     canSearchImages: canQqSearchWebImages(),
     canSendMessages: speaksThroughTool,
     canDraw: qqAgentDrawsWithTool,
@@ -11436,27 +11479,15 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     } = {}
   ) => {
     const publicMemoryContext = semanticKnowledge.length ? "" : formatQqPublicMemoryContext(event);
+    // Order is for the prompt cache as much as for reading: material that
+    // changes slowly (persona, habits, robots) comes first so consecutive
+    // turns share a long prefix; the conversation follows; this turn's plan,
+    // workspace, speaker and message come last, next to where the model acts.
     return [
       persistentResume
         ? "你正在继续同一个 QQ 长期会话。沿用线程中已经建立的身份、关系、稳定规则和前文，不要要求重新介绍背景。"
-        : "下面是本轮由 Hub 归一化并按权限裁剪后的 QQ 上下文。",
-      formatQqTaskWorkspaceContext(taskWorkspace, {
-        canGenerateImages: qqAgentCanDraw,
-        drawsWithTool: qqAgentDrawsWithTool,
-        inlineAttachments: speaksThroughTool
-      }),
-      persistentResume ? formatQqPersistentFusionNote({ replyDelivery }) : null,
+        : "下面是本轮由 Hub 归一化并按权限裁剪后的 QQ 上下文：先是变化很慢的设定，再是对话记录，最后是这一轮的安排和收到的消息。",
       "",
-      intentContext,
-      intentContext ? "" : null,
-      (!persistentResume || includeCurrentBatch) ? qqReplyTargetInstruction : null,
-      (!persistentResume || includeCurrentBatch) && qqReplyTargetInstruction ? "" : null,
-      !persistentResume ? humanBehaviorContext : null,
-      !persistentResume && humanBehaviorContext ? "" : null,
-      proactiveExecutionContext,
-      proactiveExecutionContext ? "" : null,
-      !persistentResume ? botToolContext : null,
-      !persistentResume && botToolContext ? "" : null,
       !persistentResume ? personalityCoreContext : null,
       !persistentResume && personalityCoreContext ? "" : null,
       !persistentResume ? selfPersonaContext : null,
@@ -11465,14 +11496,16 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       !persistentResume && scopeTopicContext ? "" : null,
       !persistentResume ? languageHabitsContext : null,
       !persistentResume && languageHabitsContext ? "" : null,
+      robotProfilesContext || null,
+      robotProfilesContext ? "" : null,
+      persistentResume ? formatQqPersistentFusionNote({ replyDelivery }) : null,
+      persistentResume ? "" : null,
       personaLoreContext || null,
       personaLoreContext ? "" : null,
       botLifeContext || null,
       botLifeContext ? "" : null,
       relationshipContext || null,
       relationshipContext ? "" : null,
-      robotProfilesContext || null,
-      robotProfilesContext ? "" : null,
       !persistentResume ? publicMemoryContext : null,
       !persistentResume && publicMemoryContext ? "" : null,
       includeSemanticMemory ? semanticMemoryContext : null,
@@ -11481,8 +11514,6 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       !persistentResume && personaContext ? "" : null,
       !persistentResume || includeCurrentBatch || (!forceLocalReply && expandLevel > 0) ? memoryBlock : null,
       (!persistentResume || includeCurrentBatch || (!forceLocalReply && expandLevel > 0)) && memoryBlock ? "" : null,
-      repetitionGuard,
-      repetitionGuard ? "" : null,
       quotedContext,
       quotedContext ? "" : null,
       webContext,
@@ -11508,6 +11539,24 @@ async function buildModelReply(event, { replyScope = null } = {}) {
         return `- ${contextTime}${item.sender}: ${contextText}${mentionNote}${imageNote}${item.replyToBot ? "（回复 bot）" : ""}`;
       }),
       event.proactiveDecision?.replyContext?.length ? "" : null,
+      !persistentResume ? botToolContext : null,
+      !persistentResume && botToolContext ? "" : null,
+      intentContext,
+      intentContext ? "" : null,
+      (!persistentResume || includeCurrentBatch) ? qqReplyTargetInstruction : null,
+      (!persistentResume || includeCurrentBatch) && qqReplyTargetInstruction ? "" : null,
+      proactiveExecutionContext,
+      proactiveExecutionContext ? "" : null,
+      !persistentResume ? humanBehaviorContext : null,
+      !persistentResume && humanBehaviorContext ? "" : null,
+      botExpressionContext || null,
+      botExpressionContext ? "" : null,
+      formatQqTaskWorkspaceContext(taskWorkspace, {
+        canGenerateImages: qqAgentCanDraw,
+        drawsWithTool: qqAgentDrawsWithTool,
+        inlineAttachments: speaksThroughTool
+      }),
+      "",
       event.pendingImageRequestText ? `触发原因：${ownerLabel}刚刚说“${event.pendingImageRequestText}”，随后这张 QQ 图片到达。请直接看这张图并回应。` : null,
       event.pendingImageRequestText ? "" : null,
       hasAnyQqImageReference(event) && !shouldInspectImages
@@ -11520,6 +11569,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       event.qqAnimationVision?.length ? `动图信息：${event.qqAnimationVision.join("；")}。你可以自行决定要展开几个动图、每个抽几帧以及抽哪些位置；需要时用 qq_sticker 的 inspect（selector=当前N，description 填 20%,50%,80%、中段3帧或均匀5帧）。不要把同一动图的多帧误当成多张独立表情。` : null,
       imagePaths.length ? "你可以查看图片内容，但回复要像聊天时自然接话：不必默认逐条解析图片。只有对方明确让你看图、判断内容、评价截图/表情包，或图片是回答关键时，才说明看到的主元素、文字、构图或梗图大意；完全无法辨认主体时才说看不清。" : null,
       hasAnyQqImageReference(event) ? "" : null,
+      buildQqTurnIdentityContext(event),
       "",
       event.qqColdProactive
         ? "兴趣回复冷群时间检查："
@@ -12165,17 +12215,6 @@ function deTemplateQqReply(reply, event) {
   text = rewriteOverusedQqPhrases(text, event);
   text = rewriteRecentFrequentQqPhrases(text, event);
   return text.trim();
-}
-
-function buildQqRepetitionGuard(event) {
-  if (!event.groupId) return "";
-  const frequent = getRecentFrequentQqPhrases(event.groupId);
-  if (frequent.length === 0) return "";
-  return [
-    "近期去重约束：",
-    `同一群近期这些说法/片段已经出现偏多，本次不要照抄或近似复用：${frequent.join("、")}`,
-    "如果语义必须表达类似意思，换成全新的自然说法，宁可短一点，也不要模板化。"
-  ].join("\n");
 }
 
 function getRecentFrequentQqPhrases(groupId) {
@@ -13944,6 +13983,29 @@ function backfillQqAdaptiveLearningFromRecentMessages() {
     }
   }
   return changed;
+}
+
+// This turn's expression block: worn-out words from the Bot's recent
+// messages in the scope and a rotating handful of fresh expressions, next to
+// the mood-driven typing ideas. Chat turns only; tasks keep their wording.
+function formatQqBotExpressionTurnContext(event, plan, { scopeId = "", humanChatStyle = {}, scopeSlangCandidates = [] } = {}) {
+  if (!plan.chat) return formatQqBotExpressionContext(plan);
+  const recent = scopeId ? state.qq.memory.recentMessages[scopeId] || [] : [];
+  const isBot = (entry) => entry?.isAssistant || entry?.senderId === "assistant";
+  const botReplies = recent.filter(isBot).map((entry) => entry.text || "");
+  const overused = findQqBotOverusedExpressions(botReplies, {
+    assistantNames: [state.qq.selfPersona.account?.nickname, state.qq.selfPersona.persona?.name, assistantName],
+    humanTexts: recent.filter((entry) => !isBot(entry)).map((entry) => entry.text || "")
+  });
+  const fresh = selectQqFreshExpressions({
+    habits: selectQqLanguageHabitsForScope(state.qq.selfPersona.languageHabits, scopeId),
+    slang: scopeSlangCandidates,
+    shortReactions: humanChatStyle.symbolHabits?.shortReactions || [],
+    overused: [...overused.words, ...overused.openers, ...overused.endings],
+    recentReplies: botReplies,
+    seed: `${scopeId}:${event.raw?.message_id ?? ""}:${event.text || ""}`
+  });
+  return formatQqBotExpressionContext(plan, { overused, fresh });
 }
 
 function formatQqPersonaContext(event) {
