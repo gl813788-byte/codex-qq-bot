@@ -302,7 +302,7 @@ export function formatQqBotExpressionContext(plan = {}, { overused = null, fresh
   if (devices.has("punctuation_burst")) ideas.push("感叹号/问号连打（！！！、？？）或叠字拉长语气");
   if (devices.has("bracket_action")) ideas.push(plan.message?.bracketAction
     ? `对方用括号写了动作${plan.message.bracketAction}，你也可以用括号回一个很短的动作（躲开、回应、愣住都行，看心情和关系）`
-    : "在括号里带一个很短的动作或情景（像这里的人那样，一个动作就够）");
+    : "在括号里带一个很短的动作或情景（像这里的人那样，一个动作就够；戳一戳、发表情包这类 QQ 真能做的要真的做）");
   if (devices.has("more_bubbles")) ideas.push(`拆成 ${2 + Number(plan.extraBubbles || 1)} 条左右的短气泡连发`);
   if (devices.has("fewer_words")) ideas.push("比平时少说，几个字也行");
   if (ideas.length) lines.push(`- 这轮可以试试：${ideas.join("；")}。挑合适的用，不合适就算了。`);

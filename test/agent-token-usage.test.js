@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { agentTurnUsageLogFields, createAgentTurnUsageTracker, summarizeClaudeUsage } from "../src/infrastructure/agent/agent-token-usage.js";
+import { normalizeEntry } from "../src/logger.js";
 
 const usage = (threadId, total, last) => ({ method: "thread/tokenUsage/updated", params: { threadId, tokenUsage: { total, last } } });
 
@@ -25,4 +26,11 @@ test("Claude's aggregated usage counts cache reads and writes as input", () => {
   assert.equal(summarizeClaudeUsage(null), null);
   assert.deepEqual(agentTurnUsageLogFields(null), {});
   assert.equal(agentTurnUsageLogFields(summary).cacheHitPercent, 87.5);
+});
+
+// Live check 2026-11-14: fields named inputTokens/cachedInputTokens came out
+// as "[redacted]" because the logger hides credential-like keys.
+test("usage log fields survive the logger's credential redaction", () => {
+  const fields = agentTurnUsageLogFields({ inputTokens: 8000, cachedInputTokens: 7000, outputTokens: 90, cacheHitPercent: 87.5 });
+  assert.deepEqual(normalizeEntry({ level: "success", category: "agent", message: "turn finished", details: fields }).details, fields);
 });

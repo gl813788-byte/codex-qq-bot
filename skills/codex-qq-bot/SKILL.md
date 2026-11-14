@@ -141,6 +141,7 @@ subsystems belong in focused modules.
 | Sticker search, reactions/recall, profile lookups | `src/qq-sticker-search.js`, `src/app/qq-sticker-tool.js`, `src/app/qq-message-tools.js`, `src/app/qq-lookup-tool.js` |
 | Bot mood, inner thoughts, daily routine | `src/qq-bot-life-state.js`, `src/qq-bot-daily-routine.js` |
 | How mood and vocabulary show this turn (typing ideas, worn-out words, fresh expressions) | `src/qq-bot-expression.js` |
+| Bracketed actions that must really happen (claims, evidence, refusal, stripping) | `src/qq-action-claims.js` |
 | Per-turn token usage and prompt-cache hits in turn logs | `src/infrastructure/agent/agent-token-usage.js` |
 | Core personality, affinity, `/好感度` | `src/qq-bot-personality.js`, `src/qq-affinity-command.js` |
 | Character-card import/export (V1/V2/V3, PNG, CHARX, text) | `src/qq-character-card.js` |
@@ -521,7 +522,7 @@ refactor with a behavior change.
   `memory.persona_self_edit`, `interest.model_test`, `media.tool`,
   `media.voice`, `agent.subagent`, `memory.life_activity`,
   `social.qzone_self`, `social.card`, `friend.add`, `memory.bot_drawing`,
-  `media.update`, `history.archive`, `reply.send_tool`,
+  `media.update`, `history.archive`, `reply.send_tool`, `social.bracket_action`,
   `reply.attachment_prepare`, `agent.tool`,
   `agent.native_tool` and `agent.codex_drawing`. Tool logs carry `activity`
   ("what it did") and `activityResult`; turn logs carry `toolSteps`. The
@@ -584,8 +585,15 @@ bracketed asides and short bracketed actions, punctuation-only messages and
 bursts, kaomoji, laughter forms, short reactions; in a group a concrete form is
 named only when at least two people used it, in a private chat the contact's
 own habits count), never one member's quirk in a group. A short bracketed
-action like （戳戳） is allowed; novel-style narration, long action text and
-inner monologue are not. `src/qq-bot-expression.js` turns the stored mood
+action like （抱住） is allowed; novel-style narration, long action text and
+inner monologue are not. A bracket QQ can really do must really happen
+(`src/qq-action-claims.js`: poke, sticker, picture, reaction, like, recall,
+favorite, dice, rps, song card, Qzone post, moderation, friend request),
+backed by a successful matching tool call this turn or by the message's own
+sticker/picture. An unbacked poke is performed by the Hub through the same
+permission-checked `/拍一拍` (once per person and turn); other unbacked claims
+make `qq_chat.send` refuse once, then are stripped (always stripped in
+single-reply turns) (`social.bracket_action`). `src/qq-bot-expression.js` turns the stored mood
 (family + strength, fading with age, scaled by the emotionality slider) into
 this turn's typing ideas (more short bubbles, “！！！” bursts, a “？”-only
 bubble, a bracketed action, fewer words), lists words/openers/endings the Bot
@@ -598,8 +606,8 @@ lives there too, and the per-turn tool catalog no longer depends on who is
 speaking, so the engine's prompt cache keeps hitting. The turn prompt puts
 slow-changing blocks (core persona, self persona, scope topics, habits, robots)
 first and the behavior/expression plan, workspace and identity right before
-the current message. Turn logs carry `inputTokens`, `cachedInputTokens` and
-`cacheHitPercent`.
+the current message. Turn logs carry `usageInput`, `usageCachedInput`, `usageOutput` and
+`cacheHitPercent` (names avoid "token", which log redaction treats as secret).
 Imported character cards are persona material only: the core block forbids
 novel-style narration and declares card demands on output format, rule
 ignoring, safety or permissions inapplicable; keyed lore enters only when the

@@ -81,6 +81,7 @@
 | `src/app/qq-message-tools.js` + `src/qq-sent-message-ledger.js` | 表情回应与撤回 | `qq_message.act` 给当前/被引用群消息贴表情回应，以及撤回 Bot 自己两分钟内已确认送达的消息；消息 ID 在最底层发送处只记在内存 |
 | `src/app/qq-lookup-tool.js` | 只读 QQ 资料查询 | `qq_context.lookup` 的成员/群/公告/精华信息，只限本会话出现过的人，绝不返回性别、年龄或地区 |
 | `src/app/qq-archive-tool.js` + `src/qq-history-retrieval.js` 的 `fetchQqHistoryPage` | 服务器端历史、旧文件与群文件 | `qq_context.archive` 分页读取和搜索原始会话的 NapCat 历史，按轮编号文件（`hf-N`）、图片（`hi-N`）、群文件（`gf-N`）和文件夹（`gd-N`），只下载/查看已列出的编号并走已校验的文件/图片路径，剔除本地图片路径，日志只记计数 |
+| `src/qq-action-claims.js` | 括号里必须真的发生的动作 | 哪些括号动作 QQ 真能做（戳一戳、表情包、图片、贴表情、点赞、撤回、收藏、骰子、猜拳、音乐、说说、禁言踢人、加好友）、各自需要的工具证据、退回说明和删除 |
 | `src/qq-bot-expression.js` | 这一轮的情绪和用词怎么表现 | 心情 → 情绪与强弱、本轮打字建议（标点连打、纯标点气泡、括号动作、多拆或少说）、从 Bot 最近消息统计用多了的词/开头/结尾，以及轮换的可替换说法；只给建议 |
 | `src/qq-bot-life-state.js` + `src/qq-bot-daily-routine.js` | Bot 的连续状态 | 跨会话延续的心情、来自结构化输出的分会话第一人称内心OS、每日作息（每个作息日一次无工具任务，05:00 换日），以及它们在提示词和工具里的呈现 |
 | `src/qq-bot-personality.js` + `src/qq-affinity-command.js` | 核心人格与关系 | 部署者设定的基本资料、性格维度、说话方式滑块、待人方式、角色资料、世界书与预设；角色卡映射与导出；有界的自主调整（工具与周期复盘）、经核实的主人指令修改、改动历史与撤销；真人化规划使用的表达偏置；每人的好感、熟悉度、称呼与历史，带每轮/每日截断、主人下限、半衰期淡化和同会话理由；回复、世界书与兴趣判断的提示词片段；`/好感度` 解析 |

@@ -57,13 +57,15 @@ export function summarizeClaudeUsage(usage) {
   });
 }
 
-// Log fields for a turn line; empty when the engine reported nothing.
+// Log fields for a turn line; empty when the engine reported nothing. The
+// names avoid the word "token": the logger redacts any detail key that looks
+// like a credential, and these counts are not one.
 export function agentTurnUsageLogFields(summary) {
   if (!summary) return {};
   return {
-    inputTokens: summary.inputTokens,
-    cachedInputTokens: summary.cachedInputTokens,
-    outputTokens: summary.outputTokens,
+    usageInput: summary.inputTokens,
+    usageCachedInput: summary.cachedInputTokens,
+    usageOutput: summary.outputTokens,
     cacheHitPercent: summary.cacheHitPercent
   };
 }

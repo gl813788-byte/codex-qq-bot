@@ -339,6 +339,14 @@ import {
   selectQqFreshExpressions
 } from "./qq-bot-expression.js";
 import {
+  findQqBracketActionClaims,
+  findUnbackedQqActionClaims,
+  formatQqUnbackedActionRefusal,
+  isQqAutoPerformedActionClaim,
+  qqActionEvidenceKey,
+  stripQqBracketActionClaims
+} from "./qq-action-claims.js";
+import {
   backfillQqAdaptiveInterruptionLearning,
   applyQqAdaptiveModelStyleReview,
   buildQqAdaptiveLearningSignals,
@@ -10001,6 +10009,95 @@ async function executeQqBotWebSearchCommand(command, event = null) {
   }
 }
 
+// What really happened during one reply turn (by event object): successful
+// QQ tool calls and what delivered messages carried, as evidence keys from
+// qq-action-claims.js, plus the people the Bot actually poked.
+const qqTurnActionEvidence = new WeakMap();
+const qqTurnPokedUserIds = new WeakMap();
+const qqTurnRefusedActionKinds = new WeakMap();
+
+function addQqTurnActionEvidence(event, key) {
+  if (!event || typeof event !== "object" || !key) return;
+  const keys = qqTurnActionEvidence.get(event) || new Set();
+  keys.add(key);
+  qqTurnActionEvidence.set(event, keys);
+}
+
+function rememberQqTurnPoke(event, userId) {
+  if (!event || typeof event !== "object" || !userId) return;
+  const ids = qqTurnPokedUserIds.get(event) || new Set();
+  ids.add(String(userId));
+  qqTurnPokedUserIds.set(event, ids);
+  addQqTurnActionEvidence(event, "qq_social.act:poke");
+}
+
+// A bracketed action the Bot types that QQ can really do must really happen.
+// A poke is done here through the same permission-checked /拍一拍 that
+// qq_social.act poke runs (once per person and turn). Any other unbacked
+// claim refuses the send once (allowRefusal), so the model does it with the
+// named tool or drops the bracket; after that, and in single-reply turns, the
+// bracket is removed so the text never claims an action that did not happen.
+async function applyQqBracketActionClaims(event, text, {
+  targetUserId = "",
+  sticker = false,
+  image = false,
+  allowRefusal = false
+} = {}) {
+  const claims = findQqBracketActionClaims(text);
+  if (!claims.length) return { text, notes: [] };
+  const unbacked = findUnbackedQqActionClaims(claims, {
+    evidence: qqTurnActionEvidence.get(event) || new Set(),
+    sticker,
+    image
+  });
+  if (!unbacked.length) return { text, notes: [] };
+  const logAction = (outcome, kinds) => logger.info("QQ bracketed action checked", {
+    operation: "social.bracket_action",
+    outcome,
+    actionKinds: [...new Set(kinds)].join(","),
+    groupId: event.groupId || null,
+    senderId: event.senderId || null
+  }, "qq", qqLogContext(event));
+  const manual = unbacked.filter((claim) => !isQqAutoPerformedActionClaim(claim));
+  const refused = qqTurnRefusedActionKinds.get(event) || new Set();
+  if (manual.length && allowRefusal && manual.some((claim) => !refused.has(claim.kind))) {
+    for (const claim of manual) refused.add(claim.kind);
+    qqTurnRefusedActionKinds.set(event, refused);
+    logAction("refused", manual.map((claim) => claim.kind));
+    return { refused: true, reason: formatQqUnbackedActionRefusal(manual), notes: [] };
+  }
+  const remove = [...manual];
+  const notes = [];
+  const pokes = unbacked.filter(isQqAutoPerformedActionClaim);
+  if (pokes.length) {
+    const target = String(targetUserId || (event.qqColdProactive ? "" : event.senderId) || "");
+    let poked = Boolean(target) && qqTurnPokedUserIds.get(event)?.has(target);
+    if (!poked && target && target !== String(event.selfId || "")) {
+      let result;
+      try {
+        result = await executeQqBotInternalCommand(`/拍一拍 ${target}`, event);
+      } catch (error) {
+        result = { ok: false, reply: error?.message || "poke failed" };
+      }
+      poked = result?.ok !== false;
+    }
+    if (poked) {
+      logAction("poked", ["poke"]);
+      notes.push("你括号里写的戳一戳已经真的戳了对方一下。");
+    } else {
+      remove.push(...pokes);
+    }
+  }
+  if (remove.length) {
+    logAction("removed", remove.map((claim) => claim.kind));
+    notes.push(`${remove.map((claim) => claim.bracket).join("")}这些动作这轮没有真的做成，已从消息里删掉；想做就先用对应工具做。`);
+  }
+  return {
+    text: remove.length ? stripQqBracketActionClaims(text, remove, { bubbleSeparator: qqBubbleSeparator }) : text,
+    notes
+  };
+}
+
 async function executeQqBotPokeCommand(command, event) {
   const target = resolveQqBotPokeTarget(command, event);
   if (!target.id) {
@@ -10013,6 +10110,7 @@ async function executeQqBotPokeCommand(command, event) {
     groupId: event.groupId,
     userId: target.id
   });
+  if (result.ok) rememberQqTurnPoke(event, target.id);
   return {
     ok: result.ok,
     command,
@@ -11801,7 +11899,12 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       : baseReply;
     const visibleText = takeQqReplyMemoryMarkers(reply, event);
     if (!visibleText) return event.qqColdProactive || event.qqPrivateProactive ? "" : buildAssistantReply(event);
-    return visibleText;
+    const acted = await applyQqBracketActionClaims(event, visibleText, {
+      sticker: /\[\[qq_sticker:/i.test(visibleText),
+      image: /\[\[qq_image:/i.test(visibleText)
+    });
+    if (!acted.text) event.qqModelDeclinedReply = true;
+    return acted.text;
   } finally {
     // Late send-tool calls from an engine that kept going are refused.
     await event.qqChatSendSession?.close();
@@ -14312,7 +14415,15 @@ async function deliverQqChatToolMessage(event, message, {
     ? deRepeatQqReply(deTemplateQqReply(parsed.output, event), event)
     : parsed.output;
   const targeted = extractQqReplyTargetDirective(normalizeVisibleQqReply(takeQqReplyMemoryMarkers(polished, event), event));
-  const reply = targeted.visibleText;
+  const acted = await applyQqBracketActionClaims(event, targeted.visibleText, {
+    targetUserId: targeted.directive?.senderId || "",
+    sticker: Boolean(outgoing.sticker),
+    image: outgoing.attachments.some((attachment) => attachment.kind === "image"),
+    allowRefusal: true
+  });
+  if (acted.refused) return { refused: true, reason: acted.reason, notes: inline.notes };
+  inline.notes.push(...acted.notes);
+  const reply = acted.text;
   if (!reply) return { refused: true, reason: "清理掉控制标记后没有可发送的内容。", notes: inline.notes };
   const targetDirective = targeted.directive
     || (sendIndex > 0 ? { mode: "plain", senderId: null, implicit: true } : null);
@@ -14328,6 +14439,9 @@ async function deliverQqChatToolMessage(event, message, {
   const receipt = buildQqDeliveryReceipt(reply, send || {});
   if (receipt.deliveredBubbleCount > 0) {
     await resetQqOrdinaryInterestAfterDeliveredBotReply(event, receipt);
+    // What this message carried backs later messages' bracketed claims.
+    if (message.sticker) addQqTurnActionEvidence(event, "message:sticker");
+    if (message.attachments.some((attachment) => attachment.kind === "image")) addQqTurnActionEvidence(event, "message:image");
   }
   const visiblePreview = stripLocalQqMediaMarkers(reply).replace(/\s+/g, " ").trim().slice(0, 160);
   logger[receipt.failedBubbleCount > 0 ? "warn" : "info"]("QQ chat message sent", {
@@ -14424,6 +14538,7 @@ async function sendQqTaskProgressMessage(event, progress, { replyScope = null } 
 
 function logQqNativeToolEvent(toolEvent = {}) {
   const sourceEvent = toolEvent.sourceEvent || null;
+  if (toolEvent.ok) addQqTurnActionEvidence(sourceEvent, qqActionEvidenceKey(toolEvent));
   const targetEvent = toolEvent.targetEvent || sourceEvent;
   const targetScopeId = String(toolEvent.scopeId || getQqLogScopeId(targetEvent) || "") || null;
   const details = buildQqOperationLogDetails(sourceEvent, {

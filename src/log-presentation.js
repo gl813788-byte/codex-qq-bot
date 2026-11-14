@@ -222,6 +222,7 @@ const messageTranslationsZh = Object.freeze({
   "QQ native Agent progress observer failed": "QQ 原生 Agent 进度观察器失败",
   "QQ task progress delivered": "QQ 任务进度已送达",
   "QQ chat message sent": "Bot 用发言工具发出了一条 QQ 消息",
+  "QQ bracketed action checked": "已核对 Bot 括号里写的 QQ 动作是否真的做了",
   "QQ outgoing attachments prepared": "发送前整理了 QQ 附件（图片转 PNG 或改按文件发送）",
   "OneBot empty message ignored": "忽略了一条没有任何内容的 OneBot 消息（如 QQ 的文件已接收提示）",
   "QQ agent ended its turn without sending a message": "Agent 本轮结束时一条消息都没发",
@@ -657,10 +658,11 @@ const detailLabelsZh = Object.freeze({
   activity: "做了什么",
   activityResult: "执行结果",
   toolSteps: "工具步骤",
+  actionKinds: "动作类型",
   toolCallCount: "工具调用次数",
-  inputTokens: "输入 token",
-  cachedInputTokens: "缓存命中 token",
-  outputTokens: "输出 token",
+  usageInput: "输入 token 数",
+  usageCachedInput: "缓存命中 token 数",
+  usageOutput: "输出 token 数",
   cacheHitPercent: "缓存命中率（%）",
   referenceCount: "参考图数",
   claudeModel: "Claude 模型",
@@ -972,7 +974,8 @@ const detailValuesZh = Object.freeze({
     "memory.life_activity": "Bot 作息活动", "social.qzone_self": "Bot 自主空间动态",
     "social.card": "卡片与特殊消息", "memory.bot_drawing": "Bot 画作",
     "media.update": "媒体组件更新", "history.archive": "历史消息与群文件",
-    "reply.send_tool": "发言工具", "reply.attachment_prepare": "发送前附件整理"
+    "reply.send_tool": "发言工具", "reply.attachment_prepare": "发送前附件整理",
+    "social.bracket_action": "括号里写的 QQ 动作"
   },
   outcome: {
     loaded: "已加载", created: "已新建", updated: "已更新", rejected: "已拒绝", unchanged: "无变化", recorded: "已记录",
@@ -985,7 +988,7 @@ const detailValuesZh = Object.freeze({
     frozen: "已冻结并关闭入口", extended: "已延长静默等待", fallback: "已使用降级结果", waiting: "等待中",
     synchronized: "已同步", skipped: "已跳过", initialized: "已初始化",
     sent: "已发送", ignored: "已忽略", silent: "主动沉默", command: "指令已处理",
-    delivered: "已送达", busy: "繁忙", changed: "头像已更换", empty: "没有新特征", removed: "已清理",
+    delivered: "已送达", poked: "已戳了对方", refused: "已退回，等它先真的做", busy: "繁忙", changed: "头像已更换", empty: "没有新特征", removed: "已清理",
     policy_blocked: "被安全下载策略拦截",
     applied: "已生效", "daily-cap": "已达今日上限", locked: "已锁定未改动", disabled: "功能已关闭",
     bounded: "已到边界", "no-change": "没有变化",
@@ -1193,7 +1196,7 @@ const defaultLogKeyFields = Object.freeze([
 const logKeyFieldsByCategory = Object.freeze({
   agent: Object.freeze([
     "activity", "activityResult", "toolSteps", "toolCallCount", "operation", "outcome", "error", "errorCode", "reason",
-    "durationMs", "model", "reasoningEffort", "cacheHitPercent", "inputTokens", "cachedInputTokens",
+    "durationMs", "model", "reasoningEffort", "cacheHitPercent", "usageInput", "usageCachedInput",
     "modelOutput", "outputChars", "workloadMessageCount", "deadlineRenewalCount",
     "taskType", "targetScopeId", "actorRole"
   ]),

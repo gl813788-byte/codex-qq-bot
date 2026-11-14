@@ -355,7 +355,10 @@ test("the static tool index rides in the instructions and the turn guide keeps o
 test("feelings show in typing: bracketed actions, punctuation-only bubbles and bursts are allowed", () => {
   const prompt = formatQqMainModelInstructions({});
   assert.match(prompt, /一条气泡也可以只有标点（“？”“！！！”“…”）/);
-  assert.match(prompt, /在括号里写一个很短的动作或情景（像（戳戳）（抱住）（缩））时，你也可以这样回应/);
+  assert.match(prompt, /在括号里写一个很短的动作或情景（像（抱住）（缩）（摸摸头））时，你也可以这样回应/);
+  // The Bot used to type “（戳回去）” without poking; doable brackets are done.
+  assert.match(prompt, /括号里的动作如果 QQ 真能做（戳一戳、发表情包、发图、贴表情、点赞、撤回/);
+  assert.match(prompt, /戳一戳 Hub 会替你真的戳出去，其他没做成的括号这条消息会被退回让你先做/);
   assert.match(prompt, /小说式旁白、长段动作和心理描写不写/);
   assert.match(prompt, /情绪要体现在打字上，而不是说出“我很开心”/);
   assert.match(prompt, /感叹号连打（！！！）/);
