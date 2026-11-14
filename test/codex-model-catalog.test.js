@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { findCodexModel, normalizeCodexModels, readCodexModels } from "../src/codex-model-catalog.js";
+import { createCodexModelCatalog, findCodexModel, normalizeCodexModels, readCodexModels } from "../src/codex-model-catalog.js";
 
 test("normalizes visible Codex models and their reasoning efforts", () => {
   const models = normalizeCodexModels([
@@ -51,4 +51,21 @@ test("rejects cleanly when the Codex app-server exits before reading stdin", asy
     readCodexModels({ codexPath: "/bin/false", timeoutMs: 1_000 }),
     /EPIPE|exited with|stdin closed/
   );
+});
+
+test("peek returns the cached list without starting a process", async () => {
+  let spawned = 0;
+  const catalog = createCodexModelCatalog({
+    codexPath: "/bin/false",
+    timeoutMs: 1_000,
+    spawnProcess: (...args) => {
+      spawned += 1;
+      throw new Error(`spawn ${args[0]}`);
+    }
+  });
+  assert.equal(catalog.peek(), null);
+  assert.equal(spawned, 0);
+  await assert.rejects(catalog.list());
+  assert.equal(spawned, 1);
+  assert.equal(catalog.peek(), null, "a failed read caches nothing");
 });

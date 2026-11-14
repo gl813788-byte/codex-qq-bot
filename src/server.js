@@ -452,6 +452,11 @@ import {
 } from "./infrastructure/codex/qq-turn-runner.js";
 import { detectClaudeConnection, isExecutableOnPath } from "./infrastructure/claude/claude-child-env.js";
 import {
+  CLAUDE_MODEL_SUGGESTIONS,
+  CLAUDE_REASONING_EFFORTS,
+  normalizeClaudeSettings
+} from "./infrastructure/claude/claude-settings.js";
+import {
   AGENT_LOG_CATEGORY,
   countAgentTurnProcesses,
   describeAgentEngine,
@@ -1647,6 +1652,9 @@ async function loadSettings() {
       }
       if (isValidCodexServiceTier(body.ai.serviceTier)) {
         state.ai.serviceTier = body.ai.serviceTier;
+      }
+      if (body.ai.claude && typeof body.ai.claude === "object") {
+        state.ai.claude = normalizeClaudeSettings(body.ai.claude, state.ai.claude);
       }
     }
     if (body.unifiedMemory && typeof body.unifiedMemory === "object") {
@@ -3777,7 +3785,19 @@ function normalizeMemoryEntries(entries, limit) {
 }
 
 function describeActiveAgent() {
-  return describeAgentEngine(agentEngine, { ai: state.ai, claudeModel, claudeReasoningEffort });
+  return describeAgentEngine(agentEngine, resolveAgentEngineSettings());
+}
+
+// Live engine settings for every turn: Codex from state.ai, Claude Code from
+// state.ai.claude (dashboard-editable; the environment only gives defaults).
+// An empty Claude effort follows the Codex effort.
+function resolveAgentEngineSettings() {
+  const claude = state.ai.claude || {};
+  return {
+    ai: state.ai,
+    claudeModel: claude.model || claudeModel,
+    claudeReasoningEffort: Object.hasOwn(claude, "reasoningEffort") ? (claude.reasoningEffort || null) : claudeReasoningEffort
+  };
 }
 
 // Interest-model options for the dashboard: the live Codex catalog when the
@@ -3902,21 +3922,35 @@ async function buildDashboardAdminSettings({ refresh = false } = {}) {
   const activeAgent = describeActiveAgent();
   let models = [];
   let modelError = null;
-  if (activeAgent.modelCatalog) {
+  // With Claude Code as the engine the Codex list (still used for drawing and
+  // after switching back) is read only when asked, so opening the settings
+  // page never starts a codex process.
+  if (activeAgent.modelCatalog || refresh) {
     try {
       models = await codexModelCatalog.list({ refresh });
     } catch (error) {
       modelError = String(error?.message || error).slice(0, 300);
     }
+  } else {
+    models = codexModelCatalog.peek() || [];
   }
+  const claude = normalizeClaudeSettings(state.ai.claude, { model: claudeModel, reasoningEffort: claudeReasoningEffort || "" });
   return {
-    agent: activeAgent,
+    agent: { ...activeAgent, drawing: qqAgentDrawing },
     ai: {
       model: state.ai.model,
       reasoningEffort: state.ai.reasoningEffort,
       reasoningSummary: state.ai.reasoningSummary,
       personality: state.ai.personality,
       serviceTier: state.ai.serviceTier || ""
+    },
+    claude: {
+      ...claude,
+      suggestions: [...new Set([...CLAUDE_MODEL_SUGGESTIONS, claude.model])],
+      efforts: [...CLAUDE_REASONING_EFFORTS],
+      // Where the model and effort came from before the dashboard saved them.
+      defaultModel: claudeModel,
+      defaultReasoningEffort: claudeReasoningEffort || ""
     },
     models: models.map((item) => ({
       model: item.model,
@@ -14348,6 +14382,7 @@ const runSteerableQqCodexTurn = createQqCodexTurnRunner({
   claudePath: claudeCliPath,
   claudeModel,
   claudeReasoningEffort,
+  resolveEngineSettings: resolveAgentEngineSettings,
   toolTransport: agentToolTransport,
   leanContext: agentLeanContext,
   activeChildren: activeCodexChildren,
@@ -14383,6 +14418,7 @@ const runQqBackgroundAgentTurn = createQqCodexTurnRunner({
   claudePath: claudeCliPath,
   claudeModel,
   claudeReasoningEffort,
+  resolveEngineSettings: resolveAgentEngineSettings,
   toolTransport: agentToolTransport,
   leanContext: agentLeanContext,
   activeChildren: activeCodexChildren,
@@ -16956,7 +16992,9 @@ async function handleApi(req, res) {
 
   if (req.method === "POST" && requestUrl.pathname === "/api/settings/ai") {
     const body = await readBody(req, { requireJson: true });
-    const models = describeActiveAgent().modelCatalog ? await codexModelCatalog.list().catch(() => []) : [];
+    const models = describeActiveAgent().modelCatalog
+      ? await codexModelCatalog.list().catch(() => [])
+      : codexModelCatalog.peek() || [];
     const previous = { ...state.ai };
     try {
       Object.assign(state.ai, normalizeDashboardAiSettingsPatch(body, state.ai, { models }));
@@ -16977,7 +17015,9 @@ async function handleApi(req, res) {
       model: state.ai.model,
       reasoningEffort: state.ai.reasoningEffort,
       reasoningSummary: state.ai.reasoningSummary,
-      serviceTier: state.ai.serviceTier || null
+      serviceTier: state.ai.serviceTier || null,
+      claudeModel: state.ai.claude?.model || null,
+      claudeReasoningEffort: state.ai.claude?.reasoningEffort || null
     }), "web");
     return sendJson(res, 200, await buildDashboardAdminSettings());
   }

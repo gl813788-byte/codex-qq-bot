@@ -10,6 +10,7 @@ import {
   normalizeQqCodexSessionSettings
 } from "../qq-codex-session.js";
 import { resolveInterestModelRuntimeConfig } from "../interest-model-provider.js";
+import { normalizeClaudeSettings } from "../infrastructure/claude/claude-settings.js";
 
 export function createInitialState({
   config,
@@ -30,7 +31,12 @@ export function createInitialState({
       reasoningSummary: config.codexReasoningSummary || "auto",
       personality: config.codexPersonality || "none",
       serviceTier: config.codexServiceTier || "",
-      workspace: codexWorkspaceDir
+      workspace: codexWorkspaceDir,
+      // Claude Code's own model; the environment only supplies the defaults.
+      claude: normalizeClaudeSettings(null, {
+        model: config.claudeModel,
+        reasoningEffort: config.claudeReasoningEffort || ""
+      })
     },
     channels: {
       qq: false

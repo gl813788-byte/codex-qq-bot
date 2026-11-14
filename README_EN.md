@@ -74,9 +74,9 @@ Both work. You pick one when you start the bot.
 | --- | --- | --- |
 | Install | done by the installer | `curl -fsSL https://claude.ai/install.sh \| bash` |
 | Sign-in | `codex login` | `claude auth login`, or put a relay URL and key in `~/.claude/ncc-profiles/active.env` |
-| Model | switch from the dashboard or QQ commands | `CODEX_REMOTE_CONTACT_CLAUDE_MODEL`, default `opus` |
-| Reasoning effort | switch from the dashboard or QQ commands | follows the bot setting unless `CODEX_REMOTE_CONTACT_CLAUDE_EFFORT` is set |
-| Image generation | yes | no |
+| Model | switch from the dashboard or QQ commands | switch in the dashboard's main-model card; the default comes from `CODEX_REMOTE_CONTACT_CLAUDE_MODEL` (`opus`) |
+| Reasoning effort | switch from the dashboard or QQ commands | set separately in the dashboard, or follow the Codex setting; the default comes from `CODEX_REMOTE_CONTACT_CLAUDE_EFFORT` |
+| Image generation | yes | drawn by Codex (when a `codex` CLI is installed) |
 | Quota display | shown in the dashboard | not shown; use `/usage` inside `claude` |
 
 To switch:

@@ -653,6 +653,8 @@ const detailLabelsZh = Object.freeze({
   toolSteps: "工具步骤",
   toolCallCount: "工具调用次数",
   referenceCount: "参考图数",
+  claudeModel: "Claude 模型",
+  claudeReasoningEffort: "Claude 思考强度",
   drawing: "画图方式",
   toolSendCount: "发言工具发送次数",
   steerFailureReason: "活跃轮次引导失败原因",

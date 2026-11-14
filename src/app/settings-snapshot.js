@@ -23,7 +23,8 @@ export function createSettingsSnapshot({
       reasoningEffort: state.ai.reasoningEffort,
       reasoningSummary: state.ai.reasoningSummary,
       personality: state.ai.personality,
-      serviceTier: state.ai.serviceTier
+      serviceTier: state.ai.serviceTier,
+      ...(state.ai.claude ? { claude: { model: state.ai.claude.model, reasoningEffort: state.ai.claude.reasoningEffort } } : {})
     },
     qq: {
       allowedGroups: state.qq.allowedGroups,

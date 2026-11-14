@@ -28,7 +28,9 @@ test("settings snapshot persists every native Codex runtime parameter", () => {
     reasoningEffort: state.ai.reasoningEffort,
     reasoningSummary: "detailed",
     personality: "pragmatic",
-    serviceTier: "priority"
+    serviceTier: "priority",
+    // Claude Code's own model, defaulted from the environment.
+    claude: { model: "opus", reasoningEffort: "" }
   });
   assert.equal(snapshot.qq.proactive.judge.apiKeyConfigured, true);
   assert.deepEqual(snapshot.qq.adminUserIds, ["123456789"]);
