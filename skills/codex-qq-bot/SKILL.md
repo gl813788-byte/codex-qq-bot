@@ -146,6 +146,9 @@ subsystems belong in focused modules.
 | Voice messages heard before routing | `src/app/qq-voice-transcription.js` |
 | Human action rates and the per-turn action plan | `src/qq-human-action-stats.js`, `src/qq-human-behavior.js` |
 | Background sub-agents (`qq_agent`) | `src/qq-subagents.js`, `src/app/qq-subagent-turn.js`, `src/app/qq-subagent-tool.js` |
+| Delivery-mode prompt wording (`tool`/`final`) | `src/qq-reply-delivery-prompt.js` |
+| Readable tool activity in logs | `src/infrastructure/agent/agent-tool-activity.js` |
+| Drawing through Codex (`qq_draw.image`) | `src/infrastructure/agent/agent-drawing.js`, `src/infrastructure/codex/codex-image-generation.js`, `src/app/qq-draw-tool.js` |
 | Routine activities and real experiences | `src/qq-bot-life-activities.js` |
 | Planned chats (routine decides whom to reach out to) | `src/qq-bot-planned-chat.js` |
 | Song/Bilibili/chat-record cards, dice, rock-paper-scissors, contact shares | `src/app/qq-card-tools.js` |
@@ -229,6 +232,13 @@ refactor with a behavior change.
   `final` restores the single structured reply; turns without QQ tools,
   non-OneBot turns and owner/administrator file and image tasks always use it.
   Sub-agent report turns run with source `onebot` so they are delivered.
+  The session owns its end: `finalize()` (memoized summary the lifecycle
+  records), `appendNotice()` (once, only after a delivered send); server.js
+  only wires `attachQqChatSendSession`, `getQqReplyDelivery` and
+  `getQqChatToolDelivery`. Every mode-dependent prompt sentence lives in
+  `src/qq-reply-delivery-prompt.js`; the Claude adapter tells the model which
+  mode it is in (`formatClaudeAdapterInstructions`, keyed on the
+  `qq_chat__send` MCP tool).
 - Persistent thread reuse requires the stored tool fingerprint to match. MCP
   tools are re-listed on every `thread/resume`, so all MCP catalogs share one
   transport fingerprint; dynamic tools are fixed at `thread/start` (Codex
@@ -495,7 +505,11 @@ refactor with a behavior change.
   `memory.persona_self_edit`, `interest.model_test`, `media.tool`,
   `media.voice`, `agent.subagent`, `memory.life_activity`,
   `social.qzone_self`, `social.card`, `friend.add`, `memory.bot_drawing`,
-  `media.update`, `history.archive` and `reply.send_tool`.
+  `media.update`, `history.archive`, `reply.send_tool`, `agent.tool`,
+  `agent.native_tool` and `agent.codex_drawing`. Tool logs carry `activity`
+  ("what it did") and `activityResult`; turn logs carry `toolSteps`. The
+  describer never logs host-command bodies/output, chat search terms, habit
+  terms or persona values, and raw tool arguments never leave the dispatcher.
   Language-statistics logs are low-noise checkpoints, contain counts/ratios rather than copied chat
   or inferred meaning, and fire when frequent candidates change or every 25
   text messages. Preserve stable English `message` values for JSON/API
@@ -614,8 +628,13 @@ Claude invariants that must not be weakened:
   optional `~/.claude/ncc-profiles/active.env` profile, otherwise the machine's
   `claude` login is used.
 
-Claude Code has no image generation and no quota feed; the dashboard quota
-remains Codex-only. Each turn pays the `claude -p` cold start (15-20 s on this
+Claude Code has no native image generation; with a `codex` CLI installed
+(`CODEX_REMOTE_CONTACT_CODEX_DRAWING=auto`) its turns, owner image tasks and
+sub-agents get `qq_draw.image`, which runs one tool-free, read-only Codex
+image-generation turn per picture (one at a time, two queued, host capacity
+gate for 2 processes, never the reply limiter, 2 per turn) and imports the
+picture into the task output directory. Claude has no quota feed; the
+dashboard quota remains Codex-only. Each turn pays the `claude -p` cold start (15-20 s on this
 PRoot host), which counts against the task deadline.
 
 ## Configuration and state

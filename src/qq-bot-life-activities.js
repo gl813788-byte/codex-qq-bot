@@ -97,7 +97,7 @@ const kindGuides = Object.freeze({
   learn: "认真查一个你好奇的问题，读原始资料，弄懂后用自己的话记下来；值得长期记住的事实可以写进 qq_knowledge（标题稳定、写清来源和日期）。",
   qzone: "用 qq_social.act(action=qzone_recent, target=QQ号) 看看下面几位朋友最近的空间动态；真有想说的就挑一条评论（qzone_comment，target=QQ号，value=tid 评论内容），没有就只是看看。",
   post: "想想今天真实发生过的事（下面列的经历）和最近画的画（qq_context.images list 里 d- 开头的），想发就用 qq_social.act(action=qzone_publish, value=说说内容) 发一条自然的说说；要配自己的画就先 qq_context.images(action=use, selector=d-…) 再 target=输出。不想发就算了。",
-  draw: "用原生生图真的把计划里的画画出来（一张就够；风格贴合你的人设和兴趣，可以有草稿感、可以画得不完美）。不需要发给任何人：画好的图 Hub 会自动存进你的画作。summary 写一句画完的感受，report 写这张画画了什么、你在意的细节。画不出来就如实说。"
+  draw: "用你的画图能力（原生生图；没有原生生图时用 qq_draw.image）真的把计划里的画画出来（一张就够；风格贴合你的人设和兴趣，可以有草稿感、可以画得不完美）。不需要发给任何人：画好的图 Hub 会自动存进你的画作。summary 写一句画完的感受，report 写这张画画了什么、你在意的细节。画不出来就如实说。"
 });
 
 export function buildQqLifeActivityTask({

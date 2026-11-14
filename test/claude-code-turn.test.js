@@ -11,6 +11,7 @@ import {
   buildUserContent,
   claudeSessionIdFromThreadId,
   flattenQqDynamicTools,
+  formatClaudeAdapterInstructions,
   normalizeClaudeEffort,
   runClaudeCodeTurn,
   startClaudeToolBridge,
@@ -179,10 +180,13 @@ test("QQ tools are deferred behind ToolSearch only when the turn has tools", asy
   }]);
   assert.deepEqual(bridges, [["qq_sticker__manage"]]);
   assert.equal(claude.env().ENABLE_TOOL_SEARCH, "true");
+  // Slow QQ tools (a queued Codex drawing) are bounded by the Hub, not the MCP client.
+  assert.equal(claude.env().MCP_TOOL_TIMEOUT, "900000");
   assert.match(valueAfter(claude.args(), "--allowedTools"), /ToolSearch,mcp__qq__qq_sticker__manage$/);
 
   await run([]);
   assert.equal(claude.env().ENABLE_TOOL_SEARCH, undefined);
+  assert.equal(claude.env().MCP_TOOL_TIMEOUT, undefined);
   assert.equal(valueAfter(claude.args(), "--tools").includes("ToolSearch"), false);
 });
 
@@ -455,3 +459,64 @@ function valuesAfter(args, flag) {
 function tick() {
   return new Promise((resolve) => setTimeout(resolve, 10));
 }
+
+test("the adapter tells Claude how this turn reaches QQ", () => {
+  const speaking = formatClaudeAdapterInstructions({ toolNames: ["qq_chat__send", "qq_context__history"] });
+  assert.match(speaking, /只能调用 mcp__qq__qq_chat__send/);
+  assert.match(speaking, /不会发给任何人/);
+  assert.doesNotMatch(speaking, /作为任务进度发给 QQ 用户|最终答案必须/);
+
+  const finalReply = formatClaudeAdapterInstructions({ toolNames: ["qq_context__history"] });
+  assert.match(finalReply, /作为任务进度发给 QQ 用户/);
+  assert.match(finalReply, /最终答案必须通过结构化输出提交/);
+
+  // Tool-free background judgments hear nothing about QQ tools or progress.
+  const background = formatClaudeAdapterInstructions({ toolNames: [] });
+  assert.doesNotMatch(background, /mcp__qq__|任务进度/);
+  assert.match(background, /结构化输出/);
+  assert.doesNotMatch(formatClaudeAdapterInstructions({ toolNames: [], structuredOutput: false }), /结构化输出/);
+});
+
+test("a Claude tool call completes when its result arrives, with the outcome and duration", async () => {
+  const claude = createFakeClaude();
+  const items = [];
+  const result = await runClaudeCodeTurn({
+    claudePath: "claude",
+    cwd: "/tmp",
+    prompt: "看看文件",
+    outputSchema: schema,
+    spawnProcess: claude.spawn,
+    onItem: (notification) => items.push(notification),
+    onReady: () => {
+      claude.replay(claude.lastUserInput());
+      claude.assistant("m1", [
+        { type: "tool_use", id: "tu-1", name: "Read", input: { file_path: "/tmp/a.txt" } },
+        { type: "tool_use", id: "tu-2", name: "Grep", input: { pattern: "x" } }
+      ]);
+      claude.emit({
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "tu-1", content: "file text" },
+            { type: "tool_result", tool_use_id: "tu-2", is_error: true, content: [{ type: "text", text: "Path does not exist" }] }
+          ]
+        }
+      });
+      claude.assistant("m2", [{ type: "tool_use", id: "tu-3", name: "StructuredOutput", input: { text: "好" } }]);
+      claude.result({ text: "好" });
+    }
+  });
+  assert.deepEqual(items.map((entry) => [entry.method, entry.item.tool]), [
+    ["item/started", "Read"],
+    ["item/started", "Grep"],
+    ["item/completed", "Read"],
+    ["item/completed", "Grep"]
+  ]);
+  const [read, grep] = items.filter((entry) => entry.method === "item/completed").map((entry) => entry.item);
+  assert.equal(read.ok, true);
+  assert.equal(Number.isFinite(read.durationMs), true);
+  assert.equal(grep.ok, false);
+  assert.equal(grep.errorText, "Path does not exist");
+  assert.deepEqual(result.items.filter((item) => item.type === "claudeToolCall").map((item) => item.tool), ["Read", "Grep"]);
+});

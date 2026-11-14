@@ -442,6 +442,27 @@ function renderCard(entry, options) {
     }
     for (const key of ["text", "senderName", "senderId"]) skipKeys.add(key);
   }
+  // What the Bot did with a tool, as its own line: "▶ qq_chat.send 发消息「…」 → 已送达 2 条".
+  if (typeof details.activity === "string" && details.activity.trim()) {
+    const failed = /失败|没发出|被拒绝/.test(String(details.activityResult || "")) || level === "warn" || level === "error";
+    const segments = [
+      { text: "▶ ", color: failed ? "brightRed" : "brightGreen" },
+      { text: compactLogDisplayText(details.activity, options.verbose ? 600 : 200), color: "brightWhite" }
+    ];
+    if (details.activityResult) {
+      segments.push({ text: "  →  ", color: "dim" }, { text: String(details.activityResult), color: failed ? "brightRed" : "brightGreen" });
+    }
+    for (const line of wrapTokens([segments], available)) lines.push(renderSegments([gutter, ...line], options));
+    for (const key of ["activity", "activityResult", "operation", "outcome", "toolNamespace", "toolName", "toolAction"]) skipKeys.add(key);
+  }
+  if (typeof details.toolSteps === "string" && details.toolSteps.trim()) {
+    const segments = [
+      { text: Number(details.toolCallCount) > 0 ? `工具 ${Number(details.toolCallCount)} 次：` : "工具：", color: "dim" },
+      { text: details.toolSteps, color: "brightCyan" }
+    ];
+    for (const line of wrapTokens([segments], available)) lines.push(renderSegments([gutter, ...line], options));
+    for (const key of ["toolSteps", "toolCallCount"]) skipKeys.add(key);
+  }
   const fields = collectFields(entry, options, skipKeys);
   const tokens = fields.map((field) => options.plain
     ? [{ text: `${field.label} ${field.text}` }]
@@ -515,7 +536,9 @@ function getPrimaryDuration(details) {
 
 function isDefaultVisible(entry, level) {
   return ["success", "warn", "error"].includes(level)
-    || ["Codex QQ Bot hub started", "QQ web lookup started"].includes(String(entry.message || ""));
+    || ["Codex QQ Bot hub started", "QQ web lookup started"].includes(String(entry.message || ""))
+    // What the Bot did with its tools is always worth a line.
+    || ["agent.tool", "agent.native_tool", "reply.send_tool"].includes(String(entry.details?.operation || ""));
 }
 
 function colorForCategory(entry, category) {

@@ -157,7 +157,8 @@ test("QQ social action logs expose safe diagnostic fields in Chinese", () => {
 });
 
 test("Agent, cross-session, administrator, and persistence logs share unified Chinese fields", () => {
-  assert.equal(formatLogMessage("QQ native Agent tool completed"), "QQ 原生 Agent 工具调用完成");
+  assert.equal(formatLogMessage("QQ native Agent tool completed"), "Bot 使用了 QQ 工具");
+  assert.equal(formatLogMessage("Agent native tool completed"), "Bot 使用了引擎工具");
   assert.equal(formatLogMessage("QQ cross-session message completed"), "QQ 跨会话消息发送完成");
   assert.equal(formatLogMessage("Settings persistence completed"), "配置持久化完成");
   assert.deepEqual(localizeLogDetails({
@@ -175,7 +176,7 @@ test("Agent, cross-session, administrator, and persistence logs share unified Ch
     durationMs: 18,
     errorCode: null
   }), {
-    操作: "Agent 工具调用",
+    操作: "QQ 工具调用",
     结果: "成功",
     操作者角色: "Bot 管理员",
     "操作者 QQ": "10001",
@@ -478,4 +479,23 @@ test("send-tool messages and silent tool turns are fully localized", () => {
     发言工具发送次数: 2
   });
   assert.equal(localizeLogDetails({ outcome: "no-message" }).结果, "一条都没发");
+});
+
+test("tool activity fields lead an agent entry and have Chinese labels", () => {
+  const entry = {
+    category: "agent",
+    details: {
+      operation: "agent.tool",
+      outcome: "success",
+      toolNamespace: "qq_chat",
+      toolName: "send",
+      activity: "qq_chat.send 发消息「在的」",
+      activityResult: "已送达 1 条",
+      durationMs: 1200
+    }
+  };
+  assert.deepEqual(selectLogHighlightKeys(entry).slice(0, 2), ["activity", "activityResult"]);
+  assert.equal(getLogDetailLabel("activity"), "做了什么");
+  assert.equal(getLogDetailLabel("toolSteps"), "工具步骤");
+  assert.equal(localizeLogDetails({ operation: "agent.native_tool" }).操作, "引擎工具调用");
 });

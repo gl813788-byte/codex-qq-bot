@@ -276,10 +276,7 @@ import {
   parseQqKnowledgeMainDeletionReview,
   qqKnowledgeDeletionReviewOutputSchema
 } from "./qq-knowledge-review.js";
-import {
-  formatQqColdProactiveCompletionInstruction,
-  formatQqColdProactivePrompt
-} from "./qq-cold-proactive-prompt.js";
+import { formatQqColdProactivePrompt } from "./qq-cold-proactive-prompt.js";
 import {
   createQqTwoModelProactiveApproval,
   QQ_AUTONOMOUS_PROACTIVE_KINDS,
@@ -432,13 +429,20 @@ import {
 } from "./infrastructure/codex/qq-agent-output.js";
 import {
   createQqChatSendSession,
-  summarizeQqChatSendDeliveries,
+  resolveQqReplyDelivery,
   toQqAgentOutputValue
 } from "./app/qq-chat-send-tool.js";
 import {
+  buildQqFollowUpFusionPrompts,
+  formatQqPersistentFusionNote,
+  formatQqReplyCompletionInstruction,
+  formatQqSteeredBatchInstruction
+} from "./qq-reply-delivery-prompt.js";
+import {
   buildQqNativeToolSpecs,
   createQqNativeToolDispatcher,
-  isQqChatSendCall
+  isQqChatSendCall,
+  isQqDrawCall
 } from "./infrastructure/codex/qq-native-tools.js";
 import { createQqNativeProgressReporter } from "./infrastructure/codex/qq-native-progress.js";
 import {
@@ -449,10 +453,14 @@ import {
 import { detectClaudeConnection, isExecutableOnPath } from "./infrastructure/claude/claude-child-env.js";
 import {
   AGENT_LOG_CATEGORY,
+  countAgentTurnProcesses,
   describeAgentEngine,
   formatAgentEngineSummary,
   getAgentEngine
 } from "./infrastructure/agent/agent-engines.js";
+import { isExecutableOnPathSync, resolveAgentDrawing } from "./infrastructure/agent/agent-drawing.js";
+import { runCodexImageGeneration } from "./infrastructure/codex/codex-image-generation.js";
+import { createQqDrawingService, executeQqDrawTool } from "./app/qq-draw-tool.js";
 import { createAgentCliVersionProbe } from "./infrastructure/agent/agent-cli-version.js";
 import {
   parseQqContextSummaryOutput,
@@ -534,6 +542,7 @@ import {
   selectQqLifeActivityDue
 } from "./qq-bot-life-activities.js";
 import { runOutsideAgentToolCall } from "./infrastructure/agent/agent-tool-context.js";
+import { describeQqToolActivity } from "./infrastructure/agent/agent-tool-activity.js";
 import {
   formatQqBotDrawingsContext,
   markQqBotDrawingPosted,
@@ -671,6 +680,8 @@ const {
   agentEngine,
   agentToolTransport,
   qqReplyDelivery,
+  codexDrawing,
+  codexDrawingTimeoutMs,
   agentLeanContext,
   qqBaseInstructionsMode,
   claudeCliPath,
@@ -2281,9 +2292,7 @@ async function buildQqPendingSteeringInput(entries, generation) {
     type: "text",
     text: [
       `你处理当前 QQ 回复期间又收到了 ${aggregate.queuedMessageCount || entries.length} 条新消息。Hub 已沿用连续消息合并规则，把相邻重复内容压成一条并标出总次数。`,
-      parentEvent?.qqChatSendSession
-        ? "5 秒静默窗口已经结束。Hub 把本批新消息引导进当前任务（必要时中断旧 turn 开启替代轮次）。你已经用 qq_chat.send 发出的消息对方都看到了：把新消息和正在做的事一起考虑，需要回应就接着用 qq_chat.send 说，别重复已经发过的内容，也不要逐条机械回复“消息一/消息二”。"
-        : "5 秒静默窗口已经结束。Hub 会优先把本批新消息引导进当前活跃任务；若活跃 turn 已不接受引导，才会中断旧 turn 并开启替代轮次。无论采用哪种方式，都要把追加消息与正在进行的多轮任务融合成一份统一回复，不要先发过时答案，也不要逐条机械回复“消息一/消息二”。",
+      formatQqSteeredBatchInstruction({ replyDelivery: getQqReplyDelivery(parentEvent) }),
       replyTargetInstruction || null,
       semanticRecall.context || null,
       semanticRecall.context ? "" : null,
@@ -2885,15 +2894,25 @@ function maybeScheduleQqSelfPersonaRefresh() {
   return refresh;
 }
 
+// While OneBot is down every message retries the refresh; log the deferral
+// once per state change and then at most every ten minutes.
+let qqSelfPersonaDeferredLog = { key: "", at: 0 };
+
 async function refreshQqSelfPersona() {
   const oneBotHealth = await checkOneBotHealth().catch(() => null);
   if (!oneBotHealth?.ok || !oneBotHealth.nickname) {
-    logger.debug("QQ self persona refresh deferred until OneBot identity is available", {
-      oneBotOk: Boolean(oneBotHealth?.ok),
-      hasNickname: Boolean(oneBotHealth?.nickname)
-    }, "learning");
+    const key = `${Boolean(oneBotHealth?.ok)}:${Boolean(oneBotHealth?.nickname)}`;
+    const now = Date.now();
+    if (key !== qqSelfPersonaDeferredLog.key || now - qqSelfPersonaDeferredLog.at >= 10 * 60_000) {
+      qqSelfPersonaDeferredLog = { key, at: now };
+      logger.debug("QQ self persona refresh deferred until OneBot identity is available", {
+        oneBotOk: Boolean(oneBotHealth?.ok),
+        hasNickname: Boolean(oneBotHealth?.nickname)
+      }, "learning");
+    }
     return false;
   }
+  qqSelfPersonaDeferredLog = { key: "", at: 0 };
   const accountUpdate = updateQqSelfPersonaAccount(state.qq.selfPersona, {
     userId: oneBotHealth.selfId,
     nickname: oneBotHealth.nickname
@@ -3962,6 +3981,8 @@ async function buildMaintenanceStatus({ force = false } = {}) {
     agent: {
       ...activeAgent,
       cliPathExists: usesClaude ? claudePathOk : codexPathOk,
+      // "native", "codex" (qq_draw.image through a Codex turn) or null.
+      drawing: qqAgentDrawing,
       cliVersion: agentCliVersionProbe.peek(agentCliPath),
       connection: claudeConnection,
       ...agentRun,
@@ -8148,7 +8169,8 @@ function formatQqBotInternalToolContext(event) {
     robotProfileCandidates: event.qqRobotProfileCandidates || [],
     canSearchImages: canQqSearchWebImages(),
     stickerLibraryHint: event.qqStickerLibraryHint || "",
-    replyDelivery: event.qqChatSendSession ? "tool" : "final",
+    replyDelivery: getQqReplyDelivery(event),
+    drawsWithTool: qqAgentDrawsWithTool,
     mediaSummary: formatQqMediaCandidates(getQqMediaCandidatesForEvent(event), {
       available: {
         video: Boolean(event.qqMediaToolStatus?.video),
@@ -8233,6 +8255,21 @@ async function executeQqStructuredNativeTool(call, event, context = {}) {
     const session = (context.rootEvent || event)?.qqChatSendSession;
     if (!session) return { ok: false, error: "这一轮不能用 qq_chat.send 发消息。" };
     return session.send(call.arguments || {}, { threadId: String(call.threadId || "") });
+  }
+  if (isQqDrawCall(call)) {
+    // Pictures land in the original turn's own output directory.
+    const rootEvent = context.rootEvent || event;
+    return executeQqDrawTool(call.arguments || {}, {
+      event: rootEvent,
+      service: qqCodexDrawingService,
+      taskWorkspace: rootEvent.qqTaskWorkspace,
+      signal: context.replyScope?.signal || rootEvent.qqBackgroundTurn?.signal || null,
+      assertActive: () => {
+        assertQqReplyScopeActive(context.replyScope);
+        rootEvent.qqBackgroundTurn?.assertActive?.();
+      },
+      onDrawn: (paths, { prompt }) => rememberQqToolDrawings(rootEvent, paths, prompt)
+    });
   }
   if (call?.namespace === "qq_agent" && call?.tool === "manage") {
     const rootEvent = context.rootEvent || event;
@@ -9498,7 +9535,7 @@ async function executeQqZoneCommand(command, event) {
         return { ok: false, command, reply: "当前消息和引用消息中没有可用于动态的图片。" };
       }
       if (publishCommand.useOutputImages && imagePaths.length === 0) {
-        return { ok: false, command, reply: `这一轮还没有你自己做好的图片：先${qqAgentCanDraw ? "用原生生图画一张，或" : ""}用 qq_search.images 下载一张（会存进本轮输出目录），再发；没发出去，别说已经发了。` };
+        return { ok: false, command, reply: `这一轮还没有你自己做好的图片：先${qqAgentDrawsWithTool ? "用 qq_draw.image 画一张，或" : qqAgentCanDraw ? "用原生生图画一张，或" : ""}用 qq_search.images 下载一张（会存进本轮输出目录），再发；没发出去，别说已经发了。` };
       }
       if (!publishCommand.content && imagePaths.length === 0) {
         return { ok: false, command, reply: "用法：/发动态 文字、/发动态 图片=当前，或 /发动态 文字 | 图片=当前。" };
@@ -10968,8 +11005,9 @@ async function buildAssistantInstructions(event) {
     enhancerEnabled: Boolean(state.qq.enhancer.enabled),
     toolsEnabled: qqTurnToolsEnabled(event),
     canGenerateImages: qqAgentCanDraw,
+    drawsWithTool: qqAgentDrawsWithTool,
     assistantProfile: assistantSkillBrief,
-    replyDelivery: event.qqChatSendSession ? "tool" : "final"
+    replyDelivery: getQqReplyDelivery(event)
   });
 }
 
@@ -11027,27 +11065,13 @@ async function buildModelReply(event, { replyScope = null } = {}) {
 
   // The model speaks through qq_chat.send when the turn has QQ tools and a
   // OneBot conversation to talk in; otherwise its final output is the reply.
-  const speaksThroughTool = qqReplyDelivery === "tool"
-    && qqTurnToolsEnabled(event)
-    && event.qqTransportSource === "onebot";
-  event.qqChatToolDelivery = null;
-  // Not enumerable: copies of the event (cross-session patches, aggregates)
-  // must never carry the turn's ability to speak.
-  Object.defineProperty(event, "qqChatSendSession", {
-    configurable: true,
-    enumerable: false,
-    writable: true,
-    value: speaksThroughTool
-      ? createQqChatSendSession({
-        deliver: (message, { sendIndex, threadId }) => deliverQqChatToolMessage(event, message, {
-          sendIndex,
-          replyScope,
-          threadId,
-          turnStartedAt: event.qqReplyTurnStartedAt || 0
-        })
-      })
-      : null
+  const replyDelivery = resolveQqReplyDelivery({
+    configured: qqReplyDelivery,
+    toolsEnabled: qqTurnToolsEnabled(event),
+    oneBotConversation: event.qqTransportSource === "onebot"
   });
+  const speaksThroughTool = replyDelivery === "tool";
+  attachQqChatSendSession(event, speaksThroughTool ? { replyScope } : null);
   const nativeProgress = createQqNativeAgentProgressObserver(event, { replyScope, forward: !speaksThroughTool });
 
   const text = stripMentionText(event.text);
@@ -11243,6 +11267,7 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     canRecordRobotProfiles: event.qqRobotProfileCandidates.length > 0,
     canSearchImages: canQqSearchWebImages(),
     canSendMessages: speaksThroughTool,
+    canDraw: qqAgentDrawsWithTool,
     privateChat: isQqPrivateEvent(event)
   });
   const threadFingerprintOptions = { transport: qqAgentToolTransport, replyDelivery: qqReplyDelivery };
@@ -11350,18 +11375,11 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       event.qqAgentInnerState = extractQqAgentInnerState(privateOutput.value);
       return privateOutput.output;
     }
-    const parsed = await parseQqAgentOutputWithAttachmentImport(result.finalResponse, {
-      bubbleSeparator: qqBubbleSeparator,
+    const parsed = await importQqAgentReplyOutput(result.finalResponse, event, {
       threadId: result.threadId,
-      generatedImagesDir: codexGeneratedImagesDir,
       outputDir: taskWorkspace.outputDir,
-      generatedAfterMs: turnStartedAt,
-      maxImageBytes: qqImageMaxBytes
+      turnStartedAt
     });
-    logQqGeneratedAttachmentImport(parsed, event, result);
-    if (parsed.importedImageCount > 0) {
-      trackBackgroundTask(rememberQqChatDrawings(parsed, event, taskWorkspace.outputDir), () => null);
-    }
     event.qqAgentStructuredOutput = parsed.structured;
     // The last completed attempt (after any fusion) is the turn's inner state.
     event.qqAgentInnerState = extractQqAgentInnerState(parsed.value);
@@ -11385,12 +11403,8 @@ async function buildModelReply(event, { replyScope = null } = {}) {
       persistentResume
         ? "你正在继续同一个 QQ 长期会话。沿用线程中已经建立的身份、关系、稳定规则和前文，不要要求重新介绍背景。"
         : "下面是本轮由 Hub 归一化并按权限裁剪后的 QQ 上下文。",
-      formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages: qqAgentCanDraw }),
-      persistentResume
-        ? speaksThroughTool
-          ? "本轮仍使用与临时会话完全相同的融合式追问规则：所有触发 Bot 回复的新消息作为一个批次处理，用 qq_chat.send 自然地回应。"
-          : "本轮仍使用与临时会话完全相同的融合式追问规则：所有触发 Bot 回复的新消息作为一个批次处理，最终只输出一份统一回复。"
-        : null,
+      formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages: qqAgentCanDraw, drawsWithTool: qqAgentDrawsWithTool }),
+      persistentResume ? formatQqPersistentFusionNote({ replyDelivery }) : null,
       "",
       intentContext,
       intentContext ? "" : null,
@@ -11479,17 +11493,12 @@ async function buildModelReply(event, { replyScope = null } = {}) {
         ? "当前没有新消息；执行上面的已批准私聊联系任务。"
         : formatQqCurrentMessagePrompt(event, currentMessageText),
       "",
-      event.qqColdProactive
-        ? formatQqColdProactiveCompletionInstruction({ replyDelivery: speaksThroughTool ? "tool" : "final" })
-        : event.qqPrivateProactive
-        ? speaksThroughTool
-          ? "现在想说就用 qq_chat.send 给对方发一句自然的消息；读完上下文后没有真想说的内容、这类联系已经显得多余，或安全与关键事实无法可靠确认时，一条都不发，把 status 设为 silent。"
-          : "现在只输出一句要发给对方的自然消息；读完上下文后没有真想说的内容、这类联系已经显得多余，或安全与关键事实无法可靠确认时，把 status 设为 silent。"
-        : speaksThroughTool
-        ? `现在用 qq_chat.send 在${isQqPrivateEvent(event) ? "私聊" : "群"}里回应：可以马上说，也可以先说一声再去做、做完再发，分几次发都行；不想说就一条都不发。说完、做完后提交输出 Schema 结束本轮（它不会发送）。不要追加服务式追问或“我还能继续帮你”的结尾。`
-        : isQqPrivateEvent(event)
-        ? "请按输出 Schema 提交要发送到 QQ 私聊里的最终回复。不要追加服务式追问或“我还能继续帮你”的结尾。"
-        : "请按输出 Schema 提交要发送到 QQ 群里的最终回复。不要追加服务式追问或“我还能继续帮你”的结尾。"
+      formatQqReplyCompletionInstruction({
+        replyDelivery,
+        privateChat: isQqPrivateEvent(event),
+        coldProactive: Boolean(event.qqColdProactive),
+        privateProactive: Boolean(event.qqPrivateProactive)
+      })
     ].filter((part) => part != null).join("\n");
   };
   const runBuiltReplyPrompt = async (
@@ -11582,45 +11591,13 @@ async function buildModelReply(event, { replyScope = null } = {}) {
         ];
         // Send-tool messages already reached QQ, so a later batch continues
         // the conversation instead of replacing an unsent draft.
-        const alreadySent = speaksThroughTool
-          ? summarizeQqChatSendDeliveries(event.qqChatSendSession?.deliveries || [], { bubbleSeparator: qqBubbleSeparator }).deliveredReply
-          : "";
-        const sentContext = alreadySent
-          ? `你这一轮已经用 qq_chat.send 发出、对方都看到了的消息：\n${stripLocalQqMediaMarkers(alreadySent).slice(0, 2000)}`
-          : "你这一轮还没有发出任何消息。";
         const fullBase = await buildReplyPrompt(memoryContext, 1, false, "", speaksThroughTool ? "" : draft, 0);
-        const fullPrompt = speaksThroughTool
-          ? [
-            fullBase,
-            "",
-            sentContext,
-            "",
-            "你刚结束上一段回应，又有新消息到达：",
-            fusionText,
-            "",
-            "接着自然回应这些新消息：需要回应就用 qq_chat.send 发，别重复已经发过的内容，也不要解释内部过程；没什么要补充的就一条都不发，把 status 设为 silent。"
-          ].join("\n")
-          : [
-            fullBase,
-            "",
-            "上一版回答已经生成，但尚未发送。现在有新的追问到达：",
-            fusionText,
-            "",
-            "不要发送或复述上一版回答。立即进入下一轮，把上一版草稿与这批追问融合，只输出一份替代旧草稿的最终 QQ 回复；不要解释融合过程。"
-          ].join("\n");
-        const resumePrompt = speaksThroughTool
-          ? [
-            "你正在继续同一个 QQ 长期线程。你上一轮用 qq_chat.send 发出的消息对方都已经看到。之后又有新消息到达：",
-            fusionText,
-            "",
-            "需要回应就用 qq_chat.send 接着说，别重复已经发过的话，不要逐条作答或解释内部过程；不需要就一条都不发，把 status 设为 silent。"
-          ].join("\n")
-          : [
-            "你正在继续同一个 QQ 长期线程。上一轮助手输出尚未真正发送到 QQ，只是一份必须丢弃或改写的草稿。",
-            fusionText,
-            "",
-            "立即进入下一轮，把本批触发消息及筛选后的中间语境融合进草稿，只输出一份替代草稿的最终 QQ 回复。不要逐条作答，不要解释内部过程。"
-          ].join("\n");
+        const { fullPrompt, resumePrompt } = buildQqFollowUpFusionPrompts({
+          replyDelivery,
+          fullBase,
+          fusionText,
+          alreadySent: speaksThroughTool ? stripLocalQqMediaMarkers(event.qqChatSendSession?.deliveredText() || "") : ""
+        });
         logger.info("QQ pending follow-ups fused before send", {
           outcome: "started",
           action: "fuse-before-send",
@@ -11697,9 +11674,9 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     }
     assertQqReplyScopeActive(replyScope);
     if (speaksThroughTool) {
-      const toolDelivery = await finalizeQqChatToolDelivery(event);
+      const toolDelivery = await event.qqChatSendSession.finalize();
       // The lifecycle records what qq_chat.send delivered; nothing is left to send.
-      if (toolDelivery?.sendCount > 0) return "";
+      if (toolDelivery.sendCount > 0) return "";
       if (isQqSilentReply(baseReply) || !String(baseReply || "").trim()) {
         event.qqModelDeclinedReply = true;
         if (!isQqSilentReply(baseReply)) {
@@ -11731,18 +11708,9 @@ async function buildModelReply(event, { replyScope = null } = {}) {
         stickerCatalog
       )
       : baseReply;
-    const parsedKnowledge = extractQqKnowledgeMarkers(reply);
-    event.qqKnowledgePatches = [
-      ...(event.qqKnowledgePatches || []),
-      ...parsedKnowledge.patches
-    ];
-    const parsedMemory = extractQqConversationMemoryMarkers(parsedKnowledge.visibleText);
-    event.qqConversationMemoryPatches = [
-      ...(event.qqConversationMemoryPatches || []),
-      ...parsedMemory.patches
-    ];
-    if (!parsedMemory.visibleText) return event.qqColdProactive || event.qqPrivateProactive ? "" : buildAssistantReply(event);
-    return parsedMemory.visibleText;
+    const visibleText = takeQqReplyMemoryMarkers(reply, event);
+    if (!visibleText) return event.qqColdProactive || event.qqPrivateProactive ? "" : buildAssistantReply(event);
+    return visibleText;
   } finally {
     // Late send-tool calls from an engine that kept going are refused.
     await event.qqChatSendSession?.close();
@@ -12012,7 +11980,8 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
     toolsEnabled: true,
     hasStickerCandidates: false,
     hasMemoryPeople: false,
-    canSearchImages: canQqSearchWebImages()
+    canSearchImages: canQqSearchWebImages(),
+    canDraw: qqAgentDrawsWithTool
   });
   const dispatchNativeTool = createQqNativeToolDispatcher({
     event,
@@ -12039,7 +12008,8 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
     ),
     requestText: text,
     isImageGeneration,
-    canGenerateImages: qqAgentCanDraw
+    canGenerateImages: qqAgentCanDraw,
+    drawsWithTool: qqAgentDrawsWithTool
   });
   const nativeProgress = createQqNativeAgentProgressObserver(event, { replyScope });
 
@@ -12071,19 +12041,12 @@ async function buildQqOwnerFileImageReply(event, { replyScope = null } = {}) {
       onProgress: nativeProgress.observe
     });
     assertQqReplyScopeActive(replyScope);
-    const parsed = await parseQqAgentOutputWithAttachmentImport(result.finalResponse, {
-      bubbleSeparator: qqBubbleSeparator,
+    const parsed = await importQqAgentReplyOutput(result.finalResponse, event, {
       threadId: result.threadId,
-      generatedImagesDir: codexGeneratedImagesDir,
       outputDir: taskWorkspace.outputDir,
-      generatedAfterMs: taskStartedAt,
-      maxImageBytes: qqImageMaxBytes,
+      turnStartedAt: taskStartedAt,
       recoverUnlistedGeneratedImage: isImageGeneration
     });
-    logQqGeneratedAttachmentImport(parsed, event, result);
-    if (parsed.importedImageCount > 0) {
-      trackBackgroundTask(rememberQqChatDrawings(parsed, event, taskWorkspace.outputDir), () => null);
-    }
     event.qqAgentStructuredOutput = parsed.structured;
     const normalized = await normalizeQqImageGenerationReply(parsed.output, {
       event,
@@ -13244,16 +13207,17 @@ async function processQqReplyEvent(event, options = {}) {
       error = caught.message;
       const stopped = ["QQ_GENERATION_STOPPED", "QQ_REPLY_STOPPED", "QQ_FOLLOW_UP_FUSION_RETRY", "HUB_SHUTTING_DOWN"].includes(caught.code);
       // Messages qq_chat.send already delivered stay this turn's reply.
-      const finalizedBeforeError = Boolean(event.qqChatToolDelivery);
-      const toolDelivery = await finalizeQqChatToolDelivery(event).catch(() => null);
+      const chatSend = event.qqChatSendSession || null;
+      const finishedBeforeError = Boolean(chatSend?.finalized);
+      const toolDelivery = chatSend ? await chatSend.finalize().catch(() => null) : null;
       const alreadySpoke = Number(toolDelivery?.deliveredBubbleCount || 0) > 0;
       reply = event.qqColdProactive || event.qqPrivateProactive || stopped || alreadySpoke
         ? null
         // Nothing retries a failed reply automatically, so never promise one.
         : "这边刚刚卡了一下，这条没弄出来，麻烦再叫我一次。";
-      if (alreadySpoke && !stopped && !finalizedBeforeError && !event.qqColdProactive && !event.qqPrivateProactive) {
+      if (alreadySpoke && !stopped && !finishedBeforeError && !event.qqColdProactive && !event.qqPrivateProactive) {
         // The Bot may have said "let me check" before failing; say so instead of going quiet.
-        await appendQqChatToolFailureNotice(event, replyScope);
+        await chatSend.appendNotice();
       }
     } finally {
       timings.generationDurationMs = Date.now() - generationStartedAt;
@@ -13276,7 +13240,8 @@ async function processQqReplyEvent(event, options = {}) {
   };
 
   // Send-tool messages were checked before each send and are already out.
-  if (!event.qqChatToolDelivery && isQqTimedProactiveTurnStale(event)) {
+  const toolDelivery = getQqChatToolDelivery(event);
+  if (!toolDelivery && isQqTimedProactiveTurnStale(event)) {
     record.reply = null;
     record.decision = {
       ...record.decision,
@@ -13287,8 +13252,7 @@ async function processQqReplyEvent(event, options = {}) {
   }
 
   try {
-    const toolDelivery = !record.reply ? event.qqChatToolDelivery : null;
-    if (toolDelivery?.send) {
+    if (!record.reply && toolDelivery) {
       // qq_chat.send delivered these during the turn; record them, never resend.
       record.reply = toolDelivery.reply;
       record.send = toolDelivery.send;
@@ -14136,10 +14100,84 @@ function isQqTimedProactiveTurnStale(event) {
       !== Number(qqGroupActivityVersionByGroupId.get(getQqMemoryScopeId(event)) || 0);
 }
 
-// One qq_chat.send message: the same parser, drawn-picture import, reply
-// guards, addressing and OneBot senders as a final structured reply, but sent
-// right away while the turn keeps running. The workspace stays for later
-// attachments; the lifecycle turns all receipts into memory after the turn.
+// How this event's reply turn speaks: "tool" while it owns a qq_chat.send
+// session, otherwise "final" (one structured reply sent after the turn).
+function getQqReplyDelivery(event) {
+  return event?.qqChatSendSession ? "tool" : "final";
+}
+
+// What qq_chat.send delivered in a finished turn, as the reply/send pair the
+// lifecycle records (never resends); null when the turn sent nothing.
+function getQqChatToolDelivery(event) {
+  const summary = event?.qqChatSendSession?.summary || null;
+  return summary?.sendCount > 0 && summary.send ? summary : null;
+}
+
+// Gives a reply turn its qq_chat.send session, or none for a final-reply
+// turn. Not enumerable: copies of the event (cross-session patches,
+// aggregates) must never carry the turn's ability to speak.
+function attachQqChatSendSession(event, options = null) {
+  const session = options
+    ? createQqChatSendSession({
+      bubbleSeparator: qqBubbleSeparator,
+      deliver: (message, { sendIndex, threadId, notice }) => deliverQqChatToolMessage(event, message, {
+        sendIndex,
+        replyScope: options.replyScope || null,
+        threadId: notice ? "" : threadId,
+        turnStartedAt: event.qqReplyTurnStartedAt || 0
+      })
+    })
+    : null;
+  Object.defineProperty(event, "qqChatSendSession", {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value: session
+  });
+  return session;
+}
+
+// Parses an agent's structured output, imports natively drawn pictures it
+// lists into the task output directory and remembers them as chat drawings.
+// The final reply and every qq_chat.send message share it.
+async function importQqAgentReplyOutput(rawOutput, event, {
+  threadId = "",
+  outputDir = "",
+  turnStartedAt = 0,
+  recoverUnlistedGeneratedImage = false
+} = {}) {
+  const parsed = await parseQqAgentOutputWithAttachmentImport(rawOutput, {
+    bubbleSeparator: qqBubbleSeparator,
+    threadId,
+    generatedImagesDir: codexGeneratedImagesDir,
+    outputDir,
+    generatedAfterMs: turnStartedAt,
+    maxImageBytes: qqImageMaxBytes,
+    ...(recoverUnlistedGeneratedImage ? { recoverUnlistedGeneratedImage: true } : {})
+  });
+  logQqGeneratedAttachmentImport(parsed, event, { threadId });
+  if (parsed.importedImageCount > 0) {
+    trackBackgroundTask(rememberQqChatDrawings(parsed, event, outputDir), () => null);
+  }
+  return parsed;
+}
+
+// Knowledge and conversation-memory markers leave the visible text and
+// become this turn's pending patches (persisted only after delivery).
+function takeQqReplyMemoryMarkers(reply, event) {
+  const parsedKnowledge = extractQqKnowledgeMarkers(reply);
+  event.qqKnowledgePatches = [...(event.qqKnowledgePatches || []), ...parsedKnowledge.patches];
+  const parsedMemory = extractQqConversationMemoryMarkers(parsedKnowledge.visibleText);
+  event.qqConversationMemoryPatches = [...(event.qqConversationMemoryPatches || []), ...parsedMemory.patches];
+  return parsedMemory.visibleText;
+}
+
+// One qq_chat.send message: the same parser, drawn-picture import, marker
+// handling, addressing and OneBot senders as a final structured reply, but
+// sent right away while the turn keeps running. The model already chose its
+// bubbles and sticker, so the final reply's bubble splitting and sticker
+// suggestion do not apply. The workspace stays for later attachments; the
+// lifecycle turns all receipts into memory after the turn.
 async function deliverQqChatToolMessage(event, message, {
   sendIndex = 0,
   replyScope = null,
@@ -14151,27 +14189,16 @@ async function deliverQqChatToolMessage(event, message, {
   if (isQqTimedProactiveTurnStale(event)) {
     return { refused: true, reason: "刚才有人说话了，这条主动消息不再发；等有人回应你时再说。" };
   }
-  const outputDir = event.qqTaskWorkspace?.outputDir || "";
-  const parsed = await parseQqAgentOutputWithAttachmentImport(JSON.stringify(toQqAgentOutputValue(message)), {
-    bubbleSeparator: qqBubbleSeparator,
+  const parsed = await importQqAgentReplyOutput(JSON.stringify(toQqAgentOutputValue(message)), event, {
     threadId,
-    generatedImagesDir: codexGeneratedImagesDir,
-    outputDir,
-    generatedAfterMs: turnStartedAt,
-    maxImageBytes: qqImageMaxBytes
+    outputDir: event.qqTaskWorkspace?.outputDir || "",
+    turnStartedAt
   });
-  if (parsed.importedImageCount > 0) {
-    trackBackgroundTask(rememberQqChatDrawings(parsed, event, outputDir), () => null);
-  }
-  let reply = state.qq.enhancer.enabled
+  const polished = state.qq.enhancer.enabled
     ? deRepeatQqReply(deTemplateQqReply(parsed.output, event), event)
     : parsed.output;
-  const parsedKnowledge = extractQqKnowledgeMarkers(reply);
-  event.qqKnowledgePatches = [...(event.qqKnowledgePatches || []), ...parsedKnowledge.patches];
-  const parsedMemory = extractQqConversationMemoryMarkers(parsedKnowledge.visibleText);
-  event.qqConversationMemoryPatches = [...(event.qqConversationMemoryPatches || []), ...parsedMemory.patches];
-  const targeted = extractQqReplyTargetDirective(normalizeVisibleQqReply(parsedMemory.visibleText, event));
-  reply = targeted.visibleText;
+  const targeted = extractQqReplyTargetDirective(normalizeVisibleQqReply(takeQqReplyMemoryMarkers(polished, event), event));
+  const reply = targeted.visibleText;
   if (!reply) return { refused: true, reason: "清理掉控制标记后没有可发送的内容。" };
   const targetDirective = targeted.directive
     || (sendIndex > 0 ? { mode: "plain", senderId: null, implicit: true } : null);
@@ -14205,39 +14232,6 @@ async function deliverQqChatToolMessage(event, message, {
     preview: visiblePreview || null
   }, "qq", qqLogContext(event));
   return { reply, send, receipt };
-}
-
-// After a turn that already spoke fails, tell the people it did not finish,
-// as one more plain message recorded with the turn's other sends.
-async function appendQqChatToolFailureNotice(event, replyScope) {
-  const session = event?.qqChatSendSession;
-  if (!session) return;
-  try {
-    const notice = await deliverQqChatToolMessage(event, {
-      bubbles: ["刚才卡住了，后面的没弄完，麻烦再叫我一次"],
-      reply: { mode: "plain", targetUserId: "" },
-      attachments: [],
-      sticker: ""
-    }, { sendIndex: session.deliveries.length, replyScope });
-    if (!notice || notice.refused) return;
-    event.qqChatToolDelivery = summarizeQqChatSendDeliveries([...session.deliveries, notice], {
-      bubbleSeparator: qqBubbleSeparator
-    });
-  } catch {
-    // A stopped or superseded scope stays quiet.
-  }
-}
-
-// Closes the turn's send session (late calls are refused) and hands its
-// receipts to the lifecycle as one reply/send pair.
-async function finalizeQqChatToolDelivery(event) {
-  const session = event?.qqChatSendSession;
-  if (!session) return null;
-  await session.close();
-  if (event.qqChatToolDelivery) return event.qqChatToolDelivery;
-  const summary = summarizeQqChatSendDeliveries(session.deliveries, { bubbleSeparator: qqBubbleSeparator });
-  if (summary.sendCount > 0 && summary.send) event.qqChatToolDelivery = summary;
-  return summary;
 }
 
 async function rememberQqTaskProgress(event, progress) {
@@ -14328,9 +14322,14 @@ function logQqNativeToolEvent(toolEvent = {}) {
     durationMs: Math.max(0, Number(toolEvent.durationMs || 0)),
     errorCode: String(toolEvent.errorCode || "") || null
   });
-  logger[toolEvent.ok ? "debug" : "warn"](
+  // What the Bot did, in one readable line (privacy rules live in the describer).
+  const activity = toolEvent.activity || describeQqToolActivity(
+    { namespace: toolEvent.namespace, tool: toolEvent.tool },
+    { ok: toolEvent.ok, text: toolEvent.result?.result ?? "", error: toolEvent.result?.error ?? "" }
+  );
+  logger[toolEvent.ok ? "info" : "warn"](
     "QQ native Agent tool completed",
-    { ...details, engine: agentEngine },
+    { activity: `${activity.label} ${activity.line}`.trim(), activityResult: activity.outcome || null, ...details, engine: agentEngine },
     AGENT_LOG_CATEGORY,
     sourceEvent ? qqLogContext(sourceEvent) : {}
   );
@@ -14507,7 +14506,8 @@ async function runQqSubagentJob(job, { signal, followUps = [], threadId = null, 
   ensureQqTraceId(event);
   const specs = filterQqSubagentToolSpecs(buildQqNativeToolSpecs({
     toolsEnabled: true,
-    canSearchImages: canQqSearchWebImages()
+    canSearchImages: canQqSearchWebImages(),
+    canDraw: qqAgentDrawsWithTool
   }), { kind: job.kind });
   const dispatcher = createQqNativeToolDispatcher({
     executeCommand: async (command, toolEvent) => {
@@ -14566,15 +14566,18 @@ async function runQqSubagentJob(job, { signal, followUps = [], threadId = null, 
     const parsed = parseQqSubagentOutput(result.finalResponse);
     let drawingIds = [];
     if (job.kind === "life" && qqAgentCanDraw) {
-      // A routine drawing is whatever the activity really generated.
-      const drawn = await importRecentCodexGeneratedImages({
-        threadId: result.threadId || threadId || "",
-        generatedImagesDir: codexGeneratedImagesDir,
-        outputDir: taskWorkspace.outputDir,
-        generatedAfterMs: turnStartedAt,
-        maxImageBytes: qqImageMaxBytes,
-        limit: 2
-      }).catch(() => []);
+      // A routine drawing is whatever the activity really generated:
+      // qq_draw.image pictures, or native drawings of the thread.
+      const drawn = event.qqToolDrawnImagePaths?.length
+        ? event.qqToolDrawnImagePaths.slice(0, 2)
+        : await importRecentCodexGeneratedImages({
+          threadId: result.threadId || threadId || "",
+          generatedImagesDir: codexGeneratedImagesDir,
+          outputDir: taskWorkspace.outputDir,
+          generatedAfterMs: turnStartedAt,
+          maxImageBytes: qqImageMaxBytes,
+          limit: 2
+        }).catch(() => []);
       const segment = job.context?.life?.segment || {};
       drawingIds = await rememberQqBotDrawings(drawn, {
         sourceRoot: taskWorkspace.outputDir,
@@ -14616,7 +14619,67 @@ async function collectQqSubagentAttachments(paths = [], outputDir) {
   return accepted.slice(0, 8);
 }
 
-const qqAgentCanDraw = Boolean(getAgentEngine(agentEngine).imageGeneration);
+// How the Bot draws: natively (Codex), through qq_draw.image (an engine
+// without image generation borrows one Codex turn per picture), or not at all.
+const qqAgentDrawing = resolveAgentDrawing({
+  nativeImageGeneration: Boolean(getAgentEngine(agentEngine).imageGeneration),
+  codexDrawing,
+  codexAvailable: codexDrawing !== "off" && isExecutableOnPathSync(codexCliPath)
+});
+const qqAgentCanDraw = Boolean(qqAgentDrawing);
+const qqAgentDrawsWithTool = qqAgentDrawing === "codex";
+// One drawing at a time; each passes the host capacity gate for the
+// processes a Codex turn starts, and never uses the reply limiter (the
+// calling turn holds a slot there, so waiting on it would deadlock).
+const qqCodexDrawingService = qqAgentDrawsWithTool
+  ? createQqDrawingService({
+    processGate: { acquire: (options) => agentProcessGate.acquire(options) },
+    processes: countAgentTurnProcesses("codex", { tools: false }),
+    capacityWaitMs: 60_000,
+    generate: async ({ prompt, referenceImagePaths, outputDir, cwd, signal }) => {
+      const startedAt = Date.now();
+      const result = await runCodexImageGeneration({
+        prompt,
+        referenceImagePaths,
+        outputDir,
+        cwd,
+        generatedImagesDir: codexGeneratedImagesDir,
+        codexPath: codexCliPath,
+        model: state.ai.model || null,
+        timeoutMs: codexDrawingTimeoutMs,
+        maxImageBytes: qqImageMaxBytes,
+        signal,
+        onSpawn: (child) => activeCodexChildren.add(child),
+        onExit: (child) => activeCodexChildren.delete(child)
+      });
+      logger[result.imagePaths.length ? "info" : "warn"]("Codex drawing finished", {
+        operation: "agent.codex_drawing",
+        outcome: result.imagePaths.length ? "drawn" : "no-image",
+        imageCount: result.imagePaths.length,
+        referenceCount: referenceImagePaths.length,
+        durationMs: Date.now() - startedAt,
+        engine: "codex"
+      }, AGENT_LOG_CATEGORY);
+      return result;
+    }
+  })
+  : null;
+
+// A picture drawn through qq_draw.image: chat drawings join the Bot's
+// drawing library scoped to the conversation; background jobs (routine
+// activities, sub-agents) record theirs when the job ends.
+async function rememberQqToolDrawings(event, paths, prompt = "") {
+  event.qqToolDrawnImagePaths = [...(event.qqToolDrawnImagePaths || []), ...paths];
+  if (event.qqBackgroundTurn || !event.qqTaskWorkspace?.outputDir) return;
+  const text = String(prompt || "").replace(/\s+/g, " ").trim();
+  await rememberQqBotDrawings(paths, {
+    sourceRoot: event.qqTaskWorkspace.outputDir,
+    title: text.slice(0, 20) || "聊天时画的",
+    description: text.slice(0, 200),
+    source: "chat",
+    scopeId: getQqMemoryScopeId(event)
+  });
+}
 
 // Stores the Bot's own pictures (validated inside sourceRoot) in its drawing
 // library; returns the stored ids. Unreferenced files are pruned afterwards.

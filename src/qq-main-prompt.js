@@ -25,10 +25,13 @@ export function formatQqMainModelInstructions({
   toolsEnabled = true,
   currentDate = formatQqPromptDate(),
   canGenerateImages = true,
+  drawsWithTool = false,
   assistantProfile = "",
   replyDelivery = "final"
 } = {}) {
   const chatType = privateChat ? "QQ 私聊" : "QQ 群聊";
+  // "native": the engine draws itself; "tool": qq_draw.image draws through Codex.
+  const drawing = resolveQqDrawingMode({ canGenerateImages, drawsWithTool, toolsEnabled });
   // With tools, the model speaks through qq_chat.send during the turn and the
   // final structured output stays private; without tools it is the reply.
   const speaksThroughTool = replyDelivery === "tool" && toolsEnabled;
@@ -113,10 +116,10 @@ export function formatQqMainModelInstructions({
       : null,
     `只有管理、权限或身份区分确有必要时才称呼“${ownerLabel}”；普通聊天直接回应内容，其他人绝不使用这个称呼。`,
     `不得泄露部署 profile、后台连接、本机文件、路径、日志、配置、环境变量、token、密钥或账号隐私。既非${ownerLabel}也非 Bot 管理员的人提出电脑控制、登录、验证码、现实资产、隐私或绕权操作时简短拒绝；Bot 管理员仍受上面的高风险文件判断约束。`,
-    canGenerateImages
+    drawing === "native"
       ? `图片只在实际获得视觉输入时描述；看不清就直说。需要返回文件或图片时，先用原生文件能力把成品写入本轮 task output 工作区，再把绝对路径放进${speaksThroughTool ? " qq_chat.send 的" : "结构化"} attachments。除本轮原生生图的保存路径外，不得返回工作区外路径。`
       : `图片只在实际获得视觉输入时描述；看不清就直说。需要返回文件或图片时，先用原生文件能力把成品写入本轮 task output 工作区，再把绝对路径放进${speaksThroughTool ? " qq_chat.send 的" : "结构化"} attachments。不得返回工作区外路径。`,
-    canGenerateImages ? QQ_GENERATED_IMAGE_DELIVERY_RULE : null,
+    drawing === "native" ? QQ_GENERATED_IMAGE_DELIVERY_RULE : drawing === "tool" ? QQ_DRAW_TOOL_DELIVERY_RULE : null,
     toolsEnabled ? "本段对话含图时，Hub 会在本轮上下文里附上可选图片目录。前文图片按“5 分钟或最近 20 条原始消息”保留，文字与 Bot 回复均计入条数。需要再次识别或回答图片细节时，用 qq_context.images 读取所选原图再作答；目录配文、说明和旧回答都不等于视觉证据。后续上下文中的新目录优先于旧目录，可用 list 刷新。" : null,
     "",
     "【人格与表达】",
@@ -143,7 +146,7 @@ export function formatQqMainModelInstructions({
       ? "- 别人分享视频/歌/链接/聊天记录/语音时，像人一样先看、先听（qq_media、qq_context）再说具体感受；只解析过（parse）不等于看过或听过，没看没听就别装，也别只复述标题。"
       : null,
     toolsEnabled
-      ? `- 有人让你做一件开放的事（发个动态、${canGenerateImages ? "画一张、" : ""}推荐首歌、整点活、帮忙想个名字）时，你自己拿主意，并用手上的能力真的做出成品：${canGenerateImages ? "画图就用原生生图画出来，" : "（这台机器没有生图能力，被要求画图时如实说画不了，别假装画好了）"}配图用 qq_search.images 找，推荐歌发音乐卡片（用 qq_media.music 搜到的 song-N，免得发错版本），分享视频先看再发 B站视频卡片，长清单或小故事可以折成一张聊天记录卡片；发动态写你今天真实做过、看到、想到的事或刚做好的东西（先看看 qq_self.state 里的作息和经历），需要配图就先${canGenerateImages ? "做图" : "找好图"}再一起发。不要把“想画什么/打算做什么”的描述当成成品交出去，也不要一句“好了”就结束。`
+      ? `- 有人让你做一件开放的事（发个动态、${drawing ? "画一张、" : ""}推荐首歌、整点活、帮忙想个名字）时，你自己拿主意，并用手上的能力真的做出成品：${drawing === "native" ? "画图就用原生生图画出来，" : drawing === "tool" ? "画图就用 qq_draw.image 画出来（Codex 代画，要一两分钟，先说一声再画），" : "（这台机器没有生图能力，被要求画图时如实说画不了，别假装画好了）"}配图用 qq_search.images 找，推荐歌发音乐卡片（用 qq_media.music 搜到的 song-N，免得发错版本），分享视频先看再发 B站视频卡片，长清单或小故事可以折成一张聊天记录卡片；发动态写你今天真实做过、看到、想到的事或刚做好的东西（先看看 qq_self.state 里的作息和经历），需要配图就先${drawing ? "做图" : "找好图"}再一起发。不要把“想画什么/打算做什么”的描述当成成品交出去，也不要一句“好了”就结束。`
       : null,
     toolsEnabled
       ? "- 所有动作只有工具返回成功才算做了；不必每轮都做，也别为了显得忙乱调工具。闲聊不需要查资料，但贴表情、拍一拍、点开分享这类小动作本身就是表达。"
@@ -165,7 +168,16 @@ export function formatQqMainModelInstructions({
 // is echoed whole in every protocol item and fails the entire reply.
 export const QQ_GENERATED_IMAGE_DELIVERY_RULE = "原生生图画好的图不用自己搬：把生图结果给出的保存路径原样填进 attachments（kind 为 image），Hub 会校验后复制到本轮输出目录再发送，PNG 直接发即可。不要用 Shell、apply_patch、脚本或其他工具去复制、转格式，也不要把图片编码成 base64、HTML 或其他文本写进文件：沙箱里的这类操作可能失败，图片数据还会撑爆本轮输出、让整条回复失败。没拿到保存路径也不要反复尝试搬运或转码，照常完成回答并如实说明。";
 
-export function formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages = false } = {}) {
+// Drawing pictures through qq_draw.image (engines without native image
+// generation): the tool already saved the picture in the output directory.
+export const QQ_DRAW_TOOL_DELIVERY_RULE = "画图或改图用 qq_draw.image：prompt 写清画面描述（主体、风格、构图、色调、画面里的文字）；改图时把本轮输入或输出目录里的参考图路径放进 references（聊天里的图先用 qq_context.images 的 use 取出来）。它让 Codex 代画，一张通常要一两分钟，聊天时先说一声再画。画好的图已经在本轮输出目录里，结果会让你看到画面：合适就把返回的路径原样填进 attachments（kind 为 image）发出去；工具没成功就别说画好了，如实说明。";
+
+export function resolveQqDrawingMode({ canGenerateImages = false, drawsWithTool = false, toolsEnabled = true } = {}) {
+  if (drawsWithTool) return toolsEnabled ? "tool" : "";
+  return canGenerateImages ? "native" : "";
+}
+
+export function formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages = false, drawsWithTool = false } = {}) {
   if (!taskWorkspace?.root || !taskWorkspace?.inputDir || !taskWorkspace?.outputDir) {
     throw new TypeError("taskWorkspace root/inputDir/outputDir are required");
   }
@@ -175,9 +187,10 @@ export function formatQqTaskWorkspaceContext(taskWorkspace, { canGenerateImages 
     `输入目录：${taskWorkspace.inputDir}`,
     `输出目录（task output）：${taskWorkspace.outputDir}`,
     "需要回传文件或图片时，先用原生文件能力将成品写入上述输出目录，确认文件存在，再把其绝对路径填进 attachments；工作区根目录和 input 目录中的文件不会发送。",
-    canGenerateImages
+    canGenerateImages && !drawsWithTool
       ? "例外：本轮用原生生图画好的图不要复制或转码，直接把生图保存路径填进 attachments，由 Hub 导入输出目录。"
       : null,
+    drawsWithTool ? "qq_draw.image 画好的图已经在输出目录里，直接用它返回的路径。" : null,
     "这些路径只适用于本轮；长期会话也必须使用这里的新路径，不得沿用历史附件路径。可见正文不要暴露本机路径，也不要在实际创建文件前声称已经完成。"
   ].filter(Boolean).join("\n");
 }
@@ -239,7 +252,8 @@ export function formatQqMainToolGuide({
   canSearchImages = false,
   stickerLibraryHint = "",
   mediaSummary = "",
-  replyDelivery = "final"
+  replyDelivery = "final",
+  drawsWithTool = false
 } = {}) {
   const actionRelevant = /(?:拍一拍|点赞|好友申请|加群|入群|群邀请|申请|QQ\s*空间|空间|动态|评论|ban|封禁|拉黑|禁言|踢人)/i.test(String(messageText || "")) || pokeEvent;
   const candidates = Array.isArray(replyStickerCandidates) ? replyStickerCandidates : [];
@@ -264,6 +278,7 @@ export function formatQqMainToolGuide({
     "- qq_message：给消息贴表情回应、撤回自己刚发的消息；发卡片（音乐、B站视频、聊天记录、骰子、猜拳、名片）——分享歌和视频用卡片，不要在正文贴 Markdown 链接",
     "- qq_social：拍一拍、点赞、好友/群申请、加群、QQ 空间、群管理",
     `- qq_search：中文网页${canSearchImages ? "、网络图片与表情包" : ""}（最新资料优先用原生 Web Search）`,
+    drawsWithTool ? "- qq_draw.image：画图、改图（你不能直接生图，由 Codex 代画，一张要一两分钟）" : null,
     "- qq_media：parse 解析分享的视频/歌曲是什么、video 看视频（分镜+台词+声音）、music 听歌（歌词+节奏调性+听感）和搜歌、audio 听语音/分析语气、bilibili 逛 B站（热门/搜索/视频信息和评论）；QQ 文件里的歌和视频（file-N）或本轮工作区里的文件（path）也能直接交给它们",
     "- qq_self：自己的心情、今天的作息、最近的内心OS、自己的语言习惯（口癖）和核心人格的自主微调",
     privileged ? "- qq_session.manage：列出、读取、切换其他 QQ 会话并在明确要求时发送" : null,

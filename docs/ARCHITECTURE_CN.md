@@ -72,7 +72,10 @@
 | `src/infrastructure/codex/codex-lean-config.js` | 可选的精简 Codex 上下文 | 因为 Bot 同时是 Agent，默认关闭；开启后按线程覆盖配置，从 QQ 轮次去掉连接器、插件、浏览器/电脑操控、子 Agent、目标、技能目录和仓库 AGENTS.md（特权文件任务保留项目文档） |
 | `src/infrastructure/claude/claude-child-env.js` | Claude 子进程环境 | 白名单变量、连接 profile 和固定的静默开关 |
 | `src/infrastructure/codex/qq-native-tools.js` | QQ 工具目录与分发 | 带 MCP 注解的工具 Schema、每轮调用上限（发言工具单独计数）与 callId 去重、发言/视觉/消息/资料查询/自身状态工具固定绑定原会话，以及映射到已有鉴权 Hub 操作 |
-| `src/app/qq-chat-send-tool.js` | 用 `qq_chat.send` 说话 | 每轮一个发送会话：把参数规整成最终输出的可见字段、串行发送、每轮次数上限、拒绝已送达内容的重复和回合结束后的迟到调用、给模型的回执，以及把所有回执合成生命周期可用的一组 reply/send；实际投递由组合根注入 |
+| `src/app/qq-chat-send-tool.js` | 用 `qq_chat.send` 说话 | 哪些轮次用工具说话（`resolveQqReplyDelivery`）；每轮一个发送会话：把参数规整成最终输出的可见字段、串行发送、每轮次数上限、拒绝已送达内容的重复和回合结束后的迟到调用、给模型的回执，`finalize()` 把所有回执合成一组只算一次的 reply/send 交给生命周期记录，以及说过话后又失败时补发一次“没弄完”提示；实际投递由组合根注入 |
+| `src/qq-reply-delivery-prompt.js` | 两种说话方式的措辞 | `tool` 与 `final` 两种方式下不同的回复提示句：引导进来的追加消息、长期会话续接说明、结尾指令（普通、私聊主动、冷群）、融合追问提示和中断提示 |
+| `src/infrastructure/agent/agent-tool-activity.js` | 可读的工具记录 | 把每次工具调用（QQ 工具和两种引擎的原生工具）连同结果写成一行中文，并汇总每轮的工具步骤；本机命令内容、聊天搜索词、口癖词和人设取值不进日志 |
+| `src/infrastructure/agent/agent-drawing.js` + `src/infrastructure/codex/codex-image-generation.js` + `src/app/qq-draw-tool.js` | 没有原生生图时画图 | 启动时决定原生/Codex/不画；每张图跑一轮无工具、只读的 Codex 生图并导入本轮输出目录；`qq_draw.image` 一次只画一张并排队、过主机余量闸门、每轮限量、参考图需校验 |
 | `src/qq-sticker-search.js` + `src/app/qq-sticker-tool.js` | 按需表情包库 | 由标签库身份生成的稳定 `#编号`、按情绪/场合/梗搜索并降低近期用过的权重，以及 `qq_sticker.manage` 的 search/inspect（真实视觉输入）/label/favorite |
 | `src/app/qq-message-tools.js` + `src/qq-sent-message-ledger.js` | 表情回应与撤回 | `qq_message.act` 给当前/被引用群消息贴表情回应，以及撤回 Bot 自己两分钟内已确认送达的消息；消息 ID 在最底层发送处只记在内存 |
 | `src/app/qq-lookup-tool.js` | 只读 QQ 资料查询 | `qq_context.lookup` 的成员/群/公告/精华信息，只限本会话出现过的人，绝不返回性别、年龄或地区 |

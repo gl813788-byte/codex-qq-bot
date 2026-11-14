@@ -410,3 +410,36 @@ test("ncc log viewer card layout groups by day, quotes chat and wraps to the wid
   const oneLine = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--plain"]);
   assert.equal(oneLine.stdout.trimEnd().split("\n").length, 2);
 });
+
+test("ncc log viewer puts what the Bot did with a tool on its own line, even in compact mode", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-qq-log-activity-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = join(directory, "hub.jsonl");
+  const entries = [
+    {
+      ts: "2026-01-01T00:00:00.000Z", level: "info", category: "agent", message: "QQ native Agent tool completed", traceId: "aaaa1111",
+      details: { operation: "agent.tool", outcome: "success", activity: "qq_chat.send 发消息「在的」", activityResult: "已送达 1 条", toolNamespace: "qq_chat", toolName: "send", durationMs: 900, engine: "claude" }
+    },
+    {
+      ts: "2026-01-01T00:00:01.000Z", level: "warn", category: "agent", message: "Agent native tool completed", traceId: "aaaa1111",
+      details: { operation: "agent.native_tool", outcome: "failed", activity: "Bash 运行命令 `npm test`", activityResult: "失败", engine: "claude" }
+    },
+    {
+      ts: "2026-01-01T00:00:02.000Z", level: "success", category: "agent", message: "Claude Code turn finished", traceId: "aaaa1111",
+      details: { operation: "agent.turn", outcome: "success", toolCallCount: 2, toolSteps: "qq_chat.send → Bash", engine: "claude" }
+    }
+  ];
+  await writeFile(filePath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+
+  const cards = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--plain", "--pretty", "--width", "120"]);
+  assert.match(cards.stdout, /Bot 使用了 QQ 工具/);
+  assert.match(cards.stdout, /│ ▶ qq_chat\.send 发消息「在的」 {2}→ {2}已送达 1 条/);
+  assert.match(cards.stdout, /│ ▶ Bash 运行命令 `npm test` {2}→ {2}失败/);
+  assert.match(cards.stdout, /│ 工具 2 次：qq_chat\.send → Bash/);
+  // The activity line replaces the raw namespace/name fields.
+  assert.doesNotMatch(cards.stdout, /工具命名空间/);
+
+  const compact = await execFileAsync(process.execPath, [viewerPath.pathname, filePath, "--plain", "--compact"]);
+  assert.match(compact.stdout, /做了什么：qq_chat\.send 发消息「在的」/);
+  assert.match(compact.stdout, /执行结果：已送达 1 条/);
+});

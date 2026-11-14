@@ -9,6 +9,7 @@ import { AGENT_LOG_CATEGORY, countAgentTurnProcesses, getAgentEngine } from "../
 import { describeAgentHostCapacity } from "../agent/agent-process-gate.js";
 import { assertAgentTurnNotNested, runAgentToolCall } from "../agent/agent-tool-context.js";
 import { notifyObserver } from "../agent/agent-turn-process.js";
+import { describeNativeAgentItem, summarizeAgentTurnTools } from "../agent/agent-tool-activity.js";
 import { buildCodexLeanQqConfig } from "./codex-lean-config.js";
 
 // Every difference between the two engines lives in this table (display
@@ -159,6 +160,16 @@ export function createQqCodexTurnRunner({
       const model = agent.selectModel(engineSettings);
       const reasoningEffort = agent.selectReasoningEffort(engineSettings);
       let capacitySlot = null;
+      // Every tool the engine itself ran in this turn (QQ tools included),
+      // for the native-tool log lines and the turn's tool-step summary.
+      const toolItems = [];
+      const observeItem = (notification) => {
+        if (notification?.method === "item/completed" && notification.item) {
+          toolItems.push(notification.item);
+          logNativeToolItem({ logger, logContext, options, agent, item: notification.item, generationId });
+        }
+        notifyObserver(options.onItem, notification);
+      };
       try {
         capacitySlot = await acquireCapacity(options, replyScope, agent, model);
         if (replyScope?.cancelled) throw createStoppedError();
@@ -211,7 +222,7 @@ export function createQqCodexTurnRunner({
               notifyObserver(options.onNotification, message);
             }
             : options.onNotification,
-          onItem: options.onItem,
+          onItem: observeItem,
           onProgress: options.onProgress,
           onRestarted: attempt.onRestarted,
           onSpawn: (child) => {
@@ -246,7 +257,7 @@ export function createQqCodexTurnRunner({
             }, AGENT_LOG_CATEGORY, options.qqEvent ? logContext(options.qqEvent, { spanId: generationId }) : {});
           }
         });
-        recordSuccess({ state, result, options, startedAt, generationId, logger, logContext, agent, model, reasoningEffort });
+        recordSuccess({ state, result, options, startedAt, generationId, logger, logContext, agent, model, reasoningEffort, toolItems });
         logModelOutput(result.finalResponse, {
           event: options.qqEvent,
           taskType: options.taskType,
@@ -271,7 +282,8 @@ export function createQqCodexTurnRunner({
           logContext,
           agent,
           model,
-          reasoningEffort
+          reasoningEffort,
+          toolItems
         });
         if (generationId && stoppedGenerationIds.delete(generationId)) throw createStoppedError();
         if (replyScope?.cancelled && error?.code === "ABORT_ERR") throw createStoppedError();
@@ -302,7 +314,7 @@ export function createQqCodexTurnRunner({
   }
 }
 
-function recordSuccess({ state, result, options, startedAt, generationId, logger, logContext, agent, model, reasoningEffort }) {
+function recordSuccess({ state, result, options, startedAt, generationId, logger, logContext, agent, model, reasoningEffort, toolItems = [] }) {
   const run = recordAgentRun(state, { startedAt, ok: true, error: null });
   const diagnostics = summarizeProcessDiagnostics({ stderr: result.stderr, stdout: "" });
   logger.success(`${agent.logLabel} turn finished`, {
@@ -319,11 +331,42 @@ function recordSuccess({ state, result, options, startedAt, generationId, logger
     deadlineRenewalCount: Number(result.deadlineRenewalCount || 0),
     fusionRecoveryCount: Number(result.fusionRecoveryCount || 0),
     fusionRecoveryReason: result.fusionRecoveryReason || null,
+    ...toolStepFields(toolItems.length ? toolItems : result.items),
     ...diagnosticFields(diagnostics)
   }, AGENT_LOG_CATEGORY, options.qqEvent ? logContext(options.qqEvent, { spanId: generationId }) : {});
 }
 
-function recordFailure({ state, error, options, startedAt, generationId, stoppedGenerationIds, logger, logContext, agent, model, reasoningEffort }) {
+// "ToolSearch → qq_sticker.manage → qq_chat.send ×2" on the turn's own line.
+function toolStepFields(items) {
+  const summary = summarizeAgentTurnTools(items);
+  return summary.toolCallCount > 0 ? summary : {};
+}
+
+// One line per tool the engine ran itself (shell, file edits, web search,
+// Claude Read/Grep/Bash/ToolSearch, Codex image generation…). QQ tools are
+// logged by the Hub's dispatcher with their results instead.
+function logNativeToolItem({ logger, logContext, options, agent, item, generationId }) {
+  if (typeof logger?.info !== "function") return;
+  let activity;
+  try {
+    activity = describeNativeAgentItem(item, { cwd: options.cwd || "" });
+  } catch {
+    activity = null;
+  }
+  if (!activity) return;
+  const failed = /失败|被拒绝/.test(activity.outcome);
+  const durationMs = Number(item.durationMs);
+  logger[failed ? "warn" : "info"]("Agent native tool completed", {
+    activity: `${activity.label} ${activity.line}`.trim(),
+    activityResult: activity.outcome || null,
+    ...buildQqTurnOperationLogDetails(options, failed ? "failed" : "success", agent),
+    operation: "agent.native_tool",
+    toolName: activity.label,
+    ...(Number.isFinite(durationMs) && durationMs > 0 ? { durationMs } : {})
+  }, AGENT_LOG_CATEGORY, options.qqEvent ? logContext(options.qqEvent, { spanId: generationId }) : {});
+}
+
+function recordFailure({ state, error, options, startedAt, generationId, stoppedGenerationIds, logger, logContext, agent, model, reasoningEffort, toolItems = [] }) {
   const stopped = Boolean(generationId && stoppedGenerationIds.has(generationId));
   const run = recordAgentRun(state, {
     startedAt,
@@ -338,7 +381,8 @@ function recordFailure({ state, error, options, startedAt, generationId, stopped
     durationMs: run.lastDurationMs,
     timeoutMs: options.timeout,
     replacementIdleTimeoutMs: normalizedReplacementIdleTimeout(options),
-    qqGenerationId: generationId
+    qqGenerationId: generationId,
+    ...toolStepFields(toolItems)
   };
   if (stopped) {
     logger.warn("QQ Agent generation stopped", details, AGENT_LOG_CATEGORY, options.qqEvent ? logContext(options.qqEvent, { spanId: generationId }) : {});

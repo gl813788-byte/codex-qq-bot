@@ -135,6 +135,16 @@ test("QQ replies are spoken through the send tool unless a deployment keeps the 
   assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_QQ_REPLY_DELIVERY: "stream" }).qqReplyDelivery, "tool");
 });
 
+test("Codex drawing for engines without native image generation is on by default and bounded", () => {
+  const defaults = createEnvironmentConfig({});
+  assert.equal(defaults.codexDrawing, "auto");
+  assert.equal(defaults.codexDrawingTimeoutMs, 240_000);
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_CODEX_DRAWING: " OFF " }).codexDrawing, "off");
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_CODEX_DRAWING: "maybe" }).codexDrawing, "auto");
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_CODEX_DRAWING_TIMEOUT_MS: "5" }).codexDrawingTimeoutMs, 30_000);
+  assert.equal(createEnvironmentConfig({ CODEX_REMOTE_CONTACT_CODEX_DRAWING_TIMEOUT_MS: "9999999" }).codexDrawingTimeoutMs, 600_000);
+});
+
 test("agent host capacity gate settings default to auto and stay bounded", () => {
   const defaults = createEnvironmentConfig({});
   assert.equal(defaults.agentProcessLimit, "auto");

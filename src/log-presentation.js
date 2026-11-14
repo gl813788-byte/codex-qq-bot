@@ -112,7 +112,9 @@ const messageTranslationsZh = Object.freeze({
   "QQ active social request started": "QQ 主动好友/入群申请开始",
   "QQ active social request failed": "QQ 主动好友/入群申请失败",
   "QQ active social request completed": "QQ 主动好友/入群申请完成",
-  "QQ native Agent tool completed": "QQ 原生 Agent 工具调用完成",
+  "QQ native Agent tool completed": "Bot 使用了 QQ 工具",
+  "Agent native tool completed": "Bot 使用了引擎工具",
+  "Codex drawing finished": "Codex 代画完成",
   "QQ cross-session message completed": "QQ 跨会话消息发送完成",
   "QQ chat-history search completed": "QQ 聊天记录搜索完成",
   "QQ archive tool used": "QQ 服务器历史/群文件工具已调用",
@@ -646,6 +648,12 @@ const detailLabelsZh = Object.freeze({
   attachmentCount: "附件数",
   structuredOutput: "是否为结构化输出",
   toolDelivered: "是否由发言工具送达",
+  activity: "做了什么",
+  activityResult: "执行结果",
+  toolSteps: "工具步骤",
+  toolCallCount: "工具调用次数",
+  referenceCount: "参考图数",
+  drawing: "画图方式",
   toolSendCount: "发言工具发送次数",
   steerFailureReason: "活跃轮次引导失败原因",
   fusionRecoveryCount: "融合超时恢复次数",
@@ -933,7 +941,7 @@ const detailValuesZh = Object.freeze({
   },
   operation: {
     list: "列出", search: "搜索", view: "查看", status: "查看状态", add: "添加", edit: "修改", delete: "删除", clear: "清空",
-    "agent.turn": "Agent 回复轮次", "agent.tool": "Agent 工具调用", "agent.capacity": "模型启动余量检查", "session.send": "跨会话发送",
+    "agent.turn": "Agent 回复轮次", "agent.tool": "QQ 工具调用", "agent.native_tool": "引擎工具调用", "agent.codex_drawing": "Codex 代画", "agent.capacity": "模型启动余量检查", "session.send": "跨会话发送",
     "history.search": "聊天记录搜索",
     "administrator.add": "添加 Bot 管理员", "administrator.remove": "移除 Bot 管理员",
     "friend.add": "主动加好友", "group.join": "主动加群", "settings.update": "更新设置", "settings.persist": "配置持久化",
@@ -975,7 +983,8 @@ const detailValuesZh = Object.freeze({
     "invalid-field": "设定不可自改", "invalid-key": "设定项无效", "invalid-value": "取值无效", "not-allowed": "不允许",
     checked: "已检查新版本", deferred: "已推迟", check_failed: "检查失败", apply_failed: "安装失败",
     transcribed: "已转写", partial: "部分转写", command_transcribed: "已转成文字", command_failed: "没能转成文字",
-    "partially-delivered": "部分送达", "no-message": "一条都没发"
+    "partially-delivered": "部分送达", "no-message": "一条都没发",
+    drawn: "已画好", "no-image": "没画出图", notice: "已补发中断提示"
   },
   layer: {
     "short-term": "短期记忆", impression: "印象记忆", knowledge: "长期知识", unified: "统一记忆",
@@ -1170,6 +1179,11 @@ const defaultLogKeyFields = Object.freeze([
   "privateStartShouldStart", "privateStartInterest", "privateStartReason", "privateStartJudgeProvider", "privateStartJudgeModel", "privateStartJudgeDurationMs", "spontaneityRoll"
 ]);
 const logKeyFieldsByCategory = Object.freeze({
+  agent: Object.freeze([
+    "activity", "activityResult", "toolSteps", "toolCallCount", "operation", "outcome", "error", "errorCode", "reason",
+    "durationMs", "model", "reasoningEffort", "modelOutput", "outputChars", "workloadMessageCount", "deadlineRenewalCount",
+    "taskType", "targetScopeId", "actorRole"
+  ]),
   lifecycle: Object.freeze(["outcome", "messageType", "groupId", "triggerMode", "decisionReason", "totalDurationMs", "durationMs", "error"]),
   search: Object.freeze(["query", "reason", "provider", "providers", "durationMs", "resultCount", "error"]),
   interest: Object.freeze([

@@ -5,6 +5,7 @@ import {
   formatQqChatSendResult,
   normalizeQqChatSendArguments,
   QQ_CHAT_SEND_MAX_PER_TURN,
+  resolveQqReplyDelivery,
   summarizeQqChatSendDeliveries,
   toQqAgentOutputValue
 } from "../src/app/qq-chat-send-tool.js";
@@ -161,4 +162,57 @@ test("a turn's sends fold into one receipt-exact reply for the lifecycle", () =>
   assert.deepEqual(summary.send.results.map((result) => result.ok), [true, true, true, false]);
   assert.equal(summary.send.error, "file rejected");
   assert.equal(summarizeQqChatSendDeliveries([]).send, null);
+});
+
+test("only a tool turn in a OneBot conversation speaks through qq_chat.send", () => {
+  assert.equal(resolveQqReplyDelivery({ configured: "tool", toolsEnabled: true, oneBotConversation: true }), "tool");
+  assert.equal(resolveQqReplyDelivery({ configured: "final", toolsEnabled: true, oneBotConversation: true }), "final");
+  assert.equal(resolveQqReplyDelivery({ configured: "tool", toolsEnabled: false, oneBotConversation: true }), "final");
+  assert.equal(resolveQqReplyDelivery({ configured: "tool", toolsEnabled: true, oneBotConversation: false }), "final");
+});
+
+test("finalize ends the session once and hands the lifecycle a stable summary", async () => {
+  const session = createQqChatSendSession({ deliver: async (message) => delivered(message.bubbles) });
+  assert.equal(session.summary, null);
+  assert.equal(session.finalized, false);
+  await session.send({ bubbles: ["等我看看"] });
+  assert.equal(session.deliveredText(), "等我看看");
+  const summary = await session.finalize();
+  assert.equal(session.finalized, true);
+  assert.equal(summary.sendCount, 1);
+  assert.equal(summary.reply, "等我看看");
+  assert.equal(await session.finalize(), summary);
+  assert.equal((await session.send({ bubbles: ["迟到"] })).ok, false);
+});
+
+test("a turn that spoke and then failed sends one plain notice recorded with its sends", async () => {
+  const calls = [];
+  const session = createQqChatSendSession({
+    deliver: async (message, context) => {
+      calls.push({ bubbles: message.bubbles, mode: message.reply.mode, ...context });
+      return delivered(message.bubbles);
+    }
+  });
+  await session.send({ bubbles: ["等我查一下"] });
+  await session.finalize();
+  const summary = await session.appendNotice();
+  assert.equal(summary.sendCount, 2);
+  assert.match(summary.reply, /等我查一下\n\|\|\|\n刚才卡住了/);
+  assert.deepEqual(calls.at(-1), { bubbles: ["刚才卡住了，后面的没弄完，麻烦再叫我一次"], mode: "plain", sendIndex: 1, notice: true });
+  assert.equal(session.summary, summary);
+  // Only once, and never for a turn that said nothing.
+  assert.equal(await session.appendNotice(), null);
+  const quiet = createQqChatSendSession({ deliver: async (message) => delivered(message.bubbles) });
+  await quiet.finalize();
+  assert.equal(await quiet.appendNotice(), null);
+  // A refused or stopped notice leaves the summary as it was.
+  let refuse = false;
+  const refusing = createQqChatSendSession({
+    deliver: async (message) => (refuse ? { refused: true, reason: "stale" } : delivered(message.bubbles))
+  });
+  await refusing.send({ bubbles: ["嗯"] });
+  const before = await refusing.finalize();
+  refuse = true;
+  assert.equal(await refusing.appendNotice(), null);
+  assert.equal(refusing.summary, before);
 });
