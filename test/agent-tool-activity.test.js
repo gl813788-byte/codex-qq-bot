@@ -77,7 +77,9 @@ test("private material stays out of the activity line", () => {
 
 test("common QQ tools say what was looked at or done", () => {
   assert.equal(describe("qq_sticker.manage", { action: "search", query: "无语" }, { ok: true, text: "#3 无语\n#7 白眼\n#3 无语" }).outcome, "找到 2 张");
-  assert.match(describe("qq_media.video", { action: "watch", url: "https://www.bilibili.com/video/BV1xx", from: "0:30" }).target, /www\.bilibili\.com 0:30~结尾/);
+  assert.match(describe("qq_media.analyze", { action: "analyze", url: "https://www.bilibili.com/video/BV1xx", from: "0:30" }).target, /www\.bilibili\.com 0:30~结尾/);
+  assert.equal(describe("qq_media.analyze", { action: "analyze", selector: "video-1" }).verb, "分析媒体·自动");
+  assert.equal(describe("qq_media.analyze", { action: "analyze", selector: "video-1", using: ["speech", "audio_file"] }).verb, "分析媒体·听说的话+导出声音");
   const react = describe("qq_message.act", { action: "react", target: "quoted", emoji: "👍" }, { ok: true, text: "已给被引用的消息贴上表情回应（👍）。" });
   assert.equal(react.verb, "贴表情");
   assert.match(react.target, /被引用的消息 👍/);

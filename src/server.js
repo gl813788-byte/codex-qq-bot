@@ -535,7 +535,8 @@ import {
 import { createWebSearch } from "./web-search.js";
 import { isSupportedImageContentType, readResponseJson, writeResponseBodyToFile } from "./bounded-stream.js";
 import { createQqMediaRuntime } from "./qq-media/media-runtime.js";
-import { collectQqMediaCandidates, formatQqMediaCandidates, isQqParsableMediaUrl, listQqMediaFiles } from "./qq-media/media-candidates.js";
+import { collectQqMediaCandidates, countQqTurnMedia, formatQqMediaCandidates, isQqParsableMediaUrl, listQqMediaFiles, snapshotQqRecentMedia } from "./qq-media/media-candidates.js";
+import { flattenQqMarkdownLinks } from "./qq-markdown-links.js";
 import { createQqMetingLoader } from "./qq-media/music-resolver.js";
 import { buildQqMediaUpdateEnv, createQqMediaUpdater } from "./qq-media/media-updates.js";
 import { createQqMediaServices } from "./app/qq-media-services.js";
@@ -589,11 +590,9 @@ import {
   summarizeQqHumanActionRates
 } from "./qq-human-action-stats.js";
 import {
-  executeQqMediaAudioTool,
+  executeQqMediaAnalyzeTool,
   executeQqMediaBilibiliTool,
   executeQqMediaMusicTool,
-  executeQqMediaParseTool,
-  executeQqMediaVideoTool,
   getQqMediaTurnState
 } from "./app/qq-media-tool.js";
 import { runJsonProcess, runProcess } from "./process-runner.js";
@@ -8242,7 +8241,13 @@ function formatQqBotInternalToolContext(event) {
 
 function getQqMediaCandidatesForEvent(event) {
   if (!event || typeof event !== "object") return { videos: [], audios: [], musics: [] };
-  event.qqMediaCandidates ||= collectQqMediaCandidates(event);
+  if (!event.qqMediaCandidates) {
+    // Earlier videos and voices of the same conversation stay openable for
+    // follow-ups, within the same window as earlier pictures.
+    const scopeId = getQqMemoryScopeId(event);
+    const recentEntries = state.qq.memory.enabled && scopeId ? state.qq.memory.recentMessages[scopeId] || [] : [];
+    event.qqMediaCandidates = collectQqMediaCandidates(event, { recentEntries });
+  }
   return event.qqMediaCandidates;
 }
 
@@ -8286,9 +8291,7 @@ async function executeQqMediaNativeTool(call, event, replyScope) {
   };
   const startedAt = Date.now();
   const executors = {
-    parse: executeQqMediaParseTool,
-    video: executeQqMediaVideoTool,
-    audio: executeQqMediaAudioTool,
+    analyze: executeQqMediaAnalyzeTool,
     music: executeQqMediaMusicTool,
     bilibili: executeQqMediaBilibiliTool
   };
@@ -11188,9 +11191,9 @@ function cleanCodexReply(text) {
 }
 
 function normalizeVisibleQqReply(reply, event = {}) {
-  let text = stripObsoleteQqControlMarkers(
+  let text = flattenQqMarkdownLinks(stripObsoleteQqControlMarkers(
     stripQqKnowledgeMarkers(stripQqConversationMemoryMarkers(reply))
-  )
+  ))
     .replace(/\[\[qq_context_more\]\]/g, "")
     .replace(/\[\[qq_silent\]\]/g, "")
     .replace(/\n{3,}/g, "\n\n")
@@ -11319,15 +11322,18 @@ async function buildModelReply(event, { replyScope = null } = {}) {
     : "";
   event.qqMediaToolStatus = await qqMediaRuntime.status().catch(() => null);
   const mediaCandidates = getQqMediaCandidatesForEvent(event);
+  // Only media that came with this turn counts as new; earlier videos stay
+  // openable but are not suggested again.
+  const turnMedia = countQqTurnMedia(mediaCandidates);
   const heardCurrentVoices = (event.qqVoiceTranscripts || []).filter((item) => item.ok).length;
   const humanActionPlan = state.qq.enhancer.enabled && !event.qqPrivateProactive
     ? buildQqHumanActionPlan(event, humanBehaviorPlan, {
       actionRates: summarizeQqHumanActionRates(state.qq.humanActionStats, scopeId),
       media: {
-        videos: mediaCandidates.videos.length + listQqMediaFiles(mediaCandidates, "video").length,
-        audios: mediaCandidates.audios.length,
-        unheardAudios: Math.max(0, mediaCandidates.audios.length - heardCurrentVoices),
-        musics: (mediaCandidates.musics || []).length + listQqMediaFiles(mediaCandidates, "audio").length
+        videos: turnMedia.videos.length + listQqMediaFiles(mediaCandidates, "video").length,
+        audios: turnMedia.audios.length,
+        unheardAudios: Math.max(0, turnMedia.audios.length - heardCurrentVoices),
+        musics: turnMedia.musics.length + listQqMediaFiles(mediaCandidates, "audio").length
       },
       mediaAvailable: {
         video: Boolean(event.qqMediaToolStatus?.video),
@@ -13093,7 +13099,8 @@ async function rememberQqGroupMessage(event) {
   await attachQqKnowledgeIdentity(event);
   const text = compactMemoryText(normalizeQqDisplayText(stripMentionText(event.text) || event.text || ""));
   const images = snapshotQqContextImages(event.images, { limit: 12 });
-  if (!text && images.length === 0 && !event.hasAtSegment && !event.hasReplySegment) return;
+  const media = snapshotQqRecentMedia(event.contentContext);
+  if (!text && images.length === 0 && !media && !event.hasAtSegment && !event.hasReplySegment) return;
   const entry = {
     at: new Date().toISOString(),
     messageId: event.raw?.message_id == null ? undefined : String(event.raw.message_id),
@@ -13108,6 +13115,7 @@ async function rememberQqGroupMessage(event) {
     isBotAdmin: Boolean(event.isBotAdmin),
     text,
     ...(images.length > 0 ? { images } : {}),
+    ...(media ? { media } : {}),
     atTargets: event.atTargets || [],
     atMentions: mergeQqMentionIdentities(event.atMentions || []),
     replyMessageId: event.replyMessageId,

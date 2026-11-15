@@ -1,6 +1,6 @@
 import { constants as fsConstants } from "node:fs";
 import { access, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 // Optional local media understanding: the dsh-video-storyboard CLI for
 // videos, a SenseVoice/CED worker for audio (plus essentia.js tempo/key
@@ -367,6 +367,35 @@ export function createQqMediaRuntime({
     return parseQqStoryboardOutput(result.stdout, { outputDir });
   }
 
+  // The sound track as its own audio file (AAC in .m4a through ffmpeg's
+  // built-in encoder), so the Bot can hand it over as a QQ file. Light next
+  // to recognition, but still one bounded media job behind the memory gate.
+  async function extractAudio(inputPath, { outputPath, from = 0, to = 0, maxSeconds = maxVideoSeconds, signal } = {}) {
+    const tools = await status();
+    if (!tools.ffmpeg) throw mediaError("MEDIA_UNAVAILABLE", `本机没有 ffmpeg，导出不了声音（安装：${QQ_MEDIA_INSTALL_HINT}）`);
+    if (!outputPath) throw mediaError("MEDIA_WORKSPACE", "没有导出位置");
+    await mkdir(dirname(outputPath), { recursive: true });
+    const start = Math.max(0, Number(from) || 0);
+    const end = Number(to) > start ? Number(to) : 0;
+    const limit = Math.max(1, Math.floor(Number(maxSeconds) || maxVideoSeconds));
+    const length = Math.max(1, Math.min(limit, end ? Math.ceil(end - start) : limit));
+    const args = [
+      "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+      ...(start > 0 ? ["-ss", String(start)] : []),
+      "-i", inputPath,
+      "-t", String(length),
+      "-map", "0:a:0", "-vn", "-sn", "-dn",
+      "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+      outputPath
+    ];
+    await runJob(() => runProcess(tools.ffmpeg, args, {
+      timeoutMs: jobTimeoutMs, maxOutputBytes: 256 * 1024, signal, env: childEnv(), killProcessGroup: true
+    }));
+    const info = await stat(outputPath).catch(() => null);
+    if (!info?.isFile() || info.size <= 0) throw mediaError("MEDIA_NO_AUDIO", "没有导出声音");
+    return { path: outputPath, bytes: info.size, seconds: length };
+  }
+
   async function writeTranscriptFile(outputDir, segments = []) {
     await mkdir(outputDir, { recursive: true });
     const path = join(outputDir, "transcript.json");
@@ -395,6 +424,7 @@ export function createQqMediaRuntime({
     transcribe,
     analyze,
     storyboard,
+    extractAudio,
     writeTranscriptFile,
     writeBilibiliSubtitleFile,
     get busy() {
@@ -427,7 +457,7 @@ export function parseQqStoryboardOutput(stdout = "", { outputDir = "" } = {}) {
       .join("\n")
       // Local paths stay in the Hub; the model cites cells, not files.
       .replace(/\bpath="[^"]*"/g, 'path="video"')
-      .replace(/video_zoom/g, "qq_media.video(action=watch, from, to)")
+      .replace(/video_zoom/g, "qq_media.analyze(using=[frames], from, to)")
       .trim()
     : "";
   return { sheets, summary, manifest: manifest.slice(0, 12_000) };
