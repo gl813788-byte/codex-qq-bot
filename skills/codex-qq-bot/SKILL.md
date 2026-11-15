@@ -229,7 +229,9 @@ refactor with a behavior change.
   Codex dynamic tool) and has its own per-turn limit (12). The final output is
   then private (`qqAgentToolModeOutputSchema`: innerThought, sent/silent,
   affinity, mood); the lifecycle records all receipts as one exchange and
-  never resends. Native commentary is only logged. Repeats of delivered
+  never resends. Native commentary is only logged. Markdown links are
+  flattened to "text URL" before delivery (`src/qq-markdown-links.js`, code
+  spans untouched) because QQ shows them raw. Repeats of delivered
   content, late calls, and stale cold/private outreach sends are refused; a
   turn that spoke and then failed sends one "rest did not finish" notice.
   `final` restores the single structured reply; turns without QQ tools,
@@ -350,9 +352,16 @@ refactor with a behavior change.
   safe-fetch policy, into the task output directory; keep the signature/size
   checks and the inspect-before-send guidance. Sending still goes through
   validated structured attachments.
-- `qq_media` (parse/video/music/audio/bilibili) is bound to the original
-  conversation. Sources are turn selectors (`video-N`/`music-N`/`audio-N` from
-  the message, quote and forwarded records), `bili-N`/`song-N` results from
+- `qq_media` (analyze/music search/bilibili) is bound to the original
+  conversation. `analyze` merged the old parse/video/audio/music-listen
+  tools: `using` (info/frames/speech/voice/music/subtitle/audio_file) is the
+  Bot's choice, empty means automatic by media kind (video: frames+speech,
+  voice: speech, song: music, audio file: music with song tags/lyrics or
+  >= 90 s, else speech); a video's sound works without frames, and
+  `audio_file` writes an .m4a into the turn output directory. Sources are
+  turn selectors (`video-N`/`music-N`/`audio-N` from the message, quote,
+  forwarded records and, for QQ videos/voices, earlier messages inside the
+  image window: 5 minutes or the latest 20), `bili-N`/`song-N` results from
   this turn, or video links (Bilibili/Douyin/Kuaishou/YouTube/AcFun/Xigua/
   Weibo/Xiaohongshu/Zhihu) and song links (NetEase/QQ Music/Kugou/Kuwo) that
   appeared in recent messages; never arbitrary hosts (yt-dlp must not reach
@@ -363,7 +372,7 @@ refactor with a behavior change.
   ffprobe, not the name, decides audio/video, and cover art is not video. Songs resolve through Meting (fixed platform API hosts only);
   song audio is downloaded only from the platforms' media hosts through the
   safe-fetch policy, and a music card's stream URL never enters visible text.
-  `parse` is metadata only and never counts as watching or listening. One
+  `info` is metadata only and never counts as watching or listening. One
   media job runs at a time (two queued), every child has a deadline and
   output cap, and a job is refused below
   `CODEX_REMOTE_CONTACT_MEDIA_MIN_AVAILABLE_MB`. Storyboard sheets are

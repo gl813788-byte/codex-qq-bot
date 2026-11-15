@@ -231,7 +231,7 @@ test("a shared song suggests listening to it like a person taps a music card", (
   const plan = buildQqHumanActionPlan(event, { mode: "shared_content" }, { media: { videos: 0, audios: 0, unheardAudios: 0, musics: 1 }, mediaAvailable: { music: true } });
   assert.equal(plan.musicChance, 0.8);
   const text = formatQqHumanActionContext({ ...plan, actions: ["listen_music"] });
-  assert.match(text, /qq_media\.music listen/);
+  assert.match(text, /像人一样点开听（qq_media\.analyze）/);
   const offline = buildQqHumanActionPlan(event, { mode: "shared_content" }, { media: { musics: 1 }, mediaAvailable: { music: false } });
   assert.equal(offline.musicChance, 0);
   assert.ok(!offline.actions.includes("listen_music"));

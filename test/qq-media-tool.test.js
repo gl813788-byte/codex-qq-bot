@@ -5,11 +5,11 @@ import { join } from "node:path";
 import test from "node:test";
 import { createQqMediaRuntime, inspectQqMediaTools, normalizeQqProbe, parseQqStoryboardOutput } from "../src/qq-media/media-runtime.js";
 import {
-  executeQqMediaAudioTool,
+  chooseQqMediaAutoModes,
+  executeQqMediaAnalyzeTool,
   executeQqMediaBilibiliTool,
   executeQqMediaMusicTool,
-  executeQqMediaParseTool,
-  executeQqMediaVideoTool,
+  normalizeQqMediaAnalyzeModes,
   getQqMediaTurnState,
   resolveQqWorkspaceMediaFile
 } from "../src/app/qq-media-tool.js";
@@ -43,7 +43,7 @@ test("storyboard output parsing keeps sheets in the output directory and hides l
   assert.equal(parsed.summary, "4 帧 → 1 张");
   assert.match(parsed.manifest, /path="video"/);
   assert.doesNotMatch(parsed.manifest, /\/root\/video|evidence\.json|video_zoom/);
-  assert.match(parsed.manifest, /qq_media\.video\(action=watch, from, to\)/);
+  assert.match(parsed.manifest, /qq_media\.analyze\(using=\[frames\], from, to\)/);
 });
 
 test("media tool inspection reports missing components without failing", async () => {
@@ -113,7 +113,7 @@ test("link downloads use bounded yt-dlp arguments", async () => {
 
 function fakeRuntime(calls, { video = true, audio = true } = {}) {
   return {
-    status: async () => ({ video, audio, tagging: true }),
+    status: async () => ({ video, audio, analysis: video || audio, tagging: true }),
     probe: async () => ({ durationSeconds: 600, hasAudio: true, hasVideo: true }),
     downloadLink: async (url, { outputDir }) => {
       calls.push(["download", url]);
@@ -141,7 +141,7 @@ test("watching a Bilibili card returns storyboard pictures, transcript, sound an
   const calls = [];
   const event = {};
   try {
-    const result = await executeQqMediaVideoTool({ action: "watch", selector: "video-1" }, {
+    const result = await executeQqMediaAnalyzeTool({ action: "analyze", selector: "video-1" }, {
       runtime: fakeRuntime(calls),
       bilibili: {
         resolve: async () => ({ bvid: "BV1YCxq6fE6b" }),
@@ -170,25 +170,27 @@ test("watching a Bilibili card returns storyboard pictures, transcript, sound an
 
 test("video links must come from this conversation and the tool admits missing components", async () => {
   const state = getQqMediaTurnState({});
-  const notInstalled = await executeQqMediaVideoTool({ action: "watch", selector: "video-1" }, {
-    runtime: fakeRuntime([], { video: false }), candidates: { videos: [], audios: [] }, state
+  const notInstalled = await executeQqMediaAnalyzeTool({ action: "analyze", selector: "video-1" }, {
+    runtime: fakeRuntime([], { video: false, audio: false }),
+    candidates: { videos: [{ selector: "video-1", kind: "link", platform: "bilibili", url: "https://b23.tv/x" }], audios: [] },
+    state
   });
   assert.equal(notInstalled.ok, false);
   assert.match(notInstalled.error, /没装视频分镜组件/);
-  const foreign = await executeQqMediaVideoTool({ action: "watch", url: "https://www.bilibili.com/video/BV1w5xh6sEEz" }, {
+  const foreign = await executeQqMediaAnalyzeTool({ action: "analyze", url: "https://www.bilibili.com/video/BV1w5xh6sEEz" }, {
     runtime: fakeRuntime([]), candidates: { videos: [], audios: [] }, state, isUrlInConversation: () => false
   });
   assert.match(foreign.error, /没有出现在本会话里/);
-  const loopback = await executeQqMediaVideoTool({ action: "watch", url: "http://127.0.0.1:3000/x" }, {
+  const loopback = await executeQqMediaAnalyzeTool({ action: "analyze", url: "http://127.0.0.1:3000/x" }, {
     runtime: fakeRuntime([]), candidates: { videos: [], audios: [] }, state, isUrlInConversation: () => true
   });
-  assert.match(loopback.error, /只能看 B站/);
+  assert.match(loopback.error, /只能打开 B站/);
 });
 
 test("listening to a voice clip returns a timestamped transcript", async () => {
   const taskWorkspace = await workspace();
   try {
-    const result = await executeQqMediaAudioTool({ action: "listen", selector: "audio-1" }, {
+    const result = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["speech"], selector: "audio-1" }, {
       runtime: fakeRuntime([]),
       fetchVoice: async (candidate, { outputDir }) => join(outputDir, "voice.wav"),
       candidates: { videos: [], audios: [{ selector: "audio-1", file: "a.amr" }] },
@@ -296,7 +298,7 @@ function musicRuntime(calls, { durationSeconds = 265, analysis = {} } = {}) {
 test("parse names a shared song with its facts and first lyric lines without listening", async () => {
   const calls = [];
   const state = getQqMediaTurnState({});
-  const result = await executeQqMediaParseTool({ selector: "music-1" }, {
+  const result = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["info"], selector: "music-1" }, {
     runtime: musicRuntime(calls),
     music: fakeMusic(calls),
     candidates: { videos: [], audios: [], musics: [{ selector: "music-1", kind: "music_card", platform: "kugou", title: "不死鸟", artist: "霍尊", url: "https://m.kugou.com/share/?hash=x" }] },
@@ -307,13 +309,13 @@ test("parse names a shared song with its facts and first lyric lines without lis
   assert.match(result.reply, /\[0:12\] 火焰中重生/);
   assert.match(result.reply, /还没听过/);
   // A second parse of the same card reuses the resolution.
-  await executeQqMediaParseTool({ selector: "music-1" }, { runtime: musicRuntime(calls), music: fakeMusic(calls), candidates: { musics: [{ selector: "music-1", title: "不死鸟" }] }, state });
+  await executeQqMediaAnalyzeTool({ action: "analyze", using: ["info"], selector: "music-1" }, { runtime: musicRuntime(calls), music: fakeMusic(calls), candidates: { musics: [{ selector: "music-1", title: "不死鸟" }] }, state });
   assert.equal(calls.filter((call) => call[0] === "resolve").length, 1);
 });
 
 test("parse reads a video link's facts and background music through yt-dlp", async () => {
   const calls = [];
-  const result = await executeQqMediaParseTool({ selector: "video-1" }, {
+  const result = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["info"], selector: "video-1" }, {
     runtime: musicRuntime(calls),
     candidates: { videos: [{ selector: "video-1", kind: "link", platform: "douyin", url: "https://v.douyin.com/abc/" }], audios: [], musics: [] },
     state: getQqMediaTurnState({})
@@ -323,7 +325,7 @@ test("parse reads a video link's facts and background music through yt-dlp", asy
   assert.match(result.reply, /12\.0万播放 · 3000赞 · 12评论/);
   assert.match(result.reply, /背景音乐（平台标注）：原声 - 某人/);
   assert.deepEqual(calls, [["inspect", "https://v.douyin.com/abc/"]]);
-  const foreign = await executeQqMediaParseTool({ url: "https://music.163.com/song?id=7" }, {
+  const foreign = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["info"], url: "https://music.163.com/song?id=7" }, {
     runtime: musicRuntime([]), candidates: { musics: [] }, state: getQqMediaTurnState({}), isUrlInConversation: () => false
   });
   assert.match(foreign.error, /没有出现在本会话里/);
@@ -333,7 +335,7 @@ test("listening to a song downloads it, analyzes the chorus and returns lyrics w
   const taskWorkspace = await workspace();
   const calls = [];
   try {
-    const result = await executeQqMediaMusicTool({ action: "listen", selector: "music-1" }, {
+    const result = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["music"], selector: "music-1" }, {
       runtime: musicRuntime(calls),
       music: fakeMusic(calls, { sources: ["https://evil.example/a.mp3", "https://sharefs.kugou.com/a.mp3"] }),
       downloadSong: async (url, { outputDir }) => {
@@ -365,7 +367,7 @@ test("listening to a song downloads it, analyzes the chorus and returns lyrics w
 test("a song without playable audio is admitted, and a short download is called a preview", async () => {
   const taskWorkspace = await workspace();
   try {
-    const none = await executeQqMediaMusicTool({ action: "listen", selector: "music-1" }, {
+    const none = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["music"], selector: "music-1" }, {
       runtime: musicRuntime([]),
       music: fakeMusic([], { sources: [], song: { ...parsedSong, vip: true } }),
       downloadSong: async () => { throw new Error("unused"); },
@@ -376,7 +378,7 @@ test("a song without playable audio is admitted, and a short download is called 
     assert.equal(none.ok, true);
     assert.match(none.reply, /没能下载到 《不死鸟》- 霍尊 的音频（会员\/版权限制），所以你其实没听到/);
     assert.match(none.reply, /\[0:12\] 火焰中重生/);
-    const preview = await executeQqMediaMusicTool({ action: "listen", selector: "music-1" }, {
+    const preview = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["music"], selector: "music-1" }, {
       runtime: musicRuntime([], { durationSeconds: 30 }),
       music: fakeMusic([]),
       downloadSong: async (url, { outputDir }) => join(outputDir, "song.mp3"),
@@ -405,7 +407,7 @@ test("song search hands out song-N and the music inside a video is guessed from 
       await mkdir(outputDir, { recursive: true });
       return { path: join(outputDir, "video.mp4") };
     };
-    const heard = await executeQqMediaMusicTool({ action: "listen", selector: "video-1" }, {
+    const heard = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["music"], selector: "video-1" }, {
       runtime,
       music: fakeMusic(calls),
       candidates: { videos: [{ selector: "video-1", kind: "link", platform: "bilibili", url: "https://b23.tv/x" }], audios: [], musics: [] },
@@ -425,7 +427,7 @@ test("song search hands out song-N and the music inside a video is guessed from 
 test("voice analysis adds pitch, speaking rate and loudness to the transcript", async () => {
   const taskWorkspace = await workspace();
   try {
-    const result = await executeQqMediaAudioTool({ action: "analyze", selector: "audio-1" }, {
+    const result = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["voice"], selector: "audio-1" }, {
       runtime: {
         ...musicRuntime([]),
         analyze: async (path, options) => {
@@ -548,9 +550,9 @@ test("a quoted QQ song file (file-N) is downloaded once and really listened to a
     taskWorkspace
   };
   try {
-    const listed = await executeQqMediaMusicTool({ action: "list" }, deps);
+    const listed = await executeQqMediaAnalyzeTool({ action: "list" }, deps);
     assert.match(listed.reply, /file-1：音频文件「晴天\.flac」/);
-    const result = await executeQqMediaMusicTool({ action: "listen", selector: "FILE-1" }, deps);
+    const result = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["music"], selector: "FILE-1" }, deps);
     assert.equal(result.ok, true);
     assert.match(result.reply, /你真的把 file-1「晴天\.flac」放来听了，0:00-4:29/);
     assert.match(result.reply, /FLAC 音频｜时长 4:29｜44\.1kHz 立体声｜约 912kbps｜带封面/);
@@ -563,7 +565,7 @@ test("a quoted QQ song file (file-N) is downloaded once and really listened to a
     assert.deepEqual(calls.find((call) => call[0] === "analyze"), ["analyze", "music", 0, 269, false, 900]);
     assert.equal(calls.some((call) => call[0] === "lyrics"), false);
     assert.equal(state.heard.at(-1).title, "晴天");
-    await executeQqMediaAudioTool({ action: "listen", selector: "file-1" }, deps);
+    await executeQqMediaAnalyzeTool({ action: "analyze", using: ["speech"], selector: "file-1" }, deps);
     assert.deepEqual(fetched, ["file-1"]);
   } finally {
     await rm(taskWorkspace.root, { recursive: true, force: true });
@@ -585,18 +587,18 @@ test("the Bot may pick any file inside the turn workspace by path, and nothing o
     await writeFile(join(taskWorkspace.inputDir, "empty.mp3"), "");
     const deps = () => ({ runtime: fileRuntime(calls, { tags: {}, lyrics: "" }), candidates: { files: [] }, state: getQqMediaTurnState({}), taskWorkspace });
 
-    const relative = await executeQqMediaAudioTool({ action: "listen", path: "output/unzipped/会议.m4a" }, deps());
+    const relative = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["speech"], path: "output/unzipped/会议.m4a" }, deps());
     assert.equal(relative.ok, true);
     assert.match(relative.reply, /你听了 「会议\.m4a」/);
     assert.match(relative.reply, /会议开始/);
-    const absolute = await executeQqMediaParseTool({ path: inside }, deps());
+    const absolute = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["info"], path: inside }, deps());
     assert.equal(absolute.ok, true);
     assert.match(absolute.reply, /解析结果（「会议\.m4a」）/);
     assert.match(absolute.reply, /文件里没有歌名\/歌手标签/);
     assert.match(absolute.reply, /path=同一个路径/);
 
     for (const path of [secret, "input/link.mp3", "../../etc/passwd", "input/empty.mp3", "input", "input/missing.mp3"]) {
-      const refused = await executeQqMediaMusicTool({ action: "listen", path }, deps());
+      const refused = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["music"], path }, deps());
       assert.equal(refused.ok, false, path);
       assert.match(refused.error, /只能打开本轮工作区|找不到这个文件|文件是空的|不是普通文件/, path);
       assert.doesNotMatch(refused.error, /qq-media-outside-|secret/, path);
@@ -622,15 +624,15 @@ test("file sources are probed: unknown file-N, audio-only watches and non-media 
       state: getQqMediaTurnState({}),
       taskWorkspace
     });
-    const unknown = await executeQqMediaAudioTool({ action: "listen", selector: "file-9" }, deps());
+    const unknown = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["speech"], selector: "file-9" }, deps());
     assert.match(unknown.error, /不在本轮消息或引用消息的文件里/);
-    const watch = await executeQqMediaVideoTool({ action: "watch", selector: "file-1" }, deps());
-    assert.equal(watch.ok, false);
-    assert.match(watch.error, /没有画面，是音频；听歌用 qq_media\.music/);
-    const notMedia = await executeQqMediaParseTool({ selector: "file-1" }, deps({ hasAudio: false, hasVideo: false }));
+    const frames = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["frames"], selector: "file-1" }, deps());
+    assert.equal(frames.ok, false);
+    assert.match(frames.error, /是音频，用不了 frames；可以用 info、speech、voice、music、audio_file/);
+    const notMedia = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["info"], selector: "file-1" }, deps({ hasAudio: false, hasVideo: false }));
     assert.equal(notMedia.ok, false);
     assert.match(notMedia.error, /没有能识别的音频或视频.*\.ncm/);
-    const silent = await executeQqMediaMusicTool({ action: "listen", selector: "file-1" }, deps({ hasAudio: false }));
+    const silent = await executeQqMediaAnalyzeTool({ action: "analyze", using: ["music"], selector: "file-1" }, deps({ hasAudio: false, hasVideo: true }));
     assert.match(silent.error, /file-1「晴天\.flac」 里没有声音轨/);
   } finally {
     await rm(taskWorkspace.root, { recursive: true, force: true });
@@ -641,7 +643,7 @@ test("a video sent as a QQ file is watched from its file-N", async () => {
   const taskWorkspace = await workspace();
   const calls = [];
   try {
-    const result = await executeQqMediaVideoTool({ action: "watch", selector: "file-2" }, {
+    const result = await executeQqMediaAnalyzeTool({ action: "analyze", selector: "file-2" }, {
       runtime: fakeRuntime(calls),
       fetchInboundFile: async (selector) => {
         const path = join(taskWorkspace.inputDir, `${selector}-clip.mp4`);

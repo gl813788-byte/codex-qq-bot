@@ -79,7 +79,7 @@ test("pokes, shared videos, unheard voices and new stickers suggest human action
   assert.ok(plan.actions.includes("listen_audio"));
   const text = formatQqHumanActionContext({ ...plan, actions: ["poke_back", "watch_video", "listen_audio", "save_sticker"] });
   assert.match(text, /拍回去/);
-  assert.match(text, /qq_media\.video watch/);
+  assert.match(text, /先像人一样点开看（qq_media\.analyze）/);
   assert.match(text, /工具返回成功后才算做了/);
   const withoutTools = buildQqHumanActionPlan(groupEvent(), { mode: "shared_content" }, { media: { videos: 2, audios: 0 }, mediaAvailable: { video: false } });
   assert.equal(withoutTools.watchChance, 0);

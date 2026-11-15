@@ -202,18 +202,13 @@ const QQ_TOOL_DESCRIBERS = Object.freeze({
     verb: args.action === "download" ? "下载网络图片" : "搜网络图片",
     target: args.action === "download" ? args.selector || "" : quote(args.query, 40)
   }),
-  "qq_media.parse": (args) => ({ verb: "解析分享内容", target: mediaSource(args) }),
-  "qq_media.video": (args) => ({
-    verb: args.action === "list" ? "列可看的视频" : "看视频",
+  "qq_media.analyze": (args) => ({
+    verb: args.action === "list" ? "列可看可听的媒体" : mediaAnalyzeVerb(args.using),
     target: join([mediaSource(args), timeRange(args)])
   }),
-  "qq_media.audio": (args) => ({
-    verb: { list: "列可听的语音", listen: "听语音", analyze: "分析语气" }[args.action] || "听语音",
-    target: mediaSource(args)
-  }),
   "qq_media.music": (args) => ({
-    verb: { list: "列可听的歌", search: "搜歌", listen: "听歌" }[args.action] || "听歌",
-    target: join([args.action === "search" ? quote(args.query, 30) : mediaSource(args), args.byLyrics ? "按歌词" : "", args.platform, timeRange(args)])
+    verb: "搜歌",
+    target: join([quote(args.query, 30), args.byLyrics ? "按歌词" : "", args.platform])
   }),
   "qq_media.bilibili": (args) => ({
     verb: `逛 B站·${actionLabel(args.action) || "热门"}`,
@@ -294,6 +289,15 @@ const QQ_TOOL_DESCRIBERS = Object.freeze({
     };
   }
 });
+
+const mediaModeLabels = Object.freeze({ info: "解析", frames: "看画面", speech: "听说的话", voice: "听声音特点", music: "听音乐", subtitle: "读字幕", audio_file: "导出声音" });
+
+function mediaAnalyzeVerb(using) {
+  const modes = (Array.isArray(using) ? using : String(using || "").split(/[\s,，、|]+/))
+    .map((mode) => mediaModeLabels[String(mode || "").trim().toLowerCase()])
+    .filter(Boolean);
+  return modes.length ? `分析媒体·${[...new Set(modes)].join("+")}` : "分析媒体·自动";
+}
 
 function mediaSource(args = {}) {
   if (args.selector) return String(args.selector);

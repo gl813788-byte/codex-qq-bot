@@ -90,8 +90,8 @@ export function consumeQqLifeSocialAllowance(lifeState, kind, { limits = {}, now
 
 const kindGuides = Object.freeze({
   surf: "像平时上网冲浪一样随手逛：先看看 B站热门（qq_media.bilibili popular），再用原生 Web Search 或 qq_search 看看今天大家在聊什么（热搜、新闻、新番新游戏、有意思的帖子），跟着好奇心点开 2-4 个真的看完；真想看的视频可以用 qq_media.video 点开。记下好玩的发现和你的反应。",
-  video: "用 qq_media.bilibili（popular 看热门，或 search 搜你计划里的主题）挑 1-2 个你真感兴趣的，用 qq_media.video 真的看；记下看了什么、哪里好笑/有意思/无聊。",
-  music: "用 qq_media.music(action=search) 找计划里的歌、歌手或风格，挑 1-2 首用 qq_media.music(action=listen, selector=song-N) 真的听；记下歌名、歌手、平台和听感（哪段好听、像什么心情）。",
+  video: "用 qq_media.bilibili（popular 看热门，或 search 搜你计划里的主题）挑 1-2 个你真感兴趣的，用 qq_media.analyze(selector=bili-N) 真的看；记下看了什么、哪里好笑/有意思/无聊。",
+  music: "用 qq_media.music(action=search) 找计划里的歌、歌手或风格，挑 1-2 首用 qq_media.analyze(selector=song-N) 真的听；记下歌名、歌手、平台和听感（哪段好听、像什么心情）。",
   read: "用原生 Web Search 或 qq_search 找计划里想读的东西（一篇长文、科普、网络小说或漫画的介绍和评价、百科词条），真的读完 1-2 个来源，记下读了什么、哪里有意思、你怎么想。",
   browse: "用原生 Web Search 或 qq_search 找你计划里的东西，读 1-3 个真实来源，记下看到了什么、你怎么想。",
   learn: "认真查一个你好奇的问题，读原始资料，弄懂后用自己的话记下来；值得长期记住的事实可以写进 qq_knowledge（标题稳定、写清来源和日期）。",

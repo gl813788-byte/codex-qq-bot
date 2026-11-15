@@ -85,7 +85,7 @@ test("media candidates come from the message, its quote and chat records with tu
   assert.equal(findQqMediaCandidate(candidates, "VIDEO-2").url, "https://www.bilibili.com/video/BV1w5xh6sEEz");
   const text = formatQqMediaCandidates(candidates, { available: { video: true, audio: false } });
   assert.match(text, /video-1：B站视频链接《30万人/);
-  assert.match(text, /qq_media\.video\(action=watch/);
+  assert.match(text, /qq_media\.analyze\(selector\)/);
   assert.match(text, /还没装语音识别组件/);
 });
 

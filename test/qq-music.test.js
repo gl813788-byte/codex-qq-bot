@@ -206,8 +206,8 @@ test("music cards keep their stream URL out of the visible text and become music
   assert.equal(candidates.videos[0].platform, "douyin");
   const text = formatQqMediaCandidates(candidates, { available: { video: true, audio: true, music: true } });
   assert.match(text, /music-1：酷狗音乐音乐卡片《不死鸟》 - 霍尊（当前消息，甲）/);
-  assert.match(text, /qq_media\.parse\(selector\)/);
-  assert.match(text, /qq_media\.music\(action=listen, selector\)/);
+  assert.match(text, /qq_media\.analyze\(selector\)/);
+  assert.match(text, /info 只看是什么/);
   const offline = formatQqMediaCandidates(candidates, { available: { music: false } });
   assert.match(offline, /还没装音乐解析组件/);
 });

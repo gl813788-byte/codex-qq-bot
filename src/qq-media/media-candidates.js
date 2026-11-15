@@ -1,10 +1,14 @@
+import { qqContextImageMaxAgeMs, qqContextImageRecentMessages } from "../qq-enhancer/context-images.js";
 import { collectQqInboundFileCandidates } from "../qq-inbound-files.js";
 import { classifyQqSharedContent, extractQqUrls } from "../qq-message-content.js";
 import { QQ_MUSIC_SITES, isQqMusicShareUrl } from "./music-links.js";
 
 // Videos, songs and voice clips a turn can watch, parse or hear. Candidates
-// come only from the triggering message, its quote and expanded chat records,
-// each with a turn-scoped selector (video-1, music-1, audio-1) so the model
+// come from the triggering message, its quote and expanded chat records, and
+// QQ videos/voices of earlier messages in the same conversation that are
+// still inside the image window (five minutes or the latest 20 messages), so
+// a follow-up such as "什么游戏" can look at the video again. Each gets a
+// turn-scoped selector (video-1, music-1, audio-1) so the model
 // never passes raw paths or signed QQ URLs. Platform links are limited to
 // known public video and music sites because the downloaders must never be
 // pointed at arbitrary hosts. QQ files in the message or its quote keep the
@@ -52,7 +56,32 @@ function splitMusicDescription(value) {
   return { artist: String(artist || "").trim().slice(0, 80), album: String(album || "").trim().slice(0, 80) };
 }
 
-export function collectQqMediaCandidates(event = {}) {
+// The fetchable part of a message's QQ videos and voices, kept with the
+// conversation's recent messages. Local paths are left out.
+export function snapshotQqRecentMedia(contentContext) {
+  const media = contentContext?.media;
+  if (!media || typeof media !== "object") return null;
+  const pick = (items) => (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      file: String(item?.file || "").slice(0, 300),
+      url: /^https?:\/\//i.test(String(item?.url || "")) ? String(item.url).slice(0, 2000) : "",
+      name: String(item?.name || "").slice(0, 120),
+      sizeBytes: Number.isFinite(Number(item?.sizeBytes)) && item?.sizeBytes !== null ? Number(item.sizeBytes) : null
+    }))
+    .filter((item) => item.file || item.url)
+    .slice(0, 4);
+  const videos = pick(media.videos);
+  const audios = pick(media.audios);
+  return videos.length || audios.length ? { videos, audios } : null;
+}
+
+function isRecentEntryEligible(entry, index, length, now) {
+  if (index >= length - qqContextImageRecentMessages) return true;
+  const at = Date.parse(entry?.at || "");
+  return Number.isFinite(at) && at >= now - qqContextImageMaxAgeMs;
+}
+
+export function collectQqMediaCandidates(event = {}, { recentEntries = [], now = Date.now() } = {}) {
   const videos = [];
   const audios = [];
   const musics = [];
@@ -122,6 +151,21 @@ export function collectQqMediaCandidates(event = {}) {
       addVideo({ kind: "link", source, senderName, platform: classifyQqSharedContent({ url }).platform, title: "", url });
     }
   }
+  // Earlier QQ videos and voices of this conversation, newest first.
+  const recent = Array.isArray(recentEntries) ? recentEntries : [];
+  const currentId = event.raw?.message_id == null ? "" : String(event.raw.message_id);
+  for (let index = recent.length - 1; index >= 0; index -= 1) {
+    const entry = recent[index];
+    if (!entry?.media || entry.isAssistant || !isRecentEntryEligible(entry, index, recent.length, now)) continue;
+    if (currentId && String(entry.messageId || "") === currentId) continue;
+    const senderName = String(entry.senderLabel || entry.senderName || "").slice(0, 60);
+    for (const video of entry.media.videos || []) {
+      addVideo({ kind: "qq_video", source: "recent", senderName, platform: "qq", title: video.name || "", url: video.url || "", file: video.file || "", path: "", sizeBytes: video.sizeBytes ?? null, at: entry.at || null });
+    }
+    for (const audio of entry.media.audios || []) {
+      addAudio({ kind: "qq_voice", source: "recent", senderName, url: audio.url || "", file: audio.file || "", path: "", sizeBytes: audio.sizeBytes ?? null, at: entry.at || null });
+    }
+  }
   // Every detected QQ file stays addressable (a misnamed song still plays);
   // only media-looking names are listed in the directory.
   const files = collectQqInboundFileCandidates(event).map((file) => ({
@@ -146,7 +190,14 @@ export function listQqMediaFiles(candidates = {}, mediaType = "") {
   return (candidates.files || []).filter((file) => (mediaType ? file.mediaType === mediaType : Boolean(file.mediaType)));
 }
 
-const sourceLabels = Object.freeze({ current: "当前消息", quoted: "被引用消息", forward: "聊天记录" });
+const sourceLabels = Object.freeze({ current: "当前消息", quoted: "被引用消息", forward: "聊天记录", recent: "前文消息" });
+
+// Media this turn was triggered with (not the earlier messages kept for
+// follow-ups), for counting what is new in the current message.
+export function countQqTurnMedia(candidates = {}) {
+  const own = (items) => (items || []).filter((item) => item.source !== "recent");
+  return { videos: own(candidates.videos), audios: own(candidates.audios), musics: own(candidates.musics) };
+}
 export const QQ_MEDIA_PLATFORM_LABELS = Object.freeze({
   bilibili: "B站",
   douyin: "抖音",
@@ -199,29 +250,15 @@ export function formatQqMediaCandidates(candidates = {}, { available = {} } = {}
     lines.push(`- ${file.selector}：${file.mediaType === "video" ? "视频文件" : "音频文件"}「${String(file.name || "未命名").slice(0, 80)}」（${file.origin || "当前消息"}${size ? `，${size}` : ""}）`);
   }
   const tips = [];
-  if (videos.length || musics.length) {
-    tips.push("不确定是什么时先用 qq_media.parse(selector) 解析（视频：标题/作者/时长/简介/数据/BGM；歌曲：歌名/歌手/专辑/歌词），很轻，不用下载");
+  if (videos.length || musics.length || audios.length || files.length) {
+    tips.push("都用 qq_media.analyze(selector) 打开：不填 using 就按类型自动（视频看画面+听台词，语音听内容，歌真的听一遍）；也可以自己挑 using——info 只看是什么（很轻，不下载）、frames 画面、speech 说的话、voice 声音特点、music 音乐、subtitle B站字幕、audio_file 把声音存成可发送的文件");
   }
-  if (videos.length) {
-    tips.push(available.video
-      ? "想知道视频讲了什么、好不好笑，就像人一样先点开：qq_media.video(action=watch, selector) 会给你分镜图、时间轴台词和声音；没看过就别装看过"
-      : "本机还没装视频分镜组件，看不了视频内容；只能根据标题聊，别假装看过");
-  }
-  if (musics.length) {
-    tips.push(available.music
-      ? "想知道这首歌听起来怎样，就真的去听：qq_media.music(action=listen, selector) 会下载下来，给你歌词、节奏/调性/情绪起伏和乐器人声；没听过就别装听过"
-      : "本机还没装音乐解析组件，只能根据卡片上的歌名歌手聊，别假装听过");
-  }
-  if (audios.length) {
-    tips.push(available.audio
-      ? "语音可以用 qq_media.audio(action=listen, selector) 听（转写+语气+背景声），analyze 再加音高、音量和是否在唱歌"
-      : "本机还没装语音识别组件，听不了语音；可以如实说没听清");
-  }
-  if (files.length) {
-    tips.push(available.analysis === false
-      ? "本机没有 ffmpeg/ffprobe，打不开这些音频/视频文件；如实说没法听/看"
-      : "这些文件不用先 qq_context.download_file，直接把 file-N 交给 qq_media：歌/音频用 music(action=listen) 听，说话的录音用 audio(action=listen/analyze)，视频文件用 video(action=watch) 看，只想知道格式、时长和内嵌的歌名歌手用 parse");
-  }
+  if (videos.length && !available.video) tips.push("本机还没装视频分镜组件，看不了视频画面；只能听声音或根据标题聊，别假装看过");
+  if (musics.length && !available.music) tips.push("本机还没装音乐解析组件，只能根据卡片上的歌名歌手聊，别假装听过");
+  if ((audios.length || videos.length) && !available.audio) tips.push("本机还没装语音识别组件，听不了说的话；可以如实说没听清");
+  if (files.length && available.analysis === false) tips.push("本机没有 ffmpeg/ffprobe，打不开这些音频/视频文件；如实说没法听/看");
+  if (files.length && available.analysis !== false) tips.push("这些文件不用先 qq_context.download_file，直接把 file-N 交给 qq_media.analyze");
+  tips.push("没看没听就别装看过听过；info 只是解析，不算看过或听过");
   if (tips.length) lines.push(`${tips.join("；")}。`);
   return lines.join("\n");
 }
