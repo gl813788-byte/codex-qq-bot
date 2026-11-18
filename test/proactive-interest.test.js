@@ -876,6 +876,37 @@ test("persona keyword immediately triggers one contextual judge with all interes
   assert.equal(input.recentMessages.length, 2);
 });
 
+test("only distinctive learned slang starts an immediate judge; punctuation and single characters wait for the cycle", async () => {
+  const state = proactiveState(1500, { judgeEveryMessages: 20, judgeEveryMinutes: 5 });
+  let calls = 0;
+  const helpers = (knowledgeMatches) => ({
+    openRouterApiKey: "configured-for-test",
+    knowledgeMatches,
+    fetch: async () => {
+      calls += 1;
+      return jsonJudgeResponse({ shouldReply: false, interest: 10 });
+    }
+  });
+  for (const matches of [
+    [{ title: "？", matchedTerm: "？" }],
+    [{ title: "（）", matchedTerm: "（" }, { title: "～", matchedTerm: "～" }],
+    [{ title: "6", matchedTerm: "6" }],
+    [{ title: "给", matchedTerm: "给" }]
+  ]) {
+    const result = await shouldProactivelyReplyToQq({ ...event, text: "真的吗？" }, state, helpers(matches));
+    assert.equal(result.reason, "waiting for proactive judge message interval");
+  }
+  assert.equal(calls, 0);
+
+  const result = await shouldProactivelyReplyToQq({ ...event, text: "这就开香槟了？" }, state, helpers([
+    { title: "？", matchedTerm: "？" },
+    { title: "开香槟", matchedTerm: "开香槟" }
+  ]));
+  assert.equal(calls, 1);
+  assert.equal(result.triggerReason, "knowledge_slang");
+  assert.equal(result.knowledgeMatches.length, 2);
+});
+
 test("messages arriving during a judge stay in the next cycle", async () => {
   const state = proactiveState(1500, { judgeEveryMessages: 1, judgeEveryMinutes: 5 });
   let releaseJudge;

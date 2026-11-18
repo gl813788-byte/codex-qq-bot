@@ -129,6 +129,7 @@ const messageTranslationsZh = Object.freeze({
   "QQ reply lifecycle started": "QQ 回复流程开始",
   "QQ reply lifecycle completed": "QQ 回复流程完成",
   "QQ reply post-processing failed": "QQ 回复后处理失败",
+  "QQ reply lifecycle failed after OneBot intake": "QQ 回复流程在消息接收后失败",
   "Unable to process queued QQ replies": "处理排队中的 QQ 回复失败",
   "QQ follow-up trigger entered fusion buffer": "QQ 追问触发已进入融合缓冲",
   "Queued QQ messages steered into active turn": "QQ 融合追问已一次性补充进当前回复",

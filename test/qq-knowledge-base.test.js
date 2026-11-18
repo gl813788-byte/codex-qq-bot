@@ -10,6 +10,8 @@ import {
   createQqKnowledgeBaseRepository,
   extractQqKnowledgeMarkers,
   findQqKnowledgeMatches,
+  hasDistinctiveQqKnowledgeMatch,
+  isDistinctiveQqKnowledgeTerm,
   formatQqKnowledgeEntries,
   getDueQqKnowledgeDeletionReviews,
   listQqKnowledgeEntries,
@@ -316,4 +318,17 @@ test("blocks writes and preserves a malformed persisted knowledge file", async (
   assert.equal(repository.writable, false);
   assert.equal(await readFile(filePath, "utf8"), "{not valid json");
   await rm(directory, { recursive: true, force: true });
+});
+
+test("only terms with two or more letters, digits or CJK characters count as distinctive", () => {
+  for (const term of ["？", "（）", "～", "…", "6", "给", "  米 ", "", null]) {
+    assert.equal(isDistinctiveQqKnowledgeTerm(term), false, String(term));
+  }
+  for (const term of ["rua", "福瑞", "开香槟", "yyds", "666", "6？6"]) {
+    assert.equal(isDistinctiveQqKnowledgeTerm(term), true, term);
+  }
+  assert.equal(hasDistinctiveQqKnowledgeMatch([{ title: "（）", matchedTerm: "（" }]), false);
+  assert.equal(hasDistinctiveQqKnowledgeMatch([{ title: "开香槟", matchedTerm: "开香槟" }]), true);
+  assert.equal(hasDistinctiveQqKnowledgeMatch([{ title: "开香槟" }]), true);
+  assert.equal(hasDistinctiveQqKnowledgeMatch(null), false);
 });

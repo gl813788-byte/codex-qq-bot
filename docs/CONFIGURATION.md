@@ -182,7 +182,7 @@ Startup automatically sizes resources with `CODEX_REMOTE_CONTACT_RESOURCE_PROFIL
 | `CODEX_REMOTE_CONTACT_CODEX_REPLY_TIMEOUT_MS` | `120000` | Low-effort base per-round limit for ordinary text replies |
 | `CODEX_REMOTE_CONTACT_CODEX_VISION_REPLY_TIMEOUT_MS` | `180000` | Low-effort base per-round limit for replies that inspect images |
 | `CODEX_REMOTE_CONTACT_CODEX_CONTEXT_SUMMARY_TIMEOUT_MS` | `90000` | Limit for `/总结聊天记录` |
-| `CODEX_REMOTE_CONTACT_CODEX_SELF_PERSONA_TIMEOUT_MS` | `90000` | Self-persona summary/regeneration limit |
+| `CODEX_REMOTE_CONTACT_CODEX_SELF_PERSONA_TIMEOUT_MS` | `180000` | Self-persona summary/regeneration limit (also the daily routine and avatar features); a scope summary reads up to 300 messages |
 | `CODEX_REMOTE_CONTACT_CODEX_FILE_TASK_TIMEOUT_MS` | `300000` | Owner local-file task limit |
 | `CODEX_REMOTE_CONTACT_CODEX_IMAGE_GENERATION_TIMEOUT_MS` | `600000` | Image-generation limit; configurable up to 60 minutes |
 
@@ -225,7 +225,7 @@ The QQ bot is also a working Agent, so by default every native Codex feature and
 | `ONEBOT_ACCESS_TOKEN` | empty | Preferred OneBot token |
 | `CODEX_REMOTE_CONTACT_ONEBOT_TOKEN` | empty | Compatible token name |
 | `CODEX_REMOTE_CONTACT_ONEBOT_TIMEOUT_MS` | `10000` | API timeout, bounded 1–30 seconds |
-| `CODEX_REMOTE_CONTACT_ONEBOT_MAX_CONCURRENCY` | `8` | Active webhooks, bounded 1–32 |
+| `CODEX_REMOTE_CONTACT_ONEBOT_MAX_CONCURRENCY` | `8` | Active webhooks, bounded 1–32; a slot covers parsing and remembering one event, and the judgment and reply continue after NapCat is answered |
 | `CODEX_REMOTE_CONTACT_ONEBOT_MAX_PENDING` | `32` | Pending webhooks, bounded 0–256 |
 
 Use the same token on both sides. Without one, the webhook trusts only requests whose Host and actual peer address are both loopback.

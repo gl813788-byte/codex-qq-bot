@@ -11,7 +11,10 @@ export const CODEX_TASK_TIMEOUT_DEFAULTS = Object.freeze({
   [CODEX_TASK_TYPES.QQ_REPLY]: 120_000,
   [CODEX_TASK_TYPES.QQ_VISION_REPLY]: 180_000,
   [CODEX_TASK_TYPES.QQ_CONTEXT_SUMMARY]: 90_000,
-  [CODEX_TASK_TYPES.QQ_SELF_PERSONA]: 90_000,
+  // A periodic scope summary reads up to 300 messages; at high effort it ran
+  // 120-180 s and 22 of 36 refreshes hit the former 90 s base (180 s at high)
+  // on 2026-11-13..18, each wasting the shared model slot before a retry.
+  [CODEX_TASK_TYPES.QQ_SELF_PERSONA]: 180_000,
   [CODEX_TASK_TYPES.QQ_FILE_TASK]: 300_000,
   [CODEX_TASK_TYPES.QQ_IMAGE_GENERATION]: 600_000
 });

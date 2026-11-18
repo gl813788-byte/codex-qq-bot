@@ -205,6 +205,15 @@ refactor with a behavior change.
 - Ordinary group messages are mention/reply driven unless a recognized command
   or the proactive-interest path authorizes a turn. Private messages use the
   normal reply path.
+- A OneBot webhook slot covers parsing and remembering one event only:
+  `src/channels/http/onebot-lifecycle-intake.js` answers NapCat once
+  `processQqReplyEvent` calls `onAccepted`, and the judgment/turn continue
+  tracked (shutdown waits for them like open requests). Holding the slot for
+  whole lifecycles filled the low-profile queue (2 active, 8 pending) and
+  NapCat events were refused with 429 and lost (2026-11-18).
+- Only learned slang with at least two letters/digits/CJK characters starts an
+  immediate interest judge (`isDistinctiveQqKnowledgeTerm`); “？”, “（”, “6”
+  stay context only. They once caused 71 of 116 judgments in two days.
 - One scope has one lifecycle from routing through delivery and cleanup. New
   Bot-triggering messages during generation enter the quiet-window fusion path;
   prefer steering, then interrupt/restart when steering cannot accept them.

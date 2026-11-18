@@ -184,7 +184,7 @@ npm run ncc -- setup
 | `CODEX_REMOTE_CONTACT_CODEX_REPLY_TIMEOUT_MS` | `120000` | 普通文字回复在 `low` 档的单轮基础时限 |
 | `CODEX_REMOTE_CONTACT_CODEX_VISION_REPLY_TIMEOUT_MS` | `180000` | 带图片理解的回复在 `low` 档的单轮基础时限 |
 | `CODEX_REMOTE_CONTACT_CODEX_CONTEXT_SUMMARY_TIMEOUT_MS` | `90000` | `/总结聊天记录` 时限 |
-| `CODEX_REMOTE_CONTACT_CODEX_SELF_PERSONA_TIMEOUT_MS` | `90000` | 自我人格摘要/刷新时限 |
+| `CODEX_REMOTE_CONTACT_CODEX_SELF_PERSONA_TIMEOUT_MS` | `180000` | 自我人格摘要/刷新时限（作息规划和头像特征也用它）；一次范围总结最多读 300 条消息 |
 | `CODEX_REMOTE_CONTACT_CODEX_FILE_TASK_TIMEOUT_MS` | `300000` | 主人本机文件任务时限 |
 | `CODEX_REMOTE_CONTACT_CODEX_IMAGE_GENERATION_TIMEOUT_MS` | `600000` | 图片生成时限；允许配置到 60 分钟 |
 
@@ -227,7 +227,7 @@ QQ Bot 同时也是能真正干活的 Agent，所以默认保留 Codex 的全部
 | `ONEBOT_ACCESS_TOKEN` | 空 | 首选 OneBot token |
 | `CODEX_REMOTE_CONTACT_ONEBOT_TOKEN` | 空 | OneBot token 兼容名称 |
 | `CODEX_REMOTE_CONTACT_ONEBOT_TIMEOUT_MS` | `10000` | 单次 API 超时，范围 1–30 秒 |
-| `CODEX_REMOTE_CONTACT_ONEBOT_MAX_CONCURRENCY` | `8` | Webhook 并发，范围 1–32 |
+| `CODEX_REMOTE_CONTACT_ONEBOT_MAX_CONCURRENCY` | `8` | Webhook 并发，范围 1–32；一个名额只覆盖解析并记住一条事件，兴趣判断和回复在答复 NapCat 后继续 |
 | `CODEX_REMOTE_CONTACT_ONEBOT_MAX_PENDING` | `32` | Webhook 等待队列，范围 0–256 |
 
 Hub 和 OneBot 两端 token 应一致。未配置 token 时，Webhook 仅信任 Host 和真实连接地址都为回环的请求。
