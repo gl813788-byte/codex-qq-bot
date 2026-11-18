@@ -313,6 +313,21 @@ export function findQqKnowledgeMatches(store, { text = "", groupId = "", senderI
   return matches;
 }
 
+// A matched slang term may start a proactive judgment on its own only when it
+// carries at least two letters, digits or CJK characters. Punctuation (“？”,
+// “（）”, “～”) and single characters (“6”, “给”) are learned group habits that
+// appear in most messages; they stay as context but would otherwise turn
+// almost every message into an immediate model call.
+export function isDistinctiveQqKnowledgeTerm(term) {
+  const lexical = normalizeSearchText(term).match(/[\p{L}\p{N}]/gu);
+  return Array.isArray(lexical) && lexical.length >= 2;
+}
+
+export function hasDistinctiveQqKnowledgeMatch(matches) {
+  return Array.isArray(matches)
+    && matches.some((match) => isDistinctiveQqKnowledgeTerm(match?.matchedTerm ?? match?.title));
+}
+
 export function recordQqKnowledgeUsage(store, matches, context = {}, { at = Date.now() } = {}) {
   const next = normalizeQqKnowledgeBase(store);
   const now = toIsoTime(at);

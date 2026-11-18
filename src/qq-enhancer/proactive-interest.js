@@ -10,6 +10,7 @@ import {
   getQqMessageConsecutiveRepeatCount
 } from "../qq-message-run-compaction.js";
 import { formatQqContextTime } from "../qq-context-time.js";
+import { hasDistinctiveQqKnowledgeMatch } from "../qq-knowledge-base.js";
 import {
   buildInterestModelChatCompletion,
   getDefaultInterestModel,
@@ -147,7 +148,7 @@ export async function shouldProactivelyReplyToQq(event = {}, state = {}, helpers
   const lastJudgeAt = Number(proactiveState.lastJudgeAtByGroupId[groupId] || now());
   const elapsedMs = Math.max(0, now() - lastJudgeAt);
   const keywordTriggerDue = triggerMode === "message" && Boolean(helpers.interestKeywordMatch?.matched);
-  const knowledgeTriggerDue = triggerMode === "message" && Boolean(helpers.knowledgeMatches?.length);
+  const knowledgeTriggerDue = triggerMode === "message" && hasDistinctiveQqKnowledgeMatch(helpers.knowledgeMatches);
   const conversationFollowUpDue = triggerMode === "message" && Boolean(helpers.conversationFollowUp?.candidate);
   const messageTriggerDue = currentCount >= judgeEveryMessages;
   const timeTriggerDue = judgeEveryMinutes > 0 && currentCount > 0 && elapsedMs >= judgeEveryMinutes * minuteMs;

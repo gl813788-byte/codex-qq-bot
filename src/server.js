@@ -51,6 +51,7 @@ import {
 import { createQqManualAiTaskRunner } from "./qq-manual-ai-task-runner.js";
 import { formatQqVisualMenu } from "./qq-menu.js";
 import { createConcurrencyLimiter } from "./concurrency-limiter.js";
+import { createOneBotLifecycleIntake } from "./channels/http/onebot-lifecycle-intake.js";
 import { createCodexModelCatalog, findCodexModel } from "./codex-model-catalog.js";
 import { createCodexProtocolQuota, readCodexAccountRateLimits } from "./infrastructure/codex/codex-protocol-quota.js";
 import { buildCodexChildEnv } from "./codex-child-env.js";
@@ -1263,6 +1264,11 @@ const qqOutgoingMentionResolver = createQqOutgoingMentionResolver({
 });
 const codexRunLimiter = createConcurrencyLimiter(codexMaxConcurrency, { maxPending: codexMaxPending });
 const oneBotWebhookLimiter = createConcurrencyLimiter(oneBotMaxConcurrency, { maxPending: oneBotMaxPending });
+// Webhook slots cover parsing and remembering an event; judgments and model
+// turns continue after NapCat has its answer (see onebot-lifecycle-intake.js).
+const oneBotLifecycleIntake = createOneBotLifecycleIntake({
+  onLateError: (error) => logger.error("QQ reply lifecycle failed after OneBot intake", { error }, "lifecycle")
+});
   const qqPendingReplyLimit = 16;
 const qqPendingReplyMaxTextLength = 1200;
 const qqStateScopeLimit = Math.max(50, Math.min(5_000, Number(process.env.CODEX_REMOTE_CONTACT_QQ_SCOPE_LIMIT || 500) || 500));
@@ -13288,6 +13294,8 @@ async function processQqReplyEvent(event, options = {}) {
       timings.rememberDurationMs = Date.now() - rememberStartedAt;
     }
   }
+  // The event is in rolling context now; a webhook caller may release its slot.
+  options.onAccepted?.();
 
   const decisionStartedAt = Date.now();
   let decision = options.decisionOverride || await shouldRespondToQq(event);
@@ -17573,7 +17581,7 @@ async function handleApi(req, res) {
         });
       }
       logger.debug("OneBot poke received", { groupId: event.groupId || null, senderId: event.senderId || null }, "onebot", qqLogContext(event));
-      await processQqReplyEvent(event, { source: "onebot" });
+      await oneBotLifecycleIntake.run((accept) => processQqReplyEvent(event, { source: "onebot", onAccepted: accept }));
       return sendJson(res, 200, { status: "ok", traceId: event.traceId });
     }
     if (payload.post_type !== "message" || !["group", "private"].includes(payload.message_type)) {
@@ -17654,7 +17662,7 @@ async function handleApi(req, res) {
       atTargets: Array.isArray(event.atTargets) ? event.atTargets : [],
       atMentions: getQqMentionIdentities(event)
     }, "qq", qqLogContext(event));
-    await processQqReplyEvent(event, { source: "onebot" });
+    await oneBotLifecycleIntake.run((accept) => processQqReplyEvent(event, { source: "onebot", onAccepted: accept }));
     return sendJson(res, 200, { status: "ok", traceId: event.traceId });
   }
 
@@ -17823,9 +17831,10 @@ function shutdown(signal) {
       }
     }
 
-    const closeServer = new Promise((resolveClose) => {
-      server.close(() => resolveClose("closed"));
-    });
+    const closeServer = Promise.all([
+      new Promise((resolveClose) => server.close(() => resolveClose())),
+      oneBotLifecycleIntake.settle()
+    ]).then(() => "closed");
     const forceClose = new Promise((resolveClose) => {
       const timer = setTimeout(() => {
         server.closeAllConnections?.();
